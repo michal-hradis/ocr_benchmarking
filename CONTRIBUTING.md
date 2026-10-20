@@ -26,7 +26,7 @@ Do not push directly to `main` or silently change an agreed metric, schema, or c
 | Engine Docker/inference | Adapter tests; an explicitly requested local CPU/GPU smoke run if feasible |
 | Reporting | Fixture-based aggregate, failure and truncation checks |
 
-Add regression tests for changed behavior. Normal developer tests should use synthetic deterministic fixtures without downloading models or requiring GPUs, paid APIs or external data. Real inference and the separately held six-image development set require deliberate, authorized invocation; if unavailable, report that limitation instead of claiming a pass.
+Add regression tests for changed behavior. Normal developer tests should use synthetic deterministic fixtures without downloading models or requiring GPUs, paid APIs or external data. Real inference and the separately held development set (`dev_data/`, see [docs/DATASETS.md](docs/DATASETS.md)) require deliberate, authorized invocation; if unavailable, report that limitation instead of claiming a pass.
 
 Do not add CI workflows or a universal full-suite PR gate as part of unrelated changes.
 
@@ -43,6 +43,7 @@ make check   # ruff lint + format check, then offline unit tests
 | --- | --- |
 | `make lint` / `make format` | Ruff check and format check / apply fixes and formatting |
 | `make test` | Offline unit tests; select tests with `ARGS`, e.g. `make test ARGS="tests/test_package.py -k version"` |
+| `uv run ocrbench dataset validate <manifest>` | Validate a dataset manifest and its PAGE XML, see [docs/DATASETS.md](docs/DATASETS.md) |
 | `make docker-cpu`, `make docker-cu130-torch` | Build base images |
 | `make docker-smoke`, `make gpu-preflight`, `make gpu-smoke` | Opt-in Docker and GPU checks, see [docs/DOCKER.md](docs/DOCKER.md) |
 

@@ -1,0 +1,66 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Synthetic two-column page: heading, two columns stored right-before-left in the XML,
+     a reading order that differs from document order, reversed line indexes, a repeated line,
+     a line without text, a region-text-only caption and an image region. -->
+<PcGts xmlns="http://schema.primaresearch.org/PAGE/gts/pagecontent/2019-07-15">
+  <Metadata><Creator>ocrbench synthetic fixture</Creator><Created>2026-10-20T00:00:00</Created><LastChange>2026-10-20T00:00:00</LastChange></Metadata>
+  <Page imageFilename="columns.png" imageWidth="400" imageHeight="300">
+    <ReadingOrder>
+      <OrderedGroup id="ro">
+        <RegionRefIndexed index="3" regionRef="r_right"/>
+        <RegionRefIndexed index="0" regionRef="r_head"/>
+        <RegionRefIndexed index="1" regionRef="r_left"/>
+        <RegionRefIndexed index="2" regionRef="img1"/>
+        <UnorderedGroupIndexed index="4" id="ro_extra">
+          <RegionRef regionRef="r_caption"/>
+        </UnorderedGroupIndexed>
+      </OrderedGroup>
+    </ReadingOrder>
+    <TextRegion id="r_head" type="heading">
+      <Coords points="10,10 390,10 390,40 10,40"/>
+      <TextEquiv><Unicode>DIE ZEITUNG – HEADLINE IGNORED</Unicode></TextEquiv>
+      <TextLine id="l_head" index="0">
+        <Coords points="10,10 390,10 390,40 10,40"/>
+        <Baseline points="10,35 390,35"/>
+        <TextEquiv index="2"><Unicode>Die Zeltung</Unicode></TextEquiv>
+        <TextEquiv index="1"><Unicode>Die Zeitung</Unicode></TextEquiv>
+      </TextLine>
+    </TextRegion>
+    <TextRegion id="r_right" type="paragraph">
+      <Coords points="210,50 390,50 390,200 210,200"/>
+      <TextLine id="l_right_1" index="0">
+        <Coords points="210,50 390,50 390,70 210,70"/>
+        <TextEquiv><Unicode>Der Krieg.</Unicode></TextEquiv>
+      </TextLine>
+      <TextLine id="l_right_2" index="1">
+        <Coords points="210,75 390,75 390,95 210,95"/>
+        <TextEquiv><Unicode>Der Krieg.</Unicode></TextEquiv>
+      </TextLine>
+      <TextLine id="l_right_3" index="2">
+        <Coords points="210,100 390,100 390,120 210,120"/>
+      </TextLine>
+      <TextLine id="l_right_4" index="3">
+        <Coords points="210,125 390,125 390,145 210,145"/>
+        <TextEquiv><Unicode>  Ende  ſchön  </Unicode></TextEquiv>
+      </TextLine>
+    </TextRegion>
+    <TextRegion id="r_left" type="paragraph">
+      <Coords points="10,50 190,50 190,200 10,200"/>
+      <TextLine id="l_left_2" index="1">
+        <Coords points="10,75 190,75 190,95 10,95"/>
+        <TextEquiv><Unicode>zweite Zeile</Unicode></TextEquiv>
+      </TextLine>
+      <TextLine id="l_left_1" index="0">
+        <Coords points="10,50 190,50 190,70 10,70"/>
+        <TextEquiv><Unicode>erste Zeile</Unicode></TextEquiv>
+      </TextLine>
+    </TextRegion>
+    <ImageRegion id="img1">
+      <Coords points="10,210 190,210 190,280 10,280"/>
+    </ImageRegion>
+    <TextRegion id="r_caption" type="caption">
+      <Coords points="210,210 390,210 390,280 210,280"/>
+      <TextEquiv><Unicode>Bild 1.</Unicode></TextEquiv>
+    </TextRegion>
+  </Page>
+</PcGts>

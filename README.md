@@ -2,7 +2,7 @@
 
 Compare OCR and handwritten text recognition (HTR) systems on **raster images of books, magazines and newspapers**, particularly complex and historical prints.
 
-**Project status:** early implementation. Python project tooling and shared CPU/CUDA Docker base images exist ([setup](CONTRIBUTING.md#development-setup-and-commands), [Docker](docs/DOCKER.md)). The runner, engine adapters, evaluation code and CLI commands described below are *not yet implemented*.
+**Project status:** early implementation. Python project tooling, shared CPU/CUDA Docker base images ([setup](CONTRIBUTING.md#development-setup-and-commands), [Docker](docs/DOCKER.md)) and dataset manifests with a PAGE XML reader and validator ([datasets](docs/DATASETS.md)) exist. The runner, engine adapters and evaluation code are *not yet implemented*.
 
 ## Use cases
 
@@ -13,7 +13,7 @@ Compare OCR and handwritten text recognition (HTR) systems on **raster images of
 
 Input is always an **image**, never a PDF text layer. Ground truth uses **PAGE XML**. The benchmark will compare conventional OCR pipelines with page-image-to-text models; engine-specific resizing, segmentation and tiling belong to the engine. See [architecture](docs/ARCHITECTURE.md) for the separation between engines, reference data and evaluation.
 
-For initial development, there is a **small, separately held set of six images with PAGE XML ground truth**. It is not committed to this repository. Selecting or collecting additional evaluation datasets is **separate work, not part of the present backlog**.
+For initial development, there is a **small, separately held set of page images with PAGE XML ground truth** (seven at present, referenced by [`datasets/dev-01.json`](datasets/dev-01.json)). It is not committed to this repository. Selecting or collecting additional evaluation datasets is **separate work, not part of the present backlog**.
 
 ## Planned outputs and scoring
 
@@ -21,7 +21,7 @@ Engines provide UTF-8 transcription plus versioned JSON with optional typed, pos
 
 ## Quick start (planned)
 
-The following is a **proposed workflow, not runnable commands**; the CLI and flags may change during [runner implementation #7](https://github.com/michal-hradis/ocr_benchmarking/issues/7):
+Only `dataset validate` works today (`uv run ocrbench dataset validate <dataset-manifest>`, see [datasets](docs/DATASETS.md)). The other commands are a **proposed workflow, not runnable commands**; the CLI and flags may change during [runner implementation #7](https://github.com/michal-hradis/ocr_benchmarking/issues/7):
 
 ```sh
 ocrbench dataset validate <dataset-manifest>

@@ -10,4 +10,4 @@ Choose the document for the work you want to do:
 | Work on cross-engine contracts or evaluation | [Architecture](ARCHITECTURE.md), [evaluation](EVALUATION.md) and [ADR index](adr/README.md) |
 | Pick the next task | [Work index](TODO.md) and [GitHub roadmap](https://github.com/michal-hradis/ocr_benchmarking/issues/1) |
 
-Development setup and commands are in [Contributing](../CONTRIBUTING.md#development-setup-and-commands); Docker host setup and base images are in [DOCKER.md](DOCKER.md).
+Development setup and commands are in [Contributing](../CONTRIBUTING.md#development-setup-and-commands); Docker host setup and base images are in [DOCKER.md](DOCKER.md); dataset manifests and PAGE XML extraction are in [DATASETS.md](DATASETS.md).

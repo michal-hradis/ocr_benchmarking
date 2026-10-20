@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Synthetic paragraph crop (PAGE 2013-07-15) with its own crop coordinates; one polygon
+     overshoots the crop edge, as annotation tools allow. -->
+<PcGts xmlns="http://schema.primaresearch.org/PAGE/gts/pagecontent/2013-07-15">
+  <Metadata><Creator>ocrbench synthetic fixture</Creator><Created>2026-10-20T00:00:00</Created><LastChange>2026-10-20T00:00:00</LastChange></Metadata>
+  <Page imageFilename="paragraph.png" imageWidth="120" imageHeight="40">
+    <ReadingOrder>
+      <OrderedGroup id="ro"><RegionRefIndexed index="0" regionRef="p1"/></OrderedGroup>
+    </ReadingOrder>
+    <TextRegion id="p1" type="paragraph">
+      <Coords points="0,0 120,0 120,40 0,40"/>
+      <TextLine id="p1l1">
+        <Coords points="-2,0 122,0 122,20 -2,20"/>
+        <Baseline points="0,16 120,16"/>
+        <TextEquiv><Unicode>Příliš žluťoučký</Unicode></TextEquiv>
+      </TextLine>
+      <TextLine id="p1l2">
+        <Coords points="0,20 120,20 120,40 0,40"/>
+        <TextEquiv><Unicode>kůň.</Unicode></TextEquiv>
+      </TextLine>
+    </TextRegion>
+  </Page>
+</PcGts>
