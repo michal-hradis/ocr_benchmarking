@@ -9,7 +9,7 @@ Closes #
 
 ## Verification
 
-See [CONTRIBUTING.md](../CONTRIBUTING.md#verification-and-tests). Record **only checks actually run**.
+See [CONTRIBUTING.md](https://github.com/michal-hradis/ocr_benchmarking/blob/main/CONTRIBUTING.md#verification-and-tests). Record **only checks actually run**.
 
 | Check or command | Result |
 | --- | --- |
