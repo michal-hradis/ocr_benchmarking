@@ -10,9 +10,9 @@ The engines range from line-based OCR with exact geometry to image-to-text model
 
 ## Decision
 
-- **Output.** Every engine emits a required UTF-8 plain-text page transcription and a versioned standardized JSON, and its native outputs are preserved unchanged. When the engine genuinely localizes text, the JSON holds typed regions with positions that contain lines with text, a position and an optional type. Positions refer to original-image pixels. Text-only engines provide no regions, lines or coordinates, rather than fabricated ones. Exact fields are defined in [#6](https://github.com/michal-hradis/ocr_benchmarking/issues/6).
-- **Run.** A Linux Python orchestrator runs each engine in its own Docker image. Shared CPU/CUDA base image families are used only when dependencies are compatible. Engine, image digest and model revisions are pinned. Each run stores a frozen configuration, per-sample status (success, partial, truncated or failure with a reason), timings, resources and limits. Details are defined in [#7](https://github.com/michal-hradis/ocr_benchmarking/issues/7).
-- **Evaluation.** Scoring reads stored outputs only, under an independently versioned evaluation configuration. Re-evaluation never requires rerunning a model.
+- **Output.** A valid OCR prediction has required UTF-8 plain-text transcription and versioned standardized JSON, with native outputs preserved where generated. If the engine genuinely localizes text, JSON holds typed positioned regions and nested positioned lines with text and optional type in original-image pixel coordinates; text-only models are valid without invented geometry. **A failed inference need not produce valid prediction text/JSON; it must produce a separate execution failure record through the runner.** Exact fields are owned by [#6](https://github.com/michal-hradis/ocr_benchmarking/issues/6).
+- **Run.** A Linux Python orchestrator runs each engine in its own Docker image on the local machine. Shared CPU/CUDA bases are used only when dependency versions are compatible. Engine, image digest and model revisions are pinned. A run preserves frozen configuration and per-sample **execution records** (status, failure reason, timings, resources, limits and provenance) independently of any valid OCR prediction. Details belong to [#7](https://github.com/michal-hradis/ocr_benchmarking/issues/7).
+- **Evaluation.** Local scoring reads stored execution records, valid predictions (when available) **and PAGE XML ground truth**; reports may inspect both GT and predictions. Re-evaluation never reruns a model. A failed execution is scored as empty prediction **by default**; a clearly labelled, explicitly configured exclude-failures score is optional and must report coverage.
 
 ## Alternatives considered
 
@@ -21,5 +21,5 @@ The engines range from line-based OCR with exact geometry to image-to-text model
 
 ## Consequences and verification
 
-- The schema and validator in #6 must accept text-only results and reject invalid output. Invalid output is never recorded as success.
+- The schema and validator in #6 must accept text-only predictions and reject invalid prediction output. Invalid predictions are never recorded as successful OCR; #7 retains failure records without fabricating schema-valid text.
 - Output schema, run configuration and evaluation configuration change independently and are versioned separately.
