@@ -4,7 +4,12 @@ version = "0.0.0"
 description = "Benchmark OCR/HTR engines on page images against PAGE XML ground truth"
 readme = "README.md"
 requires-python = ">=3.12,<3.13"
-dependencies = []
+dependencies = [
+    "pillow==12.3.0",
+]
+
+[project.scripts]
+ocrbench = "ocrbench.cli:main"
 
 [dependency-groups]
 dev = [

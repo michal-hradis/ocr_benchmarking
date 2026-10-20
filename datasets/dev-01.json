@@ -1,0 +1,64 @@
+{
+  "format": "ocrbench.dataset-manifest",
+  "version": 1,
+  "name": "dev-01",
+  "description": "Local development set (not in Git): full pages with PAGE XML GT, expected in dev_data/data_01/.",
+  "samples": [
+    {
+      "id": "3e6309d0-82e2-11dc-ab2c-000d606f5dc6",
+      "image": "../dev_data/data_01/3e6309d0-82e2-11dc-ab2c-000d606f5dc6.jpg",
+      "gt": "../dev_data/data_01/3e6309d0-82e2-11dc-ab2c-000d606f5dc6.xml",
+      "unit": "page",
+      "image_sha256": "0e2084e070e27319df6dd831f3c0a2787a1a5154860af80d3ed82c4752ca3c7e",
+      "gt_sha256": "d17a7d5682dc34393294817f737d63f7d019b4032b0d44e07e5b08f4eed05fce"
+    },
+    {
+      "id": "CkXII61-0017",
+      "image": "../dev_data/data_01/CkXII61-0017.jpg",
+      "gt": "../dev_data/data_01/CkXII61-0017.xml",
+      "unit": "page",
+      "image_sha256": "b06e14522cd89780e88011bfeab3461a75a36cbbc3ff6c714688d259c3a8b8fa",
+      "gt_sha256": "8d779f05b4d1660591194f191f8b1f4e75885ca052d5ba7424fdba961732340d"
+    },
+    {
+      "id": "bd497a62-d4db-416a-8acd-b2d2b14d29f6",
+      "image": "../dev_data/data_01/bd497a62-d4db-416a-8acd-b2d2b14d29f6.jpg",
+      "gt": "../dev_data/data_01/bd497a62-d4db-416a-8acd-b2d2b14d29f6.xml",
+      "unit": "page",
+      "image_sha256": "4e9a83af49b611c78d0fc7d2ffe923dfe03fae5c2c9436f97240b66763cd4abb",
+      "gt_sha256": "dbd4c4fac11dfa340dbfdff4d3608274fa9188654903699a4a0f63abe6d0d338"
+    },
+    {
+      "id": "dta-346672_0221_1600px",
+      "image": "../dev_data/data_01/dta-346672_0221_1600px.jpg",
+      "gt": "../dev_data/data_01/dta-346672_0221_1600px.xml",
+      "unit": "page",
+      "image_sha256": "9abaf266debb4e110d561568f0def9eab2c1827d01b5eccdc02f6b0573ff8456",
+      "gt_sha256": "52cdfd33cf504c95530bee59cf703cf1c206e6b9bac560b7a5949ee896c17e20"
+    },
+    {
+      "id": "dta-laube_europa0101_1833_0059_1600px",
+      "image": "../dev_data/data_01/dta-laube_europa0101_1833_0059_1600px.jpg",
+      "gt": "../dev_data/data_01/dta-laube_europa0101_1833_0059_1600px.xml",
+      "unit": "page",
+      "image_sha256": "b574034b5911f9243d1f4bce833cdb93c56c4ad97ee83a35dac43b96ecd149dd",
+      "gt_sha256": "ef31b7d00a80f652a7edc91ece6078d53264b4baaf3bc1641c5dc91f7885c204"
+    },
+    {
+      "id": "dta-martzi_klugen_1692_0135_1600px",
+      "image": "../dev_data/data_01/dta-martzi_klugen_1692_0135_1600px.jpg",
+      "gt": "../dev_data/data_01/dta-martzi_klugen_1692_0135_1600px.xml",
+      "unit": "page",
+      "image_sha256": "60def6c05ed28b890bf3151c79a14d53350a33eee4c0b86f00ca4deba1afd3d6",
+      "gt_sha256": "d9b40b97593711ff9fe8d847414cc9117f6620855146a2acf5d3e9c4494f009f"
+    },
+    {
+      "id": "dta-steinen_naturvoelker_1894_0307_1600px",
+      "image": "../dev_data/data_01/dta-steinen_naturvoelker_1894_0307_1600px.jpg",
+      "gt": "../dev_data/data_01/dta-steinen_naturvoelker_1894_0307_1600px.xml",
+      "unit": "page",
+      "image_sha256": "498cd8535634235004985e7f1f576151357ec1c32de04563156d6cce31047279",
+      "gt_sha256": "4d22d2bafda9bf729e760afb654e9b751b444dd01e18d892bc3576d15dc34b3b"
+    }
+  ]
+}

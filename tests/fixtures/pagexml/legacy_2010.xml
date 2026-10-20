@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Synthetic PAGE 2010-03-19 page: <Point> coordinates, no baselines, no ReadingOrder,
+     a TextRegion nested in a TableRegion and a TextRegion nested in a TextRegion. -->
+<PcGts xmlns="http://schema.primaresearch.org/PAGE/gts/pagecontent/2010-03-19">
+  <Metadata><Creator>ocrbench synthetic fixture</Creator><Created>2026-10-20T00:00:00</Created><LastChange>2026-10-20T00:00:00</LastChange></Metadata>
+  <Page imageFilename="legacy.tif" imageWidth="200" imageHeight="100">
+    <TextRegion id="r1">
+      <Coords><Point x="0" y="0"/><Point x="200" y="0"/><Point x="200" y="40"/><Point x="0" y="40"/></Coords>
+      <TextLine id="r1l1">
+        <Coords><Point x="0" y="0"/><Point x="200" y="0"/><Point x="200" y="20"/><Point x="0" y="20"/></Coords>
+        <TextEquiv><Unicode>outer line</Unicode></TextEquiv>
+      </TextLine>
+      <TextRegion id="r1a">
+        <Coords><Point x="0" y="20"/><Point x="200" y="20"/><Point x="200" y="40"/><Point x="0" y="40"/></Coords>
+        <TextLine id="r1al1">
+          <Coords><Point x="0" y="20"/><Point x="200" y="20"/><Point x="200" y="40"/><Point x="0" y="40"/></Coords>
+          <TextEquiv><Unicode>nested line</Unicode></TextEquiv>
+        </TextLine>
+      </TextRegion>
+    </TextRegion>
+    <TableRegion id="t1">
+      <Coords><Point x="0" y="50"/><Point x="200" y="50"/><Point x="200" y="100"/><Point x="0" y="100"/></Coords>
+      <TextRegion id="cell1">
+        <Coords><Point x="0" y="50"/><Point x="100" y="50"/><Point x="100" y="100"/><Point x="0" y="100"/></Coords>
+        <TextEquiv><Unicode>cell text</Unicode></TextEquiv>
+      </TextRegion>
+    </TableRegion>
+  </Page>
+</PcGts>
