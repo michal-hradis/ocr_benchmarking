@@ -4,7 +4,8 @@ The rules are documented in docs/EVALUATION.md; the decisions are in ADR 0008. T
 Unicode-normalized (NFC by default), every whitespace run, including line and region breaks,
 becomes one space, and the ends are stripped. Characters are code points; words are the
 space-separated tokens of that text, and every metric uses the same tokens. Capitalization,
-diacritics and punctuation are kept. Any change to these rules increments METRICS_VERSION.
+diacritics and punctuation are kept. Any change to these rules, or to the flexible alignment in
+ocrbench.alignment, increments METRICS_VERSION.
 """
 
 from __future__ import annotations
@@ -16,7 +17,7 @@ from dataclasses import dataclass, fields
 
 from rapidfuzz.distance import Levenshtein
 
-METRICS_VERSION = 1
+METRICS_VERSION = 2  # 2: flexible CER/WER (ocrbench.alignment) added; ordered metrics unchanged
 UNICODE_FORMS = ("NFC", "NFKC")
 
 

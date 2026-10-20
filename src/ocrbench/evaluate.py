@@ -1,10 +1,12 @@
 """Evaluate a run: score stored predictions against the GT frozen with the run.
 
 The evaluator reads run.json, the newest execution record of every sample, its standardized
-prediction and the PAGE XML reference; it never runs an engine. A failed sample is scored as an
-empty prediction by default (failure policy ``empty-output``) or left out of the aggregates
-(``exclude``, with coverage). Nothing is written back over predictions: every evaluation gets a
-new directory with its frozen configuration. The rules are documented in docs/EVALUATION.md.
+prediction and the PAGE XML reference; it never runs an engine. Ordered and flexible
+(order-independent, ocrbench.alignment) CER/WER use the same text preparation. A failed sample is
+scored as an empty prediction by default (failure policy ``empty-output``) or left out of the
+aggregates (``exclude``, with coverage). Nothing is written back over predictions: every
+evaluation gets a new directory with its frozen configuration. The rules are documented in
+docs/EVALUATION.md.
 """
 
 from __future__ import annotations
@@ -20,6 +22,7 @@ from statistics import fmean
 from typing import Any
 
 import ocrbench
+from ocrbench.alignment import Alignment, FlexibleScores, prediction_lines, score_flexible
 from ocrbench.issues import Severity
 from ocrbench.manifest import sha256_file
 from ocrbench.metrics import (
@@ -31,13 +34,13 @@ from ocrbench.metrics import (
     score_text,
 )
 from ocrbench.pagexml import read_page_xml
-from ocrbench.prediction import load_prediction
+from ocrbench.prediction import Prediction, load_prediction
 from ocrbench.runner import Run, RunSample, latest_record, verify_ground_truth
 
 EVAL_CONFIG_FORMAT = "ocrbench.eval-config"
 EVAL_CONFIG_VERSION = 1
 SCORES_FORMAT = "ocrbench.scores"
-SCORES_VERSION = 1
+SCORES_VERSION = 2
 FAILURE_POLICIES = ("empty-output", "exclude")
 # Fixed rules of METRICS_VERSION 1, recorded with every score.
 TEXT_RULES = {
@@ -45,6 +48,8 @@ TEXT_RULES = {
     "whitespace": "collapse-to-space",
     "words": "whitespace-split",
     "reference_lines": "joined-by-space",
+    "flexible_units": "reference-lines/prediction-lines",
+    "flexible_groups": "consecutive-runs-any-order",
 }
 _KEYS = {"format", "version", "name", "unicode", "failure_policy"}
 
@@ -145,28 +150,58 @@ def _overlap_json(counts: Overlap) -> dict[str, Any]:
     }
 
 
-def _scores_json(scores: TextScores | None) -> dict[str, Any]:
-    if scores is None:
-        return dict.fromkeys(("chars", "words", "bag_of_words", "rouge2"))
+def _alignment_json(alignment: Alignment) -> dict[str, Any]:
     return {
-        "chars": _edit_json(scores.chars),
-        "words": _edit_json(scores.words),
-        "bag_of_words": _overlap_json(scores.bag_of_words),
-        "rouge2": _overlap_json(scores.rouge2),
+        **_edit_json(alignment.counts),
+        "lower_bound": alignment.lower_bound,
+        "exact": alignment.exact,
+        "method": alignment.method,
+        "groups": len(alignment.groups),
+        "order_breaks": alignment.order_breaks,
+        "unmatched_reference_units": alignment.unmatched_reference,
+        "unmatched_hypothesis_units": alignment.unmatched_hypothesis,
     }
 
 
-def _reference_text(sample_id: str, gt: Path) -> str:
+@dataclass(frozen=True)
+class SampleScores:
+    text: TextScores
+    flexible: FlexibleScores
+
+
+_METRICS = ("chars", "words", "bag_of_words", "rouge2", "flexible_chars", "flexible_words")
+
+
+def _scores_json(scores: SampleScores | None) -> dict[str, Any]:
+    if scores is None:
+        return dict.fromkeys((*_METRICS, "flexible_units"))
+    text, flexible = scores.text, scores.flexible
+    return {
+        "chars": _edit_json(text.chars),
+        "words": _edit_json(text.words),
+        "bag_of_words": _overlap_json(text.bag_of_words),
+        "rouge2": _overlap_json(text.rouge2),
+        "flexible_chars": _alignment_json(flexible.chars),
+        "flexible_words": _alignment_json(flexible.words),
+        "flexible_units": {
+            "reference": flexible.reference_units,
+            "hypothesis": flexible.hypothesis_units,
+            "anchored": flexible.anchored_units,
+        },
+    }
+
+
+def _reference_lines(sample_id: str, gt: Path) -> list[str]:
     page, issues = read_page_xml(gt, sample_id)
     errors = [issue.format() for issue in issues if issue.severity is Severity.ERROR]
     if page is None or errors:
         raise EvaluationError(f"{sample_id}: invalid GT {gt}:\n" + "\n".join(errors))
-    return " ".join(line.text for line in page.reference_lines)
+    return [line.text for line in page.reference_lines]
 
 
-def _predicted_text(run: Run, sample: RunSample, record: dict[str, Any]) -> tuple[str, str]:
-    """The standardized page text of a valid output (never native Markdown or HTML) and the
-    SHA-256 of the stored prediction, revalidated against the image size frozen with the run."""
+def _prediction(run: Run, sample: RunSample, record: dict[str, Any]) -> tuple[Prediction, str]:
+    """The standardized prediction of a valid output (never native Markdown or HTML) and the
+    SHA-256 of the stored file, revalidated against the image size frozen with the run."""
     if record["prediction"] is None:
         raise EvaluationError(f"{sample.id}: status {record['status']!r} without a prediction")
     path = run.path / "samples" / sample.id / f"attempt-{record['attempt']}" / record["prediction"]
@@ -178,25 +213,29 @@ def _predicted_text(run: Run, sample: RunSample, record: dict[str, Any]) -> tupl
     if prediction is None:
         errors = "\n".join(issue.format() for issue in issues)
         raise EvaluationError(f"{sample.id}: stored prediction is invalid:\n{errors}")
-    return prediction.text, digest
+    return prediction, digest
 
 
 def _sample(
     run: Run, sample: RunSample, record: dict[str, Any], config: EvalConfig
-) -> tuple[dict[str, Any], TextScores | None]:
+) -> tuple[dict[str, Any], SampleScores | None]:
     # GT is checked for every sample: the failure policy only decides what is aggregated.
-    reference = _reference_text(sample.id, sample.gt)
+    reference = _reference_lines(sample.id, sample.gt)
     failed = record["status"] == "failure"
     prediction_sha256 = None
     if failed and config.failure_policy == "exclude":
         source, scores = "excluded", None
     else:
         # A failure is scored as an empty input here; no prediction is created or stored.
-        hypothesis = ""
+        hypothesis, lines = "", []
         if not failed:
-            hypothesis, prediction_sha256 = _predicted_text(run, sample, record)
+            prediction, prediction_sha256 = _prediction(run, sample, record)
+            hypothesis, lines = prediction.text, prediction_lines(prediction)
         source = "empty" if failed else "prediction"
-        scores = score_text(reference, hypothesis, config.unicode)
+        scores = SampleScores(
+            score_text(" ".join(reference), hypothesis, config.unicode),
+            score_flexible(reference, lines, config.unicode),
+        )
     entry = {
         "sample_id": sample.id,
         "unit": sample.job["unit"],
@@ -225,8 +264,9 @@ def _macro(values: list[float | None]) -> dict[str, Any]:
     }
 
 
-def _aggregate(group: dict[str, Any], members: list[tuple[dict, TextScores | None]]):
-    scored = [scores for _, scores in members if scores is not None]
+def _aggregate(group: dict[str, Any], members: list[tuple[dict, SampleScores | None]]):
+    scored = [scores.text for _, scores in members if scores is not None]
+    flexible = [scores.flexible for _, scores in members if scores is not None]
     statuses: dict[str, int] = {}
     reasons: dict[str, int] = {}
     for entry, _ in members:
@@ -256,10 +296,25 @@ def _aggregate(group: dict[str, Any], members: list[tuple[dict, TextScores | Non
                 m: _macro([getattr(c, m) for c in counts]) for m in ("precision", "recall", "f1")
             },
         }
+    for key in ("chars", "words"):
+        alignments = [getattr(f, key) for f in flexible]
+        micro = None
+        if alignments:
+            counts = sum((a.counts for a in alignments[1:]), alignments[0].counts)
+            bound = sum(a.lower_bound for a in alignments)
+            micro = _edit_json(counts) | {
+                "lower_bound": bound,
+                "lower_bound_rate": bound / counts.reference if counts.reference else None,
+            }
+        result[f"flexible_{key}"] = {
+            "micro": micro,
+            "macro": {"rate": _macro([a.counts.rate for a in alignments])},
+            "not_exact": sum(not a.exact for a in alignments),
+        }
     return result
 
 
-def _groups(samples: list[tuple[dict, TextScores | None]]) -> list[dict[str, Any]]:
+def _groups(samples: list[tuple[dict, SampleScores | None]]) -> list[dict[str, Any]]:
     """Overall, per unit, and per document type within each unit (None: not specified)."""
     keys: list[dict[str, Any]] = [{}]
     units = sorted({entry["unit"] for entry, _ in samples})
