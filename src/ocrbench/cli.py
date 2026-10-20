@@ -29,6 +29,7 @@ from ocrbench.runner import (
     load_run,
     resolve_image,
     summarize,
+    verify_ground_truth,
     verify_image,
 )
 
@@ -195,6 +196,8 @@ def _run_status(args: argparse.Namespace) -> int:
         print(f"error: {error}", file=sys.stderr)
         return 1
     _print_summary(run)
+    for issue in verify_ground_truth(run):  # predictions cannot be scored against changed GT
+        print(issue.format(), file=sys.stderr)
     return 0
 
 

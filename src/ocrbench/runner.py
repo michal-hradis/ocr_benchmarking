@@ -6,8 +6,9 @@ sample in progress is recorded as a failure and a new container continues with t
 attempt gets its own execution record and is never overwritten. The protocol and the run store
 are documented in docs/RUNNER.md; the decisions are in ADR 0007.
 
-Ground truth stays on the host: the container sees only a job file and the sample images
-(ADR 0002). Engine output is untrusted: it is validated and never followed outside its directory.
+Ground truth stays on the host: the container sees only a job file and copies of the sample
+images (ADR 0002). The GT hashes are frozen in run.json so that scoring can detect changed GT.
+Engine output is untrusted: it is validated and never followed outside its directory.
 """
 
 from __future__ import annotations
@@ -17,6 +18,7 @@ import csv
 import fcntl
 import io
 import json
+import math
 import os
 import platform
 import shutil
@@ -72,7 +74,7 @@ def _now() -> str:
 
 def _write_json(path: Path, data: Any, *, exclusive: bool = False) -> None:
     """Write JSON atomically; ``exclusive`` refuses to replace an existing file."""
-    text = json.dumps(data, ensure_ascii=False, indent=1) + "\n"
+    text = json.dumps(data, ensure_ascii=False, indent=1, allow_nan=False) + "\n"
     if exclusive:
         with open(path, "x", encoding="utf-8") as stream:
             stream.write(text)
@@ -82,8 +84,23 @@ def _write_json(path: Path, data: Any, *, exclusive: bool = False) -> None:
     os.replace(tmp, path)
 
 
+def _reject_constant(name: str) -> Any:
+    raise ValueError(f"{name} is not valid JSON")
+
+
 def _read_json(path: Path) -> Any:
-    return json.loads(path.read_text(encoding="utf-8"))
+    return json.loads(path.read_text(encoding="utf-8"), parse_constant=_reject_constant)
+
+
+def _finite(value: Any) -> bool:
+    """No infinite numbers anywhere, such as the overflow 1e999 that json.loads accepts."""
+    if isinstance(value, float):
+        return math.isfinite(value)
+    if isinstance(value, dict):
+        return all(_finite(v) for v in value.values())
+    if isinstance(value, list):
+        return all(_finite(v) for v in value)
+    return True
 
 
 # Run store -----------------------------------------------------------------------------------
@@ -96,7 +113,10 @@ class RunSample:
     image_sha256: str | None  # None when the image could not be read at run creation
     size: tuple[int, int] | None
     job: dict[str, Any]  # what the engine receives: id, unit and enabled metadata only
+    gt: Path  # host-side only, like gt_sha256: never in the job or the container input
+    gt_sha256: str | None  # None when the GT could not be read at run creation
     error: str | None = None  # input problem found at run creation
+    gt_error: str | None = None  # why gt_sha256 is None
 
 
 @dataclass(frozen=True)
@@ -132,6 +152,16 @@ def _inspect_image(sample: Sample) -> tuple[str | None, tuple[int, int] | None, 
     if sample.image_sha256 is not None and digest != sample.image_sha256:
         return None, None, "image does not match image_sha256 in the manifest"
     return digest, size, None
+
+
+def _inspect_gt(sample: Sample) -> tuple[str | None, str | None]:
+    try:
+        digest = sha256_file(sample.gt)
+    except OSError as error:
+        return None, f"cannot read GT: {error}"
+    if sample.gt_sha256 is not None and digest != sample.gt_sha256:
+        return None, "GT does not match gt_sha256 in the manifest"
+    return digest, None
 
 
 def _command_output(args: Sequence[str]) -> str | None:
@@ -194,6 +224,7 @@ def create_run(
     samples = []
     for sample in manifest.samples:
         digest, size, error = _inspect_image(sample)
+        gt_digest, gt_error = _inspect_gt(sample)
         samples.append(
             {
                 "id": sample.id,
@@ -202,6 +233,9 @@ def create_run(
                 "size": list(size) if size else None,
                 "job": _job_entry(sample, engine),
                 "error": error,
+                "gt": str(sample.gt),
+                "gt_sha256": gt_digest,
+                "gt_error": gt_error,
             }
         )
     data = {
@@ -245,7 +279,10 @@ def load_run(path: Path) -> Run:
             image_sha256=s["image_sha256"],
             size=tuple(s["size"]) if s["size"] else None,
             job=s["job"],
+            gt=Path(s["gt"]),
+            gt_sha256=s["gt_sha256"],
             error=s["error"],
+            gt_error=s["gt_error"],
         )
         for s in data["samples"]
     )
@@ -278,6 +315,28 @@ def summarize(run: Run) -> dict[str, Any]:
         if record and record["status"] == "failure":
             failures.append((sample.id, record["reason"], record.get("message")))
     return {"counts": counts, "failures": failures}
+
+
+def verify_ground_truth(run: Run) -> list[Issue]:
+    """Errors for GT that is not pinned or differs from the GT frozen at run creation.
+
+    Scoring must call this first: stored predictions are only comparable against the same GT.
+    """
+    issues = []
+    for sample in run.samples:
+        if sample.gt_sha256 is None:
+            message = f"GT was not pinned at run creation: {sample.gt_error}"
+            issues.append(Issue(Severity.ERROR, "gt-unpinned", message, sample.id))
+            continue
+        try:
+            changed = sha256_file(sample.gt) != sample.gt_sha256
+        except OSError as error:
+            issues.append(Issue(Severity.ERROR, "gt-unreadable", str(error), sample.id))
+            continue
+        if changed:
+            message = f"{sample.gt} changed since the run was created"
+            issues.append(Issue(Severity.ERROR, "gt-changed", message, sample.id))
+    return issues
 
 
 def verify_image(run: Run, image_id: str) -> None:
@@ -452,7 +511,7 @@ def _read_result(directory: Path) -> dict[str, Any] | _Outcome:
     if path.stat().st_size > MAX_RESULT_BYTES:
         return _invalid(f"{RESULT_FILE} is larger than {MAX_RESULT_BYTES} bytes")
     try:
-        result = json.loads(path.read_bytes().decode("utf-8"))
+        result = json.loads(path.read_bytes().decode("utf-8"), parse_constant=_reject_constant)
     except (OSError, ValueError) as error:
         return _invalid(f"{RESULT_FILE} is not valid JSON: {error}")
     if not isinstance(result, dict):
@@ -465,8 +524,15 @@ def _read_result(directory: Path) -> dict[str, Any] | _Outcome:
     if not isinstance(result.get("message", ""), str):
         problems.append("'message' must be a string")
     seconds = result.get("seconds")
-    if seconds is not None and (isinstance(seconds, bool) or not isinstance(seconds, int | float)):
-        problems.append("'seconds' must be a number")
+    if seconds is not None and (
+        isinstance(seconds, bool)
+        or not isinstance(seconds, int | float)
+        or not math.isfinite(seconds)
+        or seconds < 0
+    ):
+        problems.append("'seconds' must be a finite nonnegative number")
+    if not _finite(result.get("extra")):
+        problems.append("'extra' must not contain infinite numbers")
     if problems:
         return _invalid(f"{RESULT_FILE}: " + "; ".join(problems))
     return result
@@ -623,7 +689,11 @@ class _Executor:
         return record
 
     def stage(self, samples: list[RunSample], input_dir: Path) -> list[RunSample]:
-        """Copy (or hard-link) byte-identical images; record input errors."""
+        """Copy byte-identical images; record input errors.
+
+        Never a hard link: an in-place edit of the source would change the staged image after
+        its hash was checked. A copy (or a copy-on-write clone) keeps the checked bytes.
+        """
         images = input_dir / "images"
         images.mkdir(parents=True)
         staged = []
@@ -632,10 +702,7 @@ class _Executor:
             target = images / f"{sample.id}{sample.image.suffix.lower()}"
             if error is None:
                 try:
-                    try:
-                        os.link(sample.image, target)
-                    except OSError:
-                        shutil.copyfile(sample.image, target)
+                    shutil.copyfile(sample.image, target)
                     if sha256_file(target) != sample.image_sha256:
                         error = "the image changed since the run was created"
                 except OSError as exc:

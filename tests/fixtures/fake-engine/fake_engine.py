@@ -9,6 +9,7 @@ failed                                 the engine reports a failure
 invalid                                prediction.json with the wrong sample ID
 escape                                 primary output is a symlink to a host file
 bad-result                             result.json is not JSON
+nan-seconds, inf-extra                 result.json with NaN seconds or an overflowing 1e999
 skip                                   no output at all for the sample
 crash                                  exit with status 3 before any output
 hang                                   sleep until killed
@@ -89,6 +90,12 @@ def main():
             result["primary"] = "page.txt"
         elif behavior == "bad-result":
             result = "{not json"
+        elif behavior == "nan-seconds":
+            (out / "page.txt").write_text("text\n", encoding="utf-8")
+            result = '{"status": "ok", "primary": "page.txt", "seconds": NaN}'
+        elif behavior == "inf-extra":
+            (out / "page.txt").write_text("text\n", encoding="utf-8")
+            result = '{"status": "ok", "primary": "page.txt", "extra": {"score": [1e999]}}'
         write_result(out, result)
     print(f"fake engine processed {len(job['samples'])} samples", file=sys.stderr)
 
