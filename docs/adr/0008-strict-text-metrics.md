@@ -2,7 +2,7 @@
 
 - Status: proposed
 - Date: 2026-10-20
-- Related issue: [#8](https://github.com/michal-hradis/ocr_benchmarking/issues/8) (maintainer decisions from a discussion on 2026-10-20, recorded in the implementing PR)
+- Related issue: [#8](https://github.com/michal-hradis/ocr_benchmarking/issues/8) (maintainer decisions: [comment](https://github.com/michal-hradis/ocr_benchmarking/issues/8#issuecomment-6302335401))
 
 ## Context
 
