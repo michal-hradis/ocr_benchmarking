@@ -1,6 +1,6 @@
 # Evaluation
 
-This document defines the **initial** metric families and how they complement each other. Text preparation, ordered CER/WER, bag-of-words, ROUGE-2, aggregates and the failure policies are defined [below](#strict-metrics-metrics-version-1) ([#8](https://github.com/michal-hradis/ocr_benchmarking/issues/8), [ADR 0008](adr/0008-strict-text-metrics.md)) and implemented. Flexible alignment is owned by [#9](https://github.com/michal-hradis/ocr_benchmarking/issues/9) and not implemented yet. System boundaries are in [ARCHITECTURE.md](ARCHITECTURE.md).
+This document defines the **initial** metric families and how they complement each other. Text preparation, ordered CER/WER, bag-of-words, ROUGE-2, aggregates and the failure policies are defined [below](#strict-metrics-metrics-version-1) ([#8](https://github.com/michal-hradis/ocr_benchmarking/issues/8), [ADR 0008](adr/0008-strict-text-metrics.md)) and implemented. Flexible CER/WER are defined in [Flexible CER and WER](#flexible-cer-and-wer-metrics-version-2) ([#9](https://github.com/michal-hradis/ocr_benchmarking/issues/9), [ADR 0009](adr/0009-flexible-line-alignment.md)) and implemented. System boundaries are in [ARCHITECTURE.md](ARCHITECTURE.md).
 
 ## Inputs
 
@@ -34,7 +34,7 @@ The following hold for all families. #8 and #9 define the details.
 
 ## Strict metrics (metrics version 1)
 
-Implemented in `ocrbench.metrics` and `ocrbench.evaluate`. Any change to these rules increments the metrics version, which is stored with every score.
+Implemented in `ocrbench.metrics` and `ocrbench.evaluate`. Any change to these rules increments the metrics version, which is stored with every score. Metrics version 2 adds [flexible CER/WER](#flexible-cer-and-wer-metrics-version-2) and leaves these definitions unchanged.
 
 ### Text preparation
 
@@ -60,11 +60,24 @@ Implemented in `ocrbench.metrics` and `ocrbench.evaluate`. Any change to these r
 - **ROUGE-2:** the same overlap on word bigrams of the prepared text, so bigrams span line and region breaks. A text with fewer than two words has no bigrams. ROUGE-1 is not reported, as it equals bag-of-words.
 - **F1** = 2·matched / (reference + predicted items). It equals the harmonic mean when precision and recall are defined, is 0 when exactly one side is empty, and is `null` when both are empty. Precision is `null` without predicted items, recall is `null` without reference items.
 
+### Flexible CER and WER (metrics version 2)
+
+Implemented in `ocrbench.alignment`. Flexible scores use the same text preparation and edit costs as ordered CER/WER, but tolerate a different column order and segmentation.
+
+- **Units.** Reference units are the PAGE XML reference lines. Prediction units are the lines of the prediction's structure text: the prediction lines, the lines of a region's own text (such as a paragraph from an image-to-text model) and, when no region carries text, the lines of the page text. Units are normalized like the whole text; empty units are dropped. A paragraph is never split further, so a page without any line break is a single unit and is scored in order.
+- **Groups.** A group pairs a run of reference lines that are consecutive in reading order with a run of consecutive prediction units (1:1, 1:N, N:1 or N:M). It costs the Levenshtein distance of the two runs, joined by spaces. Inside a group, order counts as in ordered CER; the groups themselves can appear in any order, at no cost. A unit belongs to at most one group, so no content is credited twice.
+- **Unmatched units.** A reference line in no group costs its characters plus one separator as deletions; a prediction unit in no group costs the same as insertions. The separators between groups are matched. Without any group, the counts equal ordered CER/WER: a failure scored as an empty prediction deletes the whole reference.
+- **Denominator.** The reference length is the same as for ordered CER (lines plus the spaces joining them), so the rates are directly comparable. The ordered alignment, all units in one group, is always a candidate: flexible CER/WER is never higher than ordered CER/WER. A large gap indicates reading-order or segmentation differences.
+- **Words.** Flexible WER uses the same units and rules on words (without separators). It is optimized separately from flexible CER, so the two can use different groups.
+- **Search.** Samples with at most 8 units on both sides are solved exhaustively. Larger samples avoid a dense comparison of every reference line with every prediction unit: prediction units are anchored to reference lines by shared character 3-grams; consecutive units with consistent anchors form blocks; the blocks are put in reference order and aligned with the reference; the reference is cut into groups at line boundaries, and each cut is shifted by up to two lines where that lowers the cost. The cheaper of this result and the ordered alignment is kept. A 2,200-line synthetic page takes a few seconds.
+- **Approximation.** Every result is a valid grouping, so a non-optimal search can only overstate errors. Each sample stores a **lower bound**, `max(|reference|, |prediction|)` minus their multiset overlap of characters (or words), and **`exact`**, which is true when the result is proven optimal (exhaustive search, or errors equal to the bound). Missing text next to unrelated extra text typically leaves a gap between the bound and the result, and `exact` is false.
+- **Diagnostics** per sample and metric: `method` (`exhaustive`, `ordered` or `reordered`), the number of `groups`, `order_breaks` (consecutive groups in prediction order that are not consecutive in reference order), and the unmatched reference and prediction units. `flexible_units` holds the reference and prediction unit counts and how many prediction units were anchored (retrieval coverage).
+
 ### Aggregates
 
 Aggregates are computed for all samples, for each unit (`page`, `paragraph`) and for each document type within a unit (`doc_type` from the manifest, frozen in `run.json`; `null` when not given, or for runs created before it was frozen).
 
-- **Micro:** the counts summed over the group, then the rates, precision, recall and F1 from the sums. Long pages weigh more.
+- **Micro:** the counts summed over the group, then the rates, precision, recall and F1 from the sums. Long pages weigh more. Flexible CER/WER also sum their lower bounds (`lower_bound`, `lower_bound_rate`) and count the samples whose result is not proven optimal (`not_exact`); those samples stay in the aggregates.
 - **Macro:** the mean of the per-sample values. Samples whose value is `null` (for example an empty reference) are left out, and their number is reported as `undefined`.
 - Each group also reports its number of samples, scored samples, **coverage** (scored / all samples), status counts and failure reasons.
 
@@ -74,7 +87,7 @@ Aggregates are computed for all samples, for each unit (`page`, `paragraph`) and
 uv run ocrbench evaluate runs/<run-id> [--config eval.toml]
 ```
 
-It prints the micro scores per group and writes `runs/<run-id>/evaluations/<n>/scores.json` in a new numbered directory; earlier evaluations are never overwritten. The command exits with status 1, and writes nothing, when the run cannot be scored:
+It prints the micro scores per group, including flexible CER/WER (`fCER`, `fWER`), and writes `runs/<run-id>/evaluations/<n>/scores.json` in a new numbered directory; earlier evaluations are never overwritten. The command exits with status 1, and writes nothing, when the run cannot be scored:
 
 - a sample is still **pending** (finish the run with `run resume` first);
 - a GT file **changed**, cannot be read, or was not pinned when the run was created (`ocrbench.runner.verify_ground_truth`), so predictions are only ever compared with the GT frozen with the run;
@@ -89,7 +102,7 @@ unicode = "NFC"                  # NFC (default) or NFKC
 failure_policy = "empty-output"  # empty-output (default) or exclude
 ```
 
-`scores.json` (`ocrbench.scores`, version 1) records the run ID and the SHA-256 of `run.json`, the configuration and its hash, the metrics version, the fixed text rules, and the ocrbench and rapidfuzz versions. Per sample it holds the status, failure reason, attempt, GT hash, the SHA-256 of the scored `prediction.json` (`null` when no prediction was scored), `scored_as` (`prediction`, `empty` or `excluded`) and the counts and values of every metric; then the aggregates per group.
+`scores.json` (`ocrbench.scores`, version 2; version 1 had no flexible scores) records the run ID and the SHA-256 of `run.json`, the configuration and its hash, the metrics version, the fixed text rules, and the ocrbench and rapidfuzz versions. Per sample it holds the status, failure reason, attempt, GT hash, the SHA-256 of the scored `prediction.json` (`null` when no prediction was scored), `scored_as` (`prediction`, `empty` or `excluded`) and the counts and values of every metric, including `flexible_chars`, `flexible_words` and `flexible_units`; then the aggregates per group.
 
 ## Failed, partial and truncated samples
 

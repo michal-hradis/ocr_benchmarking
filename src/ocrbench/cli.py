@@ -223,6 +223,7 @@ def _evaluate(args: argparse.Namespace) -> int:
         print(f"error: {error}", file=sys.stderr)
         return 1
     columns = (("CER", "chars", "rate"), ("WER", "words", "rate"))
+    columns += (("fCER", "flexible_chars", "rate"), ("fWER", "flexible_words", "rate"))
     columns += (("BoW F1", "bag_of_words", "f1"), ("R-2 F1", "rouge2", "f1"))
     print(f"{'group':<32} {'samples':>7} {'coverage':>8}", *(f"{c[0]:>7}" for c in columns))
     for group in scores["aggregates"]:
@@ -233,6 +234,7 @@ def _evaluate(args: argparse.Namespace) -> int:
             *(f"{v:>7}" for v in values),
         )
     print(f"micro averages in %, failure policy {config.failure_policy}; scores: {path}")
+    print("fCER/fWER: flexible (order-independent) CER/WER")
     return 0
 
 

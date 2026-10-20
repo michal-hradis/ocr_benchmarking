@@ -2,7 +2,7 @@
 
 Compare OCR and handwritten text recognition (HTR) systems on **raster images of books, magazines and newspapers**, particularly complex and historical prints.
 
-**Project status:** early implementation. Python project tooling, shared CPU/CUDA Docker base images ([setup](CONTRIBUTING.md#development-setup-and-commands), [Docker](docs/DOCKER.md)) and dataset manifests with a PAGE XML reader and validator ([datasets](docs/DATASETS.md)), the standardized prediction format with its validator and Markdown/HTML conversion ([predictions](docs/PREDICTIONS.md)), the Docker runner with per-sample execution records ([runner](docs/RUNNER.md)) and strict ordered CER/WER, bag-of-words and ROUGE-2 scoring of stored runs ([evaluation](docs/EVALUATION.md)) exist. Engine adapters, flexible alignment and reports are *not yet implemented*.
+**Project status:** early implementation. Python project tooling, shared CPU/CUDA Docker base images ([setup](CONTRIBUTING.md#development-setup-and-commands), [Docker](docs/DOCKER.md)) and dataset manifests with a PAGE XML reader and validator ([datasets](docs/DATASETS.md)), the standardized prediction format with its validator and Markdown/HTML conversion ([predictions](docs/PREDICTIONS.md)), the Docker runner with per-sample execution records ([runner](docs/RUNNER.md)) and strict ordered and flexible (order-independent) CER/WER, bag-of-words and ROUGE-2 scoring of stored runs ([evaluation](docs/EVALUATION.md)) exist. Engine adapters and reports are *not yet implemented*.
 
 ## Use cases
 
@@ -17,7 +17,7 @@ For initial development, there is a **small, separately held set of page images 
 
 ## Planned outputs and scoring
 
-Engines provide UTF-8 transcription plus versioned JSON with optional typed regions, optional lines and optional positions ([predictions](docs/PREDICTIONS.md)); native OCR outputs are retained. Strict ordered CER/WER, bag-of-words precision/recall/F1 and ROUGE-2 are implemented; flexible line/chunk alignment is planned (#9). See [evaluation](docs/EVALUATION.md) for the metric families and the exact definitions.
+Engines provide UTF-8 transcription plus versioned JSON with optional typed regions, optional lines and optional positions ([predictions](docs/PREDICTIONS.md)); native OCR outputs are retained. Strict ordered CER/WER, flexible CER/WER that tolerate column order and segmentation differences, bag-of-words precision/recall/F1 and ROUGE-2 are implemented. See [evaluation](docs/EVALUATION.md) for the metric families and the exact definitions.
 
 ## Quick start (planned)
 

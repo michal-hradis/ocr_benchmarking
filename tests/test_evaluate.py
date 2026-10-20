@@ -205,12 +205,14 @@ def test_scores_record_settings_and_identity(tmp_path):
     scores = evaluate_run(run, EvalConfig(unicode="NFKC"))
     assert scores["format"] == "ocrbench.scores"
     assert scores["run_id"] == run.run_id
-    assert scores["metrics_version"] == 1
+    assert (scores["version"], scores["metrics_version"]) == (2, 2)
     assert scores["rules"] == {
         "characters": "code-points",
         "whitespace": "collapse-to-space",
         "words": "whitespace-split",
         "reference_lines": "joined-by-space",
+        "flexible_units": "reference-lines/prediction-lines",
+        "flexible_groups": "consecutive-runs-any-order",
         "unicode": "NFKC",
     }
     assert scores["rapidfuzz_version"]
@@ -299,3 +301,43 @@ def test_runs_created_without_doc_type_are_still_evaluated(tmp_path):
         {"unit": "paragraph"},
         {"unit": "paragraph", "doc_type": None},
     ]
+
+
+def test_flexible_scores_tolerate_reordered_output(tmp_path):
+    samples = {
+        # The prediction "md", "Text of md." has the GT lines in the opposite order.
+        "md": ("markdown", ["Text of md.", "md"], "page", None),
+        "failed": ("failed", ["lost words here"], "page", None),
+    }
+    scores = evaluate_run(make_run(tmp_path, samples))
+    md, failed = by_id(scores)["md"], by_id(scores)["failed"]
+    assert md["chars"]["errors"] > 0
+    assert md["flexible_chars"] == {
+        "reference": 14,
+        "hypothesis": 14,
+        "substitutions": 0,
+        "deletions": 0,
+        "insertions": 0,
+        "errors": 0,
+        "rate": 0.0,
+        "lower_bound": 0,
+        "exact": True,
+        "method": "exhaustive",
+        "groups": 2,
+        "order_breaks": 1,
+        "unmatched_reference_units": 0,
+        "unmatched_hypothesis_units": 0,
+    }
+    assert md["flexible_words"]["errors"] == 0
+    assert md["flexible_units"] == {"reference": 2, "hypothesis": 2, "anchored": 2}
+    # A failure is scored as an empty prediction: every reference character is deleted.
+    assert failed["flexible_chars"]["deletions"] == failed["chars"]["deletions"] == 15
+    total = group(scores)["flexible_chars"]
+    assert total["micro"]["errors"] == 15
+    assert (total["micro"]["lower_bound"], total["micro"]["lower_bound_rate"]) == (15, 15 / 29)
+    assert total["not_exact"] == 0
+    assert total["macro"]["rate"]["mean"] == pytest.approx(0.5)
+    excluded = evaluate_run(
+        load_run(tmp_path / "runs" / scores["run_id"]), EvalConfig(failure_policy="exclude")
+    )
+    assert by_id(excluded)["failed"]["flexible_chars"] is None
