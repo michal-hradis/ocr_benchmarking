@@ -1,51 +1,45 @@
-# Architecture overview (provisional)
+# Benchmark architecture (provisional)
 
-**Status:** this describes agreed boundaries and a proposed flow. The actual implementation architecture, CLI, runtime packaging, schema shapes and evaluator design belong to [issue #3](https://github.com/michal-hradis/ocr_benchmarking/issues/3) and subsequent implementation issues. As of this documentation milestone, only the README and workflow documentation exist; there is no functioning runner or model adapter.
+This document records agreed system boundaries. [Issue #3](https://github.com/michal-hradis/ocr_benchmarking/issues/3) will expand and finalize the architecture; [#5–#10](https://github.com/michal-hradis/ocr_benchmarking/issues/1) implement the contracts.
 
-## Purpose and boundaries
-
-The benchmark compares transcription quality of OCR/HTR pipelines and page-image VLMs on raster page images of books, magazines and newspapers. Independently prepared paragraph crops are also a supported sample type. Evaluation ground truth is PAGE XML.
+## Data and execution flow
 
 ```text
-Dataset manifest
-    | image path + image metadata
-    v
-Common host-side orchestration  ---> engine image/container
-    |                               (preprocessing, tiling, OCR/HTR)
-    |                                      |
-    |                               text + normalized JSON
-    |                               + native engine output
-    v                                      |
-Host-side evaluation <---------------------+
-    ^
-    | PAGE XML GT (never mounted/passed to engine)
-    v
-Metrics + reproducible reports
+raster image + manifest metadata
+             |
+             v
+       host-side runner ---- image only ---> engine Docker container
+             |                              (resizing / tiling / OCR)
+             |                                         |
+             |                           native output + UTF-8 / JSON
+             |                                         |
+             +-----------------------------------------+
+             |
+             v
+     host-side evaluator <--------- PAGE XML ground truth
+             |
+             v
+       metrics / reports
 ```
+
+**GT isolation:** PAGE XML, reference text and reference positions remain host-side and must never be exposed to an engine container. Only allowed image inputs and metadata cross that boundary.
 
 ## Responsibilities
 
-| Component | Owns | Does not own |
-| --- | --- | --- |
-| Dataset loader ([#5](https://github.com/michal-hradis/ocr_benchmarking/issues/5)) | Image/GT pairing, metadata, PAGE XML parsing/validation | Engine inference and benchmark-scoring decisions |
-| Runner ([#7](https://github.com/michal-hradis/ocr_benchmarking/issues/7)) | Iteration, launching isolated Docker engine containers, version/config/failure records | OCR model internals, reference-text access |
-| Each OCR engine ([#11+](https://github.com/michal-hradis/ocr_benchmarking/issues/11)) | OCR/HTR inference, resizing, optional tiling/detection/stitching, adapter to result contract | Scoring, GT access, external evaluator tiling |
-| Result contract ([#6](https://github.com/michal-hradis/ocr_benchmarking/issues/6)) | UTF-8 text, versioned JSON, optional typed regions + nested lines and positions, native output preservation | Invented locations for text-only systems |
-| Evaluator ([#8](https://github.com/michal-hradis/ocr_benchmarking/issues/8), [#9](https://github.com/michal-hradis/ocr_benchmarking/issues/9)) | PAGE XML reference, CER/WER, scalable flexible alignment, lexical overlap, omission/hallucination accounting | Inference or changing source images |
-| Reporting ([#10](https://github.com/michal-hradis/ocr_benchmarking/issues/10)) | Per-image/aggregate metrics, versions, failures, inspectable artifacts | Rerunning/altering model predictions |
+| Component | Responsibility |
+| --- | --- |
+| Dataset manifest / PAGE reader ([#5](https://github.com/michal-hradis/ocr_benchmarking/issues/5)) | Pair raster images and PAGE XML GT; validate image and annotation metadata |
+| Runner ([#7](https://github.com/michal-hradis/ocr_benchmarking/issues/7)) | Launch isolated engine containers, retain outputs, capture status and provenance |
+| Engine adapter ([#11–#17](https://github.com/michal-hradis/ocr_benchmarking/issues/1)) | Image preprocessing, any region detection/tiling/stitching, OCR/HTR and native output |
+| Output contract ([#6](https://github.com/michal-hradis/ocr_benchmarking/issues/6)) | Required UTF-8 transcription; versioned JSON regions with optional original-image coordinates, types, nested text lines and optional line types; native outputs preserved |
+| Evaluator ([#8–#9](https://github.com/michal-hradis/ocr_benchmarking/issues/1)) | Parse GT, compute ordered and aligned CER/WER, bag-of-words metrics and ROUGE-2; count omissions/extra text |
+| Reporter ([#10](https://github.com/michal-hradis/ocr_benchmarking/issues/10)) | Per-image and aggregate metrics, diagnostics, failures and configuration provenance |
 
-## Interface principles — agreed, detailed contracts pending
+## Stable boundaries and open details
 
-- **Image-only input:** complete raster pages by default; paragraph crops as explicit benchmark samples. No PDF text extraction.
-- **One output per sample:** required UTF-8 transcription; normalized JSON with typed regions and original-image positions, nested lines with text/positions and optional type; geometry absent when genuinely unavailable.
-- **Native output preservation:** preserve generated TXT, Markdown, HTML, PAGE/hOCR or JSON without treating Markdown syntax as transcription.
-- **Text evaluation:** strict baseline CER/WER, flexible order-independent matching, bag-of-words precision/recall/F1 and ROUGE-2; separate configuration/versioning for normalizations. Routine alignment must scale beyond 2,000 lines per newspaper image.
-- **No ground-truth leakage:** do not pass/mount PAGE XML into engine containers.
-- **Runtime:** Linux Python orchestration, isolated Docker engines. Share pinned CPU/CUDA base layers only where compatible; document NVIDIA dependencies. Run metadata includes weights/code/runtime versions, prompts, preprocessing, language, token limits, resources, truncation and failures.
-- **Testing:** deterministic local tests with synthetic fixtures; no CI initially, no forced full suite. Real GPU/model inference explicitly opted into.
+- **Benchmark unit:** a full-page raster image by default; separately supplied paragraph crops are also valid. No PDF extraction and no evaluator-side tiling.
+- **Geometry:** regions/lines must use coordinates in the original input image when genuinely available. Text-only predictions are valid without invented coordinates.
+- **Reproducibility:** Linux Python orchestration, engine-isolated Docker images, compatible shared CPU/CUDA bases and pinned model/runtime revisions. Record language hints, prompts, preprocessing, resources, truncation and failures.
+- **Scoring:** initial CER/WER (including scalable flexible alignment for 2,000+ lines per newspaper page), lexical overlap and ordered diagnostics. Exact normalization, split/merge rules, bounding-box convention and JSON property details remain for [#3](https://github.com/michal-hradis/ocr_benchmarking/issues/3), [#6](https://github.com/michal-hradis/ocr_benchmarking/issues/6) and [#9](https://github.com/michal-hradis/ocr_benchmarking/issues/9).
 
-The specific JSON property names, bbox convention, line concatenation and alignment algorithm are **not specified by this document**; they must be agreed and tested in [#3](https://github.com/michal-hradis/ocr_benchmarking/issues/3), [#6](https://github.com/michal-hradis/ocr_benchmarking/issues/6) and [#9](https://github.com/michal-hradis/ocr_benchmarking/issues/9).
-
-## Decisions and backlog
-
-Use the [ADR index](adr/README.md) for durable decisions. Keep the [issue index](TODO.md) linked to the GitHub roadmap, which is the source of truth for planning/status. Do not label future functionality as implemented before its corresponding PR is merged.
+Use [ADRs](adr/README.md) for agreed durable decisions. Individual OCR engines need the common image/dataset, runner and output contracts; Tesseract is an example adapter, **not** a prerequisite for other engines.

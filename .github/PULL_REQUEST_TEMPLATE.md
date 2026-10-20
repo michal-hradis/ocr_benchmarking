@@ -1,30 +1,25 @@
-## Related issue
+## Issue
 
 Closes #
 
-## Change
+## Summary
 
-- What changed and why:
-- Any intentionally excluded follow-ups:
+- Changed behavior/files:
+- Out-of-scope follow-ups:
 
-## Local verification
+## Verification
 
-**No CI is configured at this stage. Run checks relevant to this change; a full suite is not required.**
+See [CONTRIBUTING.md](../CONTRIBUTING.md#verification-and-tests). Record **only checks actually run**.
 
-| Command / manual check | Result |
+| Check or command | Result |
 | --- | --- |
 | | |
 
-Checks not run and why:
+Checks not run and reasons:
 
-## Data, inference and reproducibility
+## Risks and handoff
 
-- Did this change read or mount real benchmark data / PAGE XML into an engine? (Expected: no.)
-- Were model weights downloaded, paid services accessed, or GPU benchmarks run? If yes, record explicit authorization, configuration and outcome.
-- For engine changes: record model/runtime image revisions, language/prompt/preprocessing, failures and truncation.
-
-## Documentation, risks and review
-
-- Documentation/ADR updates:
-- Remaining limitations or follow-up issues:
-- Human review requested from:
+- Data/model/GPU access and reproducibility notes (if applicable):
+- Documentation/ADR changes:
+- Remaining risks, decisions and follow-ups:
+- Reviewer requested:
