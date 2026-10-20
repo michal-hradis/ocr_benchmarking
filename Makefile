@@ -42,11 +42,11 @@ docker-lock:  ## Re-lock the hashed torch requirements for the CUDA image
 		--generate-hashes --no-header --custom-compile-command "make docker-lock" \
 		-o docker/base-cu130-torch/requirements.txt
 
-docker-smoke:  ## Smoke-test built bases and a derived CPU image without a GPU (opt-in)
-	$(UV) run --locked pytest -m docker --run-docker tests/test_docker_images.py
+docker-smoke:  ## Smoke-test built bases, a derived CPU image and the fake-engine runner (opt-in)
+	$(UV) run --locked pytest -m docker --run-docker tests/test_docker_images.py tests/test_runner.py
 
 gpu-preflight:  ## Check host driver, Docker and NVIDIA Container Toolkit
 	scripts/gpu_preflight.sh
 
-gpu-smoke:  ## Check torch sees the GPU inside the CUDA base image (opt-in)
-	$(UV) run --locked pytest -m gpu --run-docker --run-gpu tests/test_docker_images.py
+gpu-smoke:  ## Check torch sees the GPU in the CUDA base and the runner passes it (opt-in)
+	$(UV) run --locked pytest -m gpu --run-docker --run-gpu tests/test_docker_images.py tests/test_runner.py

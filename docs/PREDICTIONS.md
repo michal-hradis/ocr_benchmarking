@@ -2,7 +2,7 @@
 
 A **prediction** is the standardized JSON form of one engine's valid OCR result for one sample. It holds the plain page text and, when the engine provides them, typed regions with optional lines and optional positions. The decisions behind the format are recorded in [#6](https://github.com/michal-hradis/ocr_benchmarking/issues/6#issuecomment-6299290606) and [ADR 0006](adr/0006-standardized-prediction-format.md). The machine-readable structure is the JSON Schema [`prediction-v1.schema.json`](../src/ocrbench/schemas/prediction-v1.schema.json); the rules that span several fields are checked by `ocrbench.prediction` and described below.
 
-A prediction describes only a **valid** OCR result. Execution status, failure reasons and provenance are recorded by the runner ([#7](https://github.com/michal-hradis/ocr_benchmarking/issues/7)), including for samples without any valid prediction ([ADR 0003](adr/0003-engine-run-output-contract-boundaries.md)). A prediction with any validation error is invalid: it must never be treated as a successful result.
+A prediction describes only a **valid** OCR result. Execution status, failure reasons and provenance are recorded by the runner ([RUNNER.md](RUNNER.md)), including for samples without any valid prediction ([ADR 0003](adr/0003-engine-run-output-contract-boundaries.md)). A prediction with any validation error is invalid: it must never be treated as a successful result.
 
 ## Commands
 

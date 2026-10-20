@@ -1,6 +1,6 @@
 # Docker host setup and base images
 
-Engines run in per-engine Docker images on one Linux machine ([architecture](ARCHITECTURE.md#execution-and-reproducibility)). This page covers host setup, the shared base images and the conventions for engine images. How the runner invokes containers (mounts, metadata, lifecycle) is owned by [#7](https://github.com/michal-hradis/ocr_benchmarking/issues/7).
+Engines run in per-engine Docker images on one Linux machine ([architecture](ARCHITECTURE.md#execution-and-reproducibility)). This page covers host setup, the shared base images and the conventions for engine images. How the runner invokes containers (mounts, metadata, lifecycle) is described in [RUNNER.md](RUNNER.md).
 
 ## Host setup (Ubuntu)
 
@@ -32,7 +32,7 @@ Both images provide:
 - **External** images (`FROM`, `COPY --from`) are pinned by registry digest.
 - **Shared bases** are referenced by their versioned local tag, e.g. `FROM ocrbench/base-cpu:py3.12-v1`. No other local tags (such as `latest`) are allowed.
 - A released `-vN` tag is **never reassigned** to different content: any change to a family's Dockerfile or lock bumps `BASE_VERSION`. Rebuilding the same version from the same pinned inputs is allowed.
-- Identity is recorded by **image ID**: `make docker-*` prints the ID of each built base, and the runner ([#7](https://github.com/michal-hradis/ocr_benchmarking/issues/7)) records the resolved image ID of every engine image it runs.
+- Identity is recorded by **image ID**: `make docker-*` prints the ID of each built base, and the runner ([RUNNER.md](RUNNER.md)) records the resolved image ID of every engine image it runs.
 
 Publishing bases to a registry and pinning them by digest would also work, but would need a documented push/pull workflow; it is not set up now.
 
@@ -43,9 +43,9 @@ Publishing bases to a registry and pinning them by digest would also work, but w
 | `make docker-cpu` | Build the CPU base (small pull) |
 | `make docker-cu130-torch` | Build the CUDA/torch base (several GB pulled; cached afterwards) |
 | `make docker-lock` | Re-lock `docker/base-cu130-torch/requirements.txt` with hashes after editing `requirements.in` |
-| `make docker-smoke` | Opt-in: run the built images with `--network none --read-only` and check Python, the non-root user and that torch imports without a GPU; also build a minimal derived image (`tests/fixtures/derived-cpu`) from the CPU base and check it inherits the base layers |
+| `make docker-smoke` | Opt-in: run the built images with `--network none --read-only` and check Python, the non-root user and that torch imports without a GPU; also build a minimal derived image (`tests/fixtures/derived-cpu`) from the CPU base and check it inherits the base layers; build the fake engine (`tests/fixtures/fake-engine`) and run it with `ocrbench run start` ([RUNNER.md](RUNNER.md)) |
 | `make gpu-preflight` | Opt-in: host/Docker/toolkit GPU check described above |
-| `make gpu-smoke` | Opt-in: check that torch in the CUDA image sees the GPU and runs a matrix product |
+| `make gpu-smoke` | Opt-in: check that torch in the CUDA image sees the GPU and runs a matrix product, and that the runner passes `resources.gpus` to an engine container |
 
 The default `make test` only checks the conventions of every `Dockerfile` in the repository statically (pinned parents per the rule above, non-root final user, hashed requirements); it never builds or runs images.
 
@@ -58,5 +58,6 @@ Engine adapters ([#11–#17](https://github.com/michal-hradis/ocr_benchmarking/i
 - **No weights in layers unless small.** Large weights go to the `/cache` volume, downloaded by an explicit, separately invoked step, never during an ordinary test or benchmark run. Record their revision and checksum.
 - **Inference runs offline.** Containers must work with `--network none` once weights are cached.
 - **Read-only inputs.** Images and other inputs are mounted read-only; the container writes only to its output location and `/cache`. The root filesystem should work with `--read-only` (use `--tmpfs /tmp` if the engine needs scratch space).
-- **Resource limits come from the runner** (`--cpus`, `--memory`, `--gpus`, timeouts) and are recorded in the run configuration ([#7](https://github.com/michal-hradis/ocr_benchmarking/issues/7)); images must not assume unlimited resources.
+- **Resource limits come from the runner** (`--cpus`, `--memory`, `--gpus`, timeouts) and are recorded in the run configuration ([RUNNER.md](RUNNER.md#engine-configuration)); images must not assume unlimited resources.
+- **Runner user.** The runner starts containers with the host user's UID/GID and `HOME=/tmp`, not as `ocr`, so files in `/output` and `/cache` belong to the host user. Do not depend on files writable only by `ocr`.
 - **Ground truth never enters an engine image or container** ([ADR 0002](adr/0002-ground-truth-isolation.md)).

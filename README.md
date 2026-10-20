@@ -2,7 +2,7 @@
 
 Compare OCR and handwritten text recognition (HTR) systems on **raster images of books, magazines and newspapers**, particularly complex and historical prints.
 
-**Project status:** early implementation. Python project tooling, shared CPU/CUDA Docker base images ([setup](CONTRIBUTING.md#development-setup-and-commands), [Docker](docs/DOCKER.md)) and dataset manifests with a PAGE XML reader and validator ([datasets](docs/DATASETS.md)), and the standardized prediction format with its validator and Markdown/HTML conversion ([predictions](docs/PREDICTIONS.md)) exist. The runner, engine adapters and evaluation code are *not yet implemented*.
+**Project status:** early implementation. Python project tooling, shared CPU/CUDA Docker base images ([setup](CONTRIBUTING.md#development-setup-and-commands), [Docker](docs/DOCKER.md)) and dataset manifests with a PAGE XML reader and validator ([datasets](docs/DATASETS.md)), the standardized prediction format with its validator and Markdown/HTML conversion ([predictions](docs/PREDICTIONS.md)), and the Docker runner with per-sample execution records ([runner](docs/RUNNER.md)) exist. Engine adapters and evaluation code are *not yet implemented*.
 
 ## Use cases
 
@@ -21,13 +21,13 @@ Engines provide UTF-8 transcription plus versioned JSON with optional typed regi
 
 ## Quick start (planned)
 
-Only `dataset validate|text` and `prediction validate|convert` work today (see [datasets](docs/DATASETS.md) and [predictions](docs/PREDICTIONS.md)). The other commands are a **proposed workflow, not runnable commands**; the CLI and flags may change during [runner implementation #7](https://github.com/michal-hradis/ocr_benchmarking/issues/7):
+`dataset validate|text`, `prediction validate|convert` and `run start|resume|status` work today (see [datasets](docs/DATASETS.md), [predictions](docs/PREDICTIONS.md) and [runner](docs/RUNNER.md)); no engine adapter exists yet. `evaluate` and `report` are a **proposed workflow, not runnable commands**:
 
 ```sh
 ocrbench dataset validate <dataset-manifest>
-ocrbench run --engine tesseract --dataset <dataset-manifest>
-ocrbench evaluate --run <run-id>
-ocrbench report --run <run-id>
+ocrbench run start --engine <engine.toml> --dataset <dataset-manifest>
+ocrbench evaluate --run <run-id>   # planned
+ocrbench report --run <run-id>     # planned
 ```
 
 Linux is the target platform, with per-engine Docker environments (shared CUDA/CPU bases where compatible, see [docs/DOCKER.md](docs/DOCKER.md)) and an RTX 4090 as a primary GPU test device. Consult [CONTRIBUTING.md](CONTRIBUTING.md) for the testing and PR policy.

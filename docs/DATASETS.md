@@ -2,7 +2,7 @@
 
 A dataset is described by a **manifest**: a JSON file that pairs each sample image with its PAGE XML ground truth (GT). The reader extracts reference text, regions, lines and reading order from the GT. The decisions behind these rules are recorded in [#5](https://github.com/michal-hradis/ocr_benchmarking/issues/5#issuecomment-6298136212) and [ADR 0005](adr/0005-page-xml-reference-extraction.md).
 
-GT is **host-side only**. The local reader, evaluator and reports may use it. The runner ([#7](https://github.com/michal-hradis/ocr_benchmarking/issues/7)) must never pass a sample's `gt` path or anything derived from it to an engine container ([ADR 0002](adr/0002-ground-truth-isolation.md)).
+GT is **host-side only**. The local reader, evaluator and reports may use it. The runner ([RUNNER.md](RUNNER.md)) never passes a sample's `gt` path or anything derived from it to an engine container ([ADR 0002](adr/0002-ground-truth-isolation.md)).
 
 ## Commands
 

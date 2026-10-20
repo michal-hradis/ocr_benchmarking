@@ -1,4 +1,4 @@
-"""Command-line interface: ``ocrbench dataset validate|text``, ``prediction validate|convert``."""
+"""Command-line interface: ``ocrbench dataset``, ``prediction`` and ``run`` commands."""
 
 from __future__ import annotations
 
@@ -11,6 +11,7 @@ from pathlib import Path
 from PIL import Image
 
 from ocrbench.convert import FORMATS, SUFFIXES, convert_native
+from ocrbench.engine import EngineConfigError, load_engine_config
 from ocrbench.issues import Issue, Severity
 from ocrbench.manifest import load_manifest, validate_dataset, validate_sample
 from ocrbench.prediction import (
@@ -18,6 +19,17 @@ from ocrbench.prediction import (
     load_prediction,
     prediction_to_json,
     validate_prediction,
+)
+from ocrbench.runner import (
+    DockerLauncher,
+    Run,
+    RunnerError,
+    create_run,
+    execute,
+    load_run,
+    resolve_image,
+    summarize,
+    verify_image,
 )
 
 
@@ -120,6 +132,72 @@ def _prediction_convert(args: argparse.Namespace) -> int:
     return status
 
 
+def _print_summary(run: Run) -> None:
+    summary = summarize(run)
+    for sample_id, reason, message in summary["failures"]:
+        print(f"failure: {sample_id}: {reason}: {message}")
+    counts = ", ".join(f"{count} {status}" for status, count in summary["counts"].items())
+    print(f"{run.path}: {counts}")
+
+
+def _progress(record: dict) -> None:
+    reason = f" ({record['reason']})" if record["reason"] else ""
+    print(f"{record['sample_id']}: {record['status']}{reason}", file=sys.stderr, flush=True)
+
+
+def _execute(run: Run, image_id: str, retry_failed: bool) -> int:
+    launcher = DockerLauncher(run.engine, image_id, run.cache)
+    try:
+        execute(run, launcher, retry_failed=retry_failed, progress=_progress)
+    except KeyboardInterrupt:
+        print(f"interrupted; continue with: ocrbench run resume {run.path}", file=sys.stderr)
+        return 130
+    _print_summary(run)
+    return 0
+
+
+def _run_start(args: argparse.Namespace) -> int:
+    try:
+        engine = load_engine_config(args.engine)
+        image_id = resolve_image(engine.image)
+        run = create_run(
+            engine,
+            args.dataset,
+            args.runs_dir,
+            run_id=args.run_id,
+            image_id=image_id,
+            cache=args.cache.resolve() if args.cache else None,
+        )
+        print(f"run {run.run_id}: {len(run.samples)} samples, image {image_id}", file=sys.stderr)
+        return _execute(run, image_id, retry_failed=False)
+    except (EngineConfigError, RunnerError) as error:
+        print(f"error: {error}", file=sys.stderr)
+        return 1
+
+
+def _run_resume(args: argparse.Namespace) -> int:
+    try:
+        run = load_run(args.run)
+        if run.runtime != "docker":
+            raise RunnerError(f"{args.run} was not run with Docker and cannot be resumed here")
+        image_id = resolve_image(run.engine.image)
+        verify_image(run, image_id)
+        return _execute(run, image_id, retry_failed=args.retry_failed)
+    except RunnerError as error:
+        print(f"error: {error}", file=sys.stderr)
+        return 1
+
+
+def _run_status(args: argparse.Namespace) -> int:
+    try:
+        run = load_run(args.run)
+    except RunnerError as error:
+        print(f"error: {error}", file=sys.stderr)
+        return 1
+    _print_summary(run)
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="ocrbench", description="OCR/HTR benchmark tools")
     commands = parser.add_subparsers(dest="command", required=True)
@@ -159,6 +237,28 @@ def build_parser() -> argparse.ArgumentParser:
     convert.add_argument("-o", "--output", type=Path, help="default: print to stdout")
     convert.add_argument("-v", "--verbose", action="store_true", help="also list info findings")
     convert.set_defaults(handler=_prediction_convert)
+
+    run = commands.add_parser("run", help="run an OCR engine over a dataset")
+    actions = run.add_subparsers(dest="action", required=True)
+
+    start = actions.add_parser("start", help="start a new run in a Docker container")
+    start.add_argument("--engine", type=Path, required=True, help="engine configuration (TOML)")
+    start.add_argument("--dataset", type=Path, required=True, help="dataset manifest")
+    start.add_argument("--runs-dir", type=Path, default=Path("runs"), help="default: runs/")
+    start.add_argument("--run-id", help="default: <engine>-<dataset>-<UTC time>")
+    start.add_argument("--cache", type=Path, help="host directory mounted at /cache")
+    start.set_defaults(handler=_run_start)
+
+    resume = actions.add_parser("resume", help="continue a run; finished samples are kept")
+    resume.add_argument("run", type=Path, help="run directory")
+    resume.add_argument(
+        "--retry-failed", action="store_true", help="also retry failed samples (new attempts)"
+    )
+    resume.set_defaults(handler=_run_resume)
+
+    status = actions.add_parser("status", help="count samples by status and list failures")
+    status.add_argument("run", type=Path, help="run directory")
+    status.set_defaults(handler=_run_status)
     return parser
 
 

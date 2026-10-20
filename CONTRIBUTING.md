@@ -45,8 +45,9 @@ make check   # ruff lint + format check, then offline unit tests
 | `make test` | Offline unit tests; select tests with `ARGS`, e.g. `make test ARGS="tests/test_package.py -k version"` |
 | `uv run ocrbench dataset validate <manifest>` | Validate a dataset manifest and its PAGE XML, see [docs/DATASETS.md](docs/DATASETS.md) |
 | `uv run ocrbench prediction validate\|convert …` | Validate a prediction JSON or convert native text/Markdown/HTML, see [docs/PREDICTIONS.md](docs/PREDICTIONS.md) |
+| `uv run ocrbench run start\|resume\|status …` | Run an engine image over a dataset and record every sample, see [docs/RUNNER.md](docs/RUNNER.md) |
 | `make docker-cpu`, `make docker-cu130-torch` | Build base images |
-| `make docker-smoke`, `make gpu-preflight`, `make gpu-smoke` | Opt-in Docker and GPU checks, see [docs/DOCKER.md](docs/DOCKER.md) |
+| `make docker-smoke`, `make gpu-preflight`, `make gpu-smoke` | Opt-in Docker and GPU checks (including the fake-engine runner tests), see [docs/DOCKER.md](docs/DOCKER.md) |
 
 `make help` lists all targets. Unit tests run with network sockets disabled (`pytest-socket`). Tests that need Docker or a GPU are marked `docker` / `gpu` and run only with `--run-docker` / `--run-gpu`. Add dependencies with `uv add` (or `uv add --dev`) so that `uv.lock` is updated in the same PR. Fixture rules are in [tests/fixtures/README.md](tests/fixtures/README.md).
 
