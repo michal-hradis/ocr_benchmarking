@@ -4,7 +4,7 @@ This document defines the **initial** metric families and how they complement ea
 
 ## Inputs
 
-The evaluator compares the standardized UTF-8 prediction of one sample with the reference text extracted from its PAGE XML. It reads only stored run outputs, so it never runs an engine. Its scores depend on a **versioned evaluation configuration** covering normalization, tokenization, alignment and failure policy, which is stored with every result.
+The evaluator and reports run **locally on the same Linux machine** as the OCR runner. The evaluator compares a stored UTF-8 prediction (when present) against reference text from PAGE XML. The OCR container never receives GT. Evaluation uses stored execution records, predictions and reference GT; it does **not** rerun an engine. Scores use an independently **versioned evaluation configuration** for normalization, tokenization, alignment and failure policy.
 
 ## Initial metric families
 
@@ -25,7 +25,7 @@ How the families complement each other:
 
 The following hold for all families. #8 and #9 define the details.
 
-- **All text counts.** Missing reference text counts as deletions. Extra predicted text, including hallucinations and repetitions, counts as insertions. Flexible alignment must not credit any content twice.
+- **All text counts.** For CER/WER, missing reference text contributes deletion costs and extra predicted text (including hallucinations or repetitions) contributes insertion costs. For bag-of-words and ROUGE, omissions and extraneous text affect their respective overlap/precision/recall calculations rather than edit operations. Flexible alignment must not credit content twice.
 - Scores are kept **per sample** and **aggregated**. #8 defines the aggregates, for example micro and macro averages and separate strata for full pages and crops. Every score is identifiable by sample, run and evaluation version.
 - Strict scoring preserves capitalization, diacritics and punctuation. Any normalized variants are named explicitly in the evaluation config.
 - Markup in native outputs, such as Markdown or HTML, is not scored as words. Only the standardized plain transcription is evaluated.
@@ -34,13 +34,11 @@ The following hold for all families. #8 and #9 define the details.
 
 ## Failed, partial and truncated samples
 
-- **`partial` and `truncated`** samples are scored as produced, and their status is kept with the score.
-- **`failure`** samples (timeouts, crashes, invalid output) are handled by a **configurable policy** in the evaluation config:
-  - *empty-output*: the sample is scored as an empty prediction, so all its reference text counts as deletions;
-  - *exclude*: the sample is left out of metric aggregates, and coverage (scored samples / total samples) is reported with each aggregate.
-
-  An evaluation can compute both variants. The chosen policy is part of the evaluation version.
-- Whatever the policy, every non-`success` sample is **logged, counted and enumerated** in generated reports, with its status and reason ([#10](https://github.com/michal-hradis/ocr_benchmarking/issues/10)).
+- **Primary default: `empty-output`.** Any failed invocation (timeout, crash, invalid prediction, etc.) is treated **by the evaluator** as an empty prediction for scoring. For CER/WER, its reference text contributes deletions, so failure on a difficult page cannot artificially improve overall accuracy. Other metrics apply their normal empty-prediction conventions, detailed in #8.
+- **Explicit override: `exclude`.** A user may configure an alternate calculation that excludes failed samples from its metric aggregate; this is **not the default primary score**. Any excluded-sample score must be clearly labelled and shown with coverage (scored samples / all benchmark samples), with counts and reasons for failures. Results computed with different failure policies must not be silently compared.
+- **`partial` and `truncated`** samples are scored using the output actually produced (including omissions); their status is retained. If the output cannot be validated as a prediction, record a `failure` instead.
+- **Execution failure is not a successful empty transcription.** The runner records each sample's execution status/reason/provenance even if no valid OCR prediction exists. The evaluator may synthesize an **empty scoring input** for a failure; it must never silently invent or persist a successful OCR result.
+- Every non-`success` sample is **logged, counted and enumerated** in reports. The default/override is stored in the evaluation configuration and versioned score ([#10](https://github.com/michal-hradis/ocr_benchmarking/issues/10)).
 
 ## Later extensions
 

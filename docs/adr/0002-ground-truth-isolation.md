@@ -10,7 +10,7 @@ Ground truth (GT) is PAGE XML containing reference text, region and line geometr
 
 ## Decision
 
-- PAGE XML and all data derived from it stay **host-side**, used only by the dataset reader and the evaluator.
+- PAGE XML and GT-derived data remain available to the **local dataset reader, evaluator and report generator**, all running on the same Linux machine. They are **never sent to OCR inference containers**.
 - An engine container receives only the sample image and an explicit list of **allowed inference metadata**, such as language hints and the sample type. [#7](https://github.com/michal-hradis/ocr_benchmarking/issues/7) defines that list. GT paths, content and GT-derived statistics are never mounted or passed.
 
 ## Alternatives considered
@@ -19,5 +19,5 @@ Ground truth (GT) is PAGE XML containing reference text, region and line geometr
 
 ## Consequences and verification
 
-- The runner mounts only the image and allowed metadata. Runner tests verify that GT paths are absent from the container mounts, environment and arguments.
+- The runner mounts only the image and allowed metadata in an OCR container. Runner tests verify that GT paths/content are absent from container mounts, environment and arguments. Local scoring/reporting may access GT.
 - Treat scanned text and model output as untrusted data.

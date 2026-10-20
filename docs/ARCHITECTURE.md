@@ -4,7 +4,7 @@ This document defines the system boundaries and high-level contracts of the benc
 
 ## Data and execution flow
 
-There are two separate paths. The **inference path** carries only images to the engines. The **reference path** carries ground truth (GT) only to the evaluator.
+Everything runs **locally on one Linux machine**. The OCR inference component runs in an isolated Docker container. The surrounding local application manages images and PAGE XML reference data, runs OCR, evaluates predictions, and produces reports. In the diagram, only the image and permitted inference metadata cross into the OCR container.
 
 ```text
                       dataset manifest (sample id, image path, GT path, metadata)
@@ -39,18 +39,18 @@ There are two separate paths. The **inference path** carries only images to the 
                                    metrics -> reporter
 ```
 
-Ground truth never enters the inference path. The evaluator is the first and only component that sees both predictions and GT.
+**Ground truth never enters an OCR container.** The local dataset reader, evaluator and report generator can access PAGE XML and its derived reference text/geometry as needed. The distinction is an **inference-container boundary**, not separate hosts, servers or permissions between local evaluation and reporting.
 
 ## Responsibilities and interface owners
 
 | Component | Responsibility | Does not | Owner |
 | --- | --- | --- | --- |
-| Dataset manifest and PAGE XML reader | Pair images with GT; validate files, image sizes and geometry; extract reference text, lines, regions and reading order | Pass GT to the runner or engines | [#5](https://github.com/michal-hradis/ocr_benchmarking/issues/5) |
+| Dataset manifest and PAGE XML reader | Pair images with GT; validate files, image sizes and geometry; extract reference text, lines, regions and reading order | Expose GT to OCR inference containers | [#5](https://github.com/michal-hradis/ocr_benchmarking/issues/5) |
 | Engine adapter (container) | Every preprocessing step: resizing, region/line detection, tiling and stitching, plus OCR/HTR and prompting. Emits native output, UTF-8 text and standardized JSON | Read GT; invent geometry | [#11–#17](https://github.com/michal-hradis/ocr_benchmarking/issues/1) |
 | Output contract | Versioned JSON for page text and optional positioned regions and lines; validator | Prescribe how engines segment | [#6](https://github.com/michal-hradis/ocr_benchmarking/issues/6) |
-| Runner and CLI | Launch isolated containers with the image and allowed metadata; record status, provenance and resources; persist outputs | Tile, crop or resize images; mount GT | [#7](https://github.com/michal-hradis/ocr_benchmarking/issues/7) |
+| Runner and CLI | Launch isolated containers with the image and allowed metadata; record status, provenance and resources; persist outputs | Tile, crop or resize images; expose GT to an engine container | [#7](https://github.com/michal-hradis/ocr_benchmarking/issues/7) |
 | Evaluator | Compute ordered and flexible metrics against GT from stored outputs, using a versioned evaluation config | Run engines | [#8](https://github.com/michal-hradis/ocr_benchmarking/issues/8), [#9](https://github.com/michal-hradis/ocr_benchmarking/issues/9) |
-| Reporter | Per-sample and aggregate results, diagnostics, enumerated failures and truncations, provenance | Recompute or alter scores | [#10](https://github.com/michal-hradis/ocr_benchmarking/issues/10) |
+| Reporter | Per-sample and aggregate results, GT-versus-prediction inspection, diagnostics, enumerated failures and truncations, provenance | Recompute or alter scores | [#10](https://github.com/michal-hradis/ocr_benchmarking/issues/10) |
 | Development tooling and base images | Linux Python environment; shared CPU/CUDA base image families | Add CI | [#4](https://github.com/michal-hradis/ocr_benchmarking/issues/4) |
 
 ## Contracts
@@ -63,17 +63,17 @@ Ground truth never enters the inference path. The evaluator is the first and onl
 
 ### Ground-truth isolation ([ADR 0002](adr/0002-ground-truth-isolation.md))
 
-PAGE XML and anything derived from it, such as reference text, line or region geometry and reading order, stays host-side. A container receives only the image and **allowed inference metadata**, for example language hints and the sample type. It never receives GT paths, content or statistics derived from GT. #7 defines the exact allowed-metadata list.
+PAGE XML and derived reference text, region/line geometry and reading order are available to the **local dataset reader, evaluator and reports**. An OCR inference container receives only the image and **allowed inference metadata** (for example language hints and sample type); it never receives GT paths, reference content or statistics derived from GT. #7 defines the allowed-metadata list.
 
 ### Standardized prediction ([ADR 0003](adr/0003-engine-run-output-contract-boundaries.md))
 
-Each engine produces, for every sample:
+For an invocation that **produces a valid OCR prediction**, the engine adapter provides:
 
-1. A required **UTF-8 page transcription** in plain text, with no Markdown or HTML markup.
-2. A **versioned standardized JSON** result. When the engine genuinely localizes text, the JSON contains **typed regions** with positions, and the regions contain **lines** with text, a position and an optional type. Positions refer to pixels of the **original input image**.
-3. The **native outputs**, preserved unchanged, for example TXT, Markdown, HTML, hOCR, PAGE XML and metadata.
+1. Required **UTF-8 page transcription** in plain text, without Markdown or HTML markup.
+2. A **versioned standardized JSON** prediction. If the engine genuinely localizes text, it contains **typed regions** with positions and nested **lines** with text, positions and optional type. Positions refer to pixels of the **original input image**.
+3. The **native outputs** that were produced, preserved unchanged (e.g. TXT, Markdown, HTML, hOCR or PAGE XML).
 
-Image-to-text models without reliable segmentation are first-class participants. They provide page text only and must not invent regions, physical lines or coordinates.
+Image-to-text models without reliable segmentation are first-class participants: keep their page text without inventing regions, physical lines or coordinates. **When inference fails, a separate per-sample execution record with status, reason and provenance is required even if no valid OCR text/JSON result exists.** The evaluator, not the engine, may interpret that failure as an empty prediction for scoring.
 
 ### Execution and reproducibility
 
@@ -86,13 +86,13 @@ Image-to-text models without reliable segmentation are first-class participants.
 
 - **Separate versions.** The output schema, the run configuration and the evaluation configuration (normalization, tokenization, alignment and failure policy) are versioned independently. Every score is identifiable by sample, run and evaluation version.
 - **Raw and normalized output.** The run store keeps native output unchanged, next to the standardized text and JSON derived from it. Evaluator-side normalization is applied at scoring time and is never written back over predictions.
-- **Explicit status per sample:** `success`, `partial`, `truncated` or `failure`, with failure reasons such as a timeout, a crash, empty output or invalid output. Output that fails schema validation is never treated as `success`. #7 finalizes the exact status values and reasons.
-- **Re-evaluation without rerunning models.** The evaluator works only from stored outputs and GT. Changing the evaluation config produces new scores under a new evaluation version, without new inference.
-- **Failure accounting.** [EVALUATION.md](EVALUATION.md#failed-partial-and-truncated-samples) describes how failed, partial and truncated samples are scored.
+- **Execution records and prediction results are separate:** the runner records a status for every sample (`success`, `partial`, `truncated` or `failure`) and a reason for failures, such as a crash, timeout or invalid output. A failure does **not** require fabricating a valid OCR text/JSON result. Output that fails schema validation is never treated as `success`. #7 finalizes status values and failure reasons.
+- **Re-evaluation without rerunning models.** Local evaluation reads stored execution records, available predictions, and PAGE XML ground truth. Changing the evaluation config produces new scores under a new version, without new inference.
+- **Failure accounting.** The primary default is **empty-output**: a failed OCR invocation is scored as an empty prediction, retaining its missing GT text in the score. Explicit configuration may instead **exclude** failures from an alternate metric calculation, always with coverage reported. See [EVALUATION.md](EVALUATION.md#failed-partial-and-truncated-samples).
 
 ## Data
 
-- The initial real development set is **six page images with PAGE XML GT**. It is held **outside this repository** and is referenced by local manifests only.
+- The currently available development set happens to contain **six full-page images with PAGE XML GT**, held outside this repository. The architecture and ordinary automated tests do **not** assume six samples, page-only content, or access to these files.
 - Automated tests use small, redistributable synthetic fixtures.
 - Selecting, acquiring, reviewing licenses for or splitting additional datasets is **not part of the current backlog**. A manifest may carry split labels as metadata, but they are not required.
 
@@ -111,6 +111,6 @@ The issues below own these choices. The architecture deliberately leaves them un
 | Container invocation, I/O mount protocol, per-sample versus batch lifecycle, allowed-metadata list, final status vocabulary | [#7](https://github.com/michal-hradis/ocr_benchmarking/issues/7) |
 | Unicode normalization, grapheme handling, word tokenization, edit-count and empty-case definitions | [#8](https://github.com/michal-hradis/ocr_benchmarking/issues/8) |
 | Flexible matching algorithm, split/merge accounting, candidate retrieval, treatment of unmatched predictions | [#9](https://github.com/michal-hradis/ocr_benchmarking/issues/9) |
-| Report layout and formats; default failure-scoring variant shown first | [#10](https://github.com/michal-hradis/ocr_benchmarking/issues/10) |
+| Report layout and formats; primary empty-output score, optional exclude view, and coverage/failure displays | [#10](https://github.com/michal-hradis/ocr_benchmarking/issues/10) |
 
 Development and testing rules are in [CONTRIBUTING.md](../CONTRIBUTING.md).
