@@ -164,9 +164,15 @@ class _Reader:
             return None
 
         self.check_duplicate_ids(page)
-        regions = self.collect_regions(page, parent_id=None)
-        ordered, source = self.order_regions(page, regions)
-        reference = tuple(self.reference_lines(ordered))
+        regions: list[TextRegion] = []
+        parents: list[int | None] = []  # parent position in `regions`; PAGE ids may be missing
+        self.collect_regions(page, None, regions, parents)
+        children: dict[int | None, list[int]] = {}
+        for index, parent in enumerate(parents):
+            children.setdefault(parent, []).append(index)
+        order, source = self.order_regions(page, regions, children)
+        reference = tuple(self.reference_lines(order, regions, children))
+        ordered = [regions[i] for i in order]
         if not reference:
             self.issue(Severity.WARNING, "no-reference-text", "the page has no reference text")
         self.check_bounds(ordered, width, height)
@@ -191,17 +197,22 @@ class _Reader:
                     element_id,
                 )
 
-    def collect_regions(self, element: ET.Element, parent_id: str | None) -> list[TextRegion]:
+    def collect_regions(
+        self,
+        element: ET.Element,
+        parent: int | None,
+        regions: list[TextRegion],
+        parents: list[int | None],
+    ) -> None:
         """All TextRegions in document order, including nested ones and table cells."""
-        regions: list[TextRegion] = []
         for child in element:
             if _local(child.tag) == "TextRegion":
-                region = self.region(child, parent_id)
-                regions.append(region)
-                regions.extend(self.collect_regions(child, region.id))
+                parent_id = regions[parent].id if parent is not None else None
+                regions.append(self.region(child, parent_id))
+                parents.append(parent)
+                self.collect_regions(child, len(regions) - 1, regions, parents)
             elif _local(child.tag) not in {"TextLine", "ReadingOrder"}:
-                regions.extend(self.collect_regions(child, parent_id))
-        return regions
+                self.collect_regions(child, parent, regions, parents)
 
     def region(self, element: ET.Element, parent_id: str | None) -> TextRegion:
         region_id = element.get("id", "")
@@ -250,8 +261,9 @@ class _Reader:
         return lines
 
     def order_regions(
-        self, page: ET.Element, regions: list[TextRegion]
-    ) -> tuple[list[TextRegion], Literal["page", "document"]]:
+        self, page: ET.Element, regions: list[TextRegion], children: dict[int | None, list[int]]
+    ) -> tuple[list[int], Literal["page", "document"]]:
+        """Positions of `regions` in reading order."""
         reading_order = self.child(page, "ReadingOrder")
         if reading_order is None:
             self.issue(
@@ -259,13 +271,16 @@ class _Reader:
                 "no-reading-order",
                 "no ReadingOrder element; using document order of regions",
             )
-            return regions, "document"
+            return list(range(len(regions))), "document"
 
-        by_id = {r.id: r for r in regions if r.id}
+        by_id: dict[str, int] = {}
+        for index, region in enumerate(regions):
+            if region.id:
+                by_id.setdefault(region.id, index)
         all_ids = {e.get("id") for e in page.iter()}
-        referenced: dict[str, None] = {}  # insertion-ordered set
+        referenced: dict[int, None] = {}  # insertion-ordered set of positions
         for ref in self.walk_group(reading_order):
-            if ref in referenced:
+            if ref in by_id and by_id[ref] in referenced:
                 self.issue(
                     Severity.WARNING,
                     "duplicate-reading-order-ref",
@@ -273,7 +288,7 @@ class _Reader:
                     ref,
                 )
             elif ref in by_id:
-                referenced[ref] = None
+                referenced[by_id[ref]] = None
             elif ref not in all_ids:
                 self.issue(
                     Severity.WARNING,
@@ -283,24 +298,23 @@ class _Reader:
                 )
             # references to non-text regions (images, separators) are legitimate and ignored
 
-        children: dict[str | None, list[TextRegion]] = {}
-        for region in regions:
-            children.setdefault(region.parent_id, []).append(region)
-        ordered: list[TextRegion] = []
-        placed: set[int] = set()  # object ids: regions without @id must not collide
+        ordered: list[int] = []
+        placed: set[int] = set()
 
-        def place(region: TextRegion) -> None:
-            ordered.append(region)
-            placed.add(id(region))
+        def place(index: int) -> None:
+            if index in placed:
+                return
+            ordered.append(index)
+            placed.add(index)
             # nested regions without their own position follow their parent
-            for child in children.get(region.id, []):
-                if child.id not in referenced:
+            for child in children.get(index, []):
+                if child not in referenced:
                     place(child)
 
-        for ref in referenced:
-            place(by_id[ref])
-        for region in regions:
-            if id(region) not in placed:
+        for index in referenced:
+            place(index)
+        for index, region in enumerate(regions):
+            if index not in placed:
                 if region.text or any(line.text for line in region.lines):
                     self.issue(
                         Severity.WARNING,
@@ -308,7 +322,7 @@ class _Reader:
                         "text region is missing from ReadingOrder; appended at the end",
                         region.id,
                     )
-                place(region)
+                place(index)
         return ordered, "page"
 
     def walk_group(self, element: ET.Element) -> Iterator[str]:
@@ -341,9 +355,22 @@ class _Reader:
             else:
                 yield from self.walk_group(member)
 
-    def reference_lines(self, regions: Iterable[TextRegion]) -> Iterator[ReferenceLine]:
-        """Line text where any line has text; region text only as a fallback. Never both."""
-        for region in regions:
+    def reference_lines(
+        self, order: list[int], regions: list[TextRegion], children: dict[int | None, list[int]]
+    ) -> Iterator[ReferenceLine]:
+        """Line text where any line has text; region text only as a fallback. Never both.
+
+        A region's own TextEquiv is a fallback for its whole subtree: it is used only when
+        neither its lines nor any nested region provide text, since it usually aggregates them.
+        """
+        has_text = [_has_text(region.text) for region in regions]
+        subtree = [False] * len(regions)  # the region's lines or nested regions provide text
+        for index in reversed(range(len(regions))):  # nested regions follow their parents
+            own = any(_has_text(line.text) for line in regions[index].lines)
+            nested = any(subtree[c] or has_text[c] for c in children.get(index, []))
+            subtree[index] = own or nested
+        for index in order:
+            region = regions[index]
             with_text = [line for line in region.lines if line.text and line.text.strip()]
             for line in region.lines:
                 if not (line.text and line.text.strip()):
@@ -353,18 +380,19 @@ class _Reader:
                         "TextLine has no text; skipped in the reference",
                         line.id or region.id,
                     )
-            if with_text:
-                if region.text and region.text.strip():
+            for line in with_text:
+                yield ReferenceLine(line.text or "", region.id, line.id, line.coords)
+            if has_text[index]:
+                if subtree[index]:
                     self.issue(
                         Severity.INFO,
                         "region-text-ignored",
-                        "region-level TextEquiv ignored because its lines have text",
+                        "region-level TextEquiv ignored because its lines or nested regions "
+                        "have text",
                         region.id,
                     )
-                for line in with_text:
-                    yield ReferenceLine(line.text or "", region.id, line.id, line.coords)
-            elif region.text and region.text.strip():
-                yield ReferenceLine(region.text, region.id, None, region.coords)
+                else:
+                    yield ReferenceLine(region.text or "", region.id, None, region.coords)
 
     def check_bounds(self, regions: Iterable[TextRegion], width: int, height: int) -> None:
         outside, first = 0, None
@@ -383,6 +411,10 @@ class _Reader:
                 f"{outside} point(s) outside the {width}x{height} image; kept as annotated",
                 first,
             )
+
+
+def _has_text(text: str | None) -> bool:
+    return bool(text and text.strip())
 
 
 def read_page_xml(path: Path, sample_id: str | None = None) -> tuple[PageGT | None, list[Issue]]:
