@@ -28,7 +28,25 @@ Do not push directly to `main` or silently change an agreed metric, schema, or c
 
 Add regression tests for changed behavior. Normal developer tests should use synthetic deterministic fixtures without downloading models or requiring GPUs, paid APIs or external data. Real inference and the separately held six-image development set require deliberate, authorized invocation; if unavailable, report that limitation instead of claiming a pass.
 
-Do not add CI workflows or a universal full-suite PR gate as part of unrelated changes. Once [#4](https://github.com/michal-hradis/ocr_benchmarking/issues/4) implements tooling, document actual supported commands here.
+Do not add CI workflows or a universal full-suite PR gate as part of unrelated changes.
+
+## Development setup and commands
+
+Requirements: Linux, `make`, and [uv](https://docs.astral.sh/uv/) ≥ 0.13 (for example `pip install --user uv`). uv downloads Python 3.12 if the host lacks it; the host Python is not modified.
+
+```sh
+make setup   # create .venv from uv.lock
+make check   # ruff lint + format check, then offline unit tests
+```
+
+| Command | Purpose |
+| --- | --- |
+| `make lint` / `make format` | Ruff check and format check / apply fixes and formatting |
+| `make test` | Offline unit tests; select tests with `ARGS`, e.g. `make test ARGS="tests/test_package.py -k version"` |
+| `make docker-cpu`, `make docker-cu130-torch` | Build base images |
+| `make docker-smoke`, `make gpu-preflight`, `make gpu-smoke` | Opt-in Docker and GPU checks, see [docs/DOCKER.md](docs/DOCKER.md) |
+
+`make help` lists all targets. Unit tests run with network sockets disabled (`pytest-socket`). Tests that need Docker or a GPU are marked `docker` / `gpu` and run only with `--run-docker` / `--run-gpu`. Add dependencies with `uv add` (or `uv add --dev`) so that `uv.lock` is updated in the same PR. Fixture rules are in [tests/fixtures/README.md](tests/fixtures/README.md).
 
 ## Data and runtime hygiene
 

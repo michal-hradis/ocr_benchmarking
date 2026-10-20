@@ -9,6 +9,7 @@ Create short ADRs for agreed cross-engine decisions, including output schema, co
 | [0001: Image-only samples and engine-owned preprocessing](0001-image-only-samples-engine-owned-preprocessing.md) | accepted |
 | [0002: Ground-truth isolation from inference](0002-ground-truth-isolation.md) | accepted |
 | [0003: Engine, run and output contract boundaries](0003-engine-run-output-contract-boundaries.md) | accepted |
+| [0004: Docker base image families](0004-docker-base-image-families.md) | proposed |
 
 ## Conventions
 

@@ -79,7 +79,7 @@ Image-to-text models without reliable segmentation are first-class participants:
 
 - A common Python orchestrator runs on **Linux** and starts one isolated Docker environment per engine. Engines may share a pinned CPU or CUDA base image family **only when their dependencies are compatible**.
 - Both CPU and NVIDIA GPU execution are supported. A single RTX 4090 is a primary target.
-- Engine code, image digests and model revisions are pinned.
+- Engine code, image digests and model revisions are pinned. Base image families and engine image conventions are in [DOCKER.md](DOCKER.md) ([ADR 0004](adr/0004-docker-base-image-families.md)).
 - Each run records a **frozen run configuration**: engine and model versions, prompts and language hints, preprocessing settings, hardware, token and output limits, and timeouts.
 
 ### Versioning, status and re-evaluation

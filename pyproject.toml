@@ -1,0 +1,38 @@
+[project]
+name = "ocrbench"
+version = "0.0.0"
+description = "Benchmark OCR/HTR engines on page images against PAGE XML ground truth"
+readme = "README.md"
+requires-python = ">=3.12,<3.13"
+dependencies = []
+
+[dependency-groups]
+dev = [
+    "pytest==9.1.1",
+    "pytest-socket==0.8.1",
+    "ruff==0.17.1",
+]
+
+[build-system]
+requires = ["uv_build>=0.13.4,<0.14"]
+build-backend = "uv_build"
+
+[tool.uv]
+required-version = ">=0.13"
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP", "SIM", "PT"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+# Unit tests are offline: sockets are disabled unless a test is explicitly marked.
+addopts = ["--strict-markers", "--disable-socket", "--allow-unix-socket"]
+markers = [
+    "docker: builds or runs Docker images; opt in with --run-docker",
+    "gpu: needs an NVIDIA GPU in Docker; opt in with --run-gpu",
+]
