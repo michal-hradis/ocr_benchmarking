@@ -27,11 +27,13 @@ test:  ## Offline unit tests (no GPU, Docker, network or model downloads); pass 
 
 check: lint test  ## lint + test
 
-docker-cpu:  ## Build the CPU base image
+docker-cpu:  ## Build the CPU base image and print its image ID
 	docker build -t $(CPU_IMAGE) docker/base-cpu
+	@docker image inspect --format '$(CPU_IMAGE) {{.Id}}' $(CPU_IMAGE)
 
 docker-cu130-torch:  ## Build the CUDA 13.0 + torch base image (multi-GB download)
 	docker build -t $(CU130_TORCH_IMAGE) docker/base-cu130-torch
+	@docker image inspect --format '$(CU130_TORCH_IMAGE) {{.Id}}' $(CU130_TORCH_IMAGE)
 
 docker-lock:  ## Re-lock the hashed torch requirements for the CUDA image
 	$(UV) pip compile docker/base-cu130-torch/requirements.in \
@@ -40,7 +42,7 @@ docker-lock:  ## Re-lock the hashed torch requirements for the CUDA image
 		--generate-hashes --no-header --custom-compile-command "make docker-lock" \
 		-o docker/base-cu130-torch/requirements.txt
 
-docker-smoke:  ## Smoke-test built base images without a GPU (opt-in)
+docker-smoke:  ## Smoke-test built bases and a derived CPU image without a GPU (opt-in)
 	$(UV) run --locked pytest -m docker --run-docker tests/test_docker_images.py
 
 gpu-preflight:  ## Check host driver, Docker and NVIDIA Container Toolkit

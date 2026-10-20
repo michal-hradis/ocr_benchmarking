@@ -1,5 +1,6 @@
 """Static conventions for base Dockerfiles, plus opt-in smoke runs of built images."""
 
+import json
 import os
 import re
 import subprocess
@@ -7,8 +8,16 @@ from pathlib import Path
 
 import pytest
 
-DOCKER_DIR = Path(__file__).resolve().parents[1] / "docker"
-DOCKERFILES = sorted(DOCKER_DIR.glob("*/Dockerfile"))
+ROOT = Path(__file__).resolve().parents[1]
+DOCKER_DIR = ROOT / "docker"
+DERIVED_CPU_DIR = ROOT / "tests" / "fixtures" / "derived-cpu"
+# Every Dockerfile in the repository, so future engine images are checked too.
+DOCKERFILES = sorted(
+    p for p in ROOT.rglob("Dockerfile") if not {".venv", ".git"} & set(p.relative_to(ROOT).parts)
+)
+# Locally built shared bases are referenced by an immutable versioned tag (docs/DOCKER.md).
+LOCAL_BASE_REF = re.compile(r"^ocrbench/base-[a-z0-9-]+:[A-Za-z0-9._-]+-v[0-9]+$")
+DIGEST_REF = re.compile(r"@sha256:[0-9a-f]{64}$")
 CPU_IMAGE = os.environ.get("CPU_IMAGE", "ocrbench/base-cpu:py3.12-v1")
 CU130_TORCH_IMAGE = os.environ.get(
     "CU130_TORCH_IMAGE", "ocrbench/base-cu130-torch:torch2.14.1-py3.12-v1"
@@ -19,16 +28,33 @@ def test_base_dockerfiles_exist():
     assert {p.parent.name for p in DOCKERFILES} >= {"base-cpu", "base-cu130-torch"}
 
 
-@pytest.mark.parametrize("dockerfile", DOCKERFILES, ids=lambda p: p.parent.name)
-def test_external_images_are_pinned_by_digest(dockerfile):
+@pytest.mark.parametrize("dockerfile", DOCKERFILES, ids=lambda p: str(p.parent.relative_to(ROOT)))
+def test_parent_images_are_pinned(dockerfile):
     text = dockerfile.read_text()
     refs = re.findall(r"^FROM\s+(\S+)", text, re.M) + re.findall(r"COPY\s+--from=(\S+)", text)
     assert refs
     for ref in refs:
-        assert re.search(r"@sha256:[0-9a-f]{64}$", ref), f"{ref} is not pinned by digest"
+        assert DIGEST_REF.search(ref) or LOCAL_BASE_REF.match(ref), (
+            f"{ref}: external images need @sha256 digests; local bases need ocrbench/base-*:...-vN"
+        )
 
 
-@pytest.mark.parametrize("dockerfile", DOCKERFILES, ids=lambda p: p.parent.name)
+@pytest.mark.parametrize(
+    ("ref", "ok"),
+    [
+        ("ocrbench/base-cpu:py3.12-v1", True),
+        ("ocrbench/base-cu130-torch:torch2.14.1-py3.12-v12", True),
+        ("ocrbench/base-cpu:latest", False),
+        ("ocrbench/base-cpu", False),
+        ("python:3.12-slim", False),
+        ("evil/base-cpu:py3.12-v1", False),
+    ],
+)
+def test_local_base_reference_rule(ref, ok):
+    assert bool(LOCAL_BASE_REF.match(ref)) is ok
+
+
+@pytest.mark.parametrize("dockerfile", DOCKERFILES, ids=lambda p: str(p.parent.relative_to(ROOT)))
 def test_final_user_is_not_root(dockerfile):
     users = re.findall(r"^USER\s+(\S+)", dockerfile.read_text(), re.M)
     assert users
@@ -56,6 +82,38 @@ def test_image_runs_offline_as_non_root(image):
     uid, version = out.split(" ", 1)
     assert uid != "0"
     assert version.strip() == "(3, 12)"
+
+
+def _layers(image):
+    out = subprocess.run(
+        ["docker", "image", "inspect", "--format", "{{json .RootFS.Layers}}", image],
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout
+    return json.loads(out)
+
+
+@pytest.mark.docker
+def test_derived_engine_image_inherits_local_base():
+    tag = "ocrbench-test/derived-cpu:smoke"
+    subprocess.run(
+        ["docker", "build", "-q", "-t", tag, str(DERIVED_CPU_DIR)],
+        capture_output=True,
+        text=True,
+        timeout=600,
+        check=True,
+    )
+    try:
+        base = re.search(r"^FROM\s+(\S+)", (DERIVED_CPU_DIR / "Dockerfile").read_text(), re.M)[1]
+        base_layers = _layers(base)
+        assert _layers(tag)[: len(base_layers)] == base_layers
+        out = _run_in(tag, "import os; print(os.getuid(), open('/opt/ocrbench-derived').read())")
+        uid, marker = out.split(" ", 1)
+        assert uid != "0"
+        assert marker.strip() == "derived-cpu fixture"
+    finally:
+        subprocess.run(["docker", "image", "rm", "-f", tag], capture_output=True, check=False)
 
 
 @pytest.mark.docker
