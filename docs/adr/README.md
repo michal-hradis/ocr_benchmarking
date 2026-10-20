@@ -11,6 +11,7 @@ Create short ADRs for agreed cross-engine decisions, including output schema, co
 | [0003: Engine, run and output contract boundaries](0003-engine-run-output-contract-boundaries.md) | accepted |
 | [0004: Docker base image families](0004-docker-base-image-families.md) | proposed |
 | [0005: PAGE XML reference extraction and dataset manifests](0005-page-xml-reference-extraction.md) | proposed |
+| [0006: Standardized prediction format and host-side conversion](0006-standardized-prediction-format.md) | proposed |
 
 ## Conventions
 

@@ -1,14 +1,24 @@
-"""Command-line interface: ``ocrbench dataset validate|text``."""
+"""Command-line interface: ``ocrbench dataset validate|text``, ``prediction validate|convert``."""
 
 from __future__ import annotations
 
 import argparse
+import json
 import sys
 from collections.abc import Sequence
 from pathlib import Path
 
-from ocrbench.issues import Severity
+from PIL import Image
+
+from ocrbench.convert import FORMATS, SUFFIXES, convert_native
+from ocrbench.issues import Issue, Severity
 from ocrbench.manifest import load_manifest, validate_dataset, validate_sample
+from ocrbench.prediction import (
+    Prediction,
+    load_prediction,
+    prediction_to_json,
+    validate_prediction,
+)
 
 
 def _validate(args: argparse.Namespace) -> int:
@@ -55,6 +65,50 @@ def _text(args: argparse.Namespace) -> int:
     return 0
 
 
+def _finish_prediction(
+    prediction: Prediction | None, issues: list[Issue], args: argparse.Namespace
+) -> int:
+    for issue in issues:
+        if args.verbose or issue.severity is not Severity.INFO:
+            print(issue.format(), file=sys.stderr)
+    if prediction is None:
+        print("invalid prediction", file=sys.stderr)
+        return 1
+    if args.output:
+        text = json.dumps(prediction_to_json(prediction), ensure_ascii=False, indent=1)
+        args.output.write_text(text + "\n", encoding="utf-8")
+    return 0
+
+
+def _prediction_validate(args: argparse.Namespace) -> int:
+    size = None
+    if args.image:
+        with Image.open(args.image) as image:  # reads the header only
+            size = image.size
+    prediction, issues = load_prediction(args.prediction, sample_id=args.sample_id, image_size=size)
+    return _finish_prediction(prediction, issues, args)
+
+
+def _prediction_convert(args: argparse.Namespace) -> int:
+    source_format = args.source_format or SUFFIXES.get(args.native.suffix.lower())
+    if source_format is None:
+        print(f"error: cannot infer the format of {args.native}; use --from", file=sys.stderr)
+        return 1
+    try:
+        content = args.native.read_bytes().decode("utf-8")
+    except UnicodeDecodeError as error:
+        print(f"error: {args.native} is not UTF-8: {error}", file=sys.stderr)
+        return 1
+    data = convert_native(content, source_format, args.sample_id)
+    prediction, issues = validate_prediction(
+        data, sample_id=args.sample_id, location=args.native.name
+    )
+    status = _finish_prediction(prediction, issues, args)
+    if status == 0 and not args.output:
+        print(json.dumps(prediction_to_json(prediction), ensure_ascii=False, indent=1))
+    return status
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="ocrbench", description="OCR/HTR benchmark tools")
     commands = parser.add_subparsers(dest="command", required=True)
@@ -71,6 +125,29 @@ def build_parser() -> argparse.ArgumentParser:
     text.add_argument("sample_id")
     text.add_argument("--ids", action="store_true", help="prefix region and line ids")
     text.set_defaults(handler=_text)
+
+    prediction = commands.add_parser("prediction", help="standardized OCR prediction JSON")
+    actions = prediction.add_subparsers(dest="action", required=True)
+
+    check = actions.add_parser("validate", help="check a prediction JSON file")
+    check.add_argument("prediction", type=Path)
+    check.add_argument("--image", type=Path, help="sample image, to check the declared size")
+    check.add_argument("--sample-id", help="expected sample ID")
+    check.add_argument("-o", "--output", type=Path, help="write the standardized prediction")
+    check.add_argument("-v", "--verbose", action="store_true", help="also list info findings")
+    check.set_defaults(handler=_prediction_validate)
+
+    convert = actions.add_parser(
+        "convert", help="convert native text, Markdown or HTML output into a prediction"
+    )
+    convert.add_argument("native", type=Path)
+    convert.add_argument("--sample-id", required=True)
+    convert.add_argument(
+        "--from", dest="source_format", choices=FORMATS, help="default: from the file suffix"
+    )
+    convert.add_argument("-o", "--output", type=Path, help="default: print to stdout")
+    convert.add_argument("-v", "--verbose", action="store_true", help="also list info findings")
+    convert.set_defaults(handler=_prediction_convert)
     return parser
 
 

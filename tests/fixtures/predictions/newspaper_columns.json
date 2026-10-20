@@ -1,0 +1,44 @@
+{
+  "format": "ocrbench.prediction",
+  "version": 1,
+  "sample_id": "columns_2019",
+  "image": {"width": 400, "height": 300},
+  "text": "Die Zeitung\n\nerste Zeile\nzweite Zeile\n\nDer Krieg.\nEnde ſchön\n\nE = mc^2",
+  "regions": [
+    {
+      "id": "r_right",
+      "type": "text",
+      "native_type": "paragraph",
+      "polygon": [[210, 60], [390, 60], [390, 200], [210, 200]],
+      "lines": [
+        {"id": "l_right_1", "text": "Der Krieg.", "polygon": [[210, 60], [390, 60], [390, 80], [210, 80]], "baseline": [[210, 76], [390, 76]], "confidence": 0.93},
+        {"id": "l_right_2", "text": "Ende ſchön", "polygon": [[210, 85], [405, 85], [405, 105], [210, 105]]}
+      ]
+    },
+    {
+      "id": "r_head",
+      "type": "heading",
+      "native_type": "title",
+      "polygon": [[10, 10], [390, 10], [390, 50], [10, 50]],
+      "lines": [{"id": "l_head", "text": "Die Zeitung"}]
+    },
+    {
+      "id": "r_left",
+      "type": "text",
+      "polygon": [[10, 60], [190, 60], [190, 200], [10, 200]],
+      "lines": [
+        {"id": "l_left_1", "type": "handwritten", "text": "erste Zeile", "polygon": [[10, 60], [190, 60], [190, 80], [10, 80]]},
+        {"id": "l_left_2", "text": "zweite Zeile", "polygon": [[10, 85], [190, 85], [190, 105], [10, 105]]}
+      ]
+    },
+    {
+      "id": "r_formula",
+      "type": "formula",
+      "polygon": [[10, 220], [190, 220], [190, 250], [10, 250]],
+      "text": "E = mc^2"
+    },
+    {"id": "r_photo", "type": "figure", "polygon": [[210, 220], [390, 220], [390, 290], [210, 290]]}
+  ],
+  "reading_order": ["r_head", "r_left", "r_right", "r_formula", "r_photo"],
+  "extra": {"engine_note": "synthetic fixture"}
+}

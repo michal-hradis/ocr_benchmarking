@@ -1,0 +1,87 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/michal-hradis/ocr_benchmarking/blob/main/src/ocrbench/schemas/prediction-v1.schema.json",
+  "title": "ocrbench standardized OCR prediction, version 1",
+  "description": "Structure only. Cross-field rules (unique IDs, reading-order references, text agreement, image bounds) are checked by ocrbench.prediction and documented in docs/PREDICTIONS.md.",
+  "type": "object",
+  "required": ["format", "version", "sample_id", "text"],
+  "additionalProperties": false,
+  "properties": {
+    "format": { "const": "ocrbench.prediction" },
+    "version": { "const": 1 },
+    "sample_id": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$" },
+    "image": {
+      "description": "Size of the original input image; required when any position is given.",
+      "type": "object",
+      "required": ["width", "height"],
+      "additionalProperties": false,
+      "properties": {
+        "width": { "type": "integer", "minimum": 1 },
+        "height": { "type": "integer", "minimum": 1 }
+      }
+    },
+    "text": { "description": "Plain UTF-8 page transcription.", "type": "string" },
+    "regions": { "type": "array", "items": { "$ref": "#/$defs/region" } },
+    "reading_order": {
+      "description": "Region IDs in reading order. Absent means no explicit reading order.",
+      "type": "array",
+      "items": { "$ref": "#/$defs/id" }
+    },
+    "conversion": {
+      "description": "Set when the prediction was converted on the host from a native output.",
+      "type": "object",
+      "required": ["from", "version"],
+      "additionalProperties": false,
+      "properties": {
+        "from": { "enum": ["text", "markdown", "html"] },
+        "version": { "type": "integer", "minimum": 1 }
+      }
+    },
+    "extra": { "$ref": "#/$defs/extra" }
+  },
+  "$defs": {
+    "id": { "type": "string", "minLength": 1, "maxLength": 256 },
+    "label": { "type": "string", "minLength": 1, "maxLength": 256 },
+    "extra": {
+      "description": "Engine-specific data; never used by metrics.",
+      "type": "object"
+    },
+    "point": {
+      "type": "array",
+      "prefixItems": [{ "type": "number" }, { "type": "number" }],
+      "minItems": 2,
+      "maxItems": 2
+    },
+    "polygon": { "type": "array", "items": { "$ref": "#/$defs/point" }, "minItems": 3 },
+    "polyline": { "type": "array", "items": { "$ref": "#/$defs/point" }, "minItems": 2 },
+    "region": {
+      "type": "object",
+      "required": ["id"],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "$ref": "#/$defs/id" },
+        "type": { "$ref": "#/$defs/label" },
+        "native_type": { "$ref": "#/$defs/label" },
+        "polygon": { "$ref": "#/$defs/polygon" },
+        "text": { "type": "string" },
+        "lines": { "type": "array", "items": { "$ref": "#/$defs/line" } },
+        "confidence": { "type": "number" },
+        "extra": { "$ref": "#/$defs/extra" }
+      }
+    },
+    "line": {
+      "type": "object",
+      "required": ["text"],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "$ref": "#/$defs/id" },
+        "type": { "$ref": "#/$defs/label" },
+        "text": { "type": "string" },
+        "polygon": { "$ref": "#/$defs/polygon" },
+        "baseline": { "$ref": "#/$defs/polyline" },
+        "confidence": { "type": "number" },
+        "extra": { "$ref": "#/$defs/extra" }
+      }
+    }
+  }
+}
