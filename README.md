@@ -2,7 +2,7 @@
 
 Compare OCR and handwritten text recognition (HTR) systems on **raster images of books, magazines and newspapers**, particularly complex and historical prints.
 
-**Project status:** documentation and initial implementation planning. The Python runner, evaluation code, Docker images and CLI commands described below are *not yet implemented*.
+**Project status:** early implementation. Python project tooling and shared CPU/CUDA Docker base images exist ([setup](CONTRIBUTING.md#development-setup-and-commands), [Docker](docs/DOCKER.md)). The runner, engine adapters, evaluation code and CLI commands described below are *not yet implemented*.
 
 ## Use cases
 
@@ -30,7 +30,7 @@ ocrbench evaluate --run <run-id>
 ocrbench report --run <run-id>
 ```
 
-Linux is the target platform, with per-engine Docker environments (shared CUDA/CPU bases where compatible) and an RTX 4090 as a primary GPU test device. Development setup will be introduced in [#4](https://github.com/michal-hradis/ocr_benchmarking/issues/4). Consult [CONTRIBUTING.md](CONTRIBUTING.md) for the testing and PR policy.
+Linux is the target platform, with per-engine Docker environments (shared CUDA/CPU bases where compatible, see [docs/DOCKER.md](docs/DOCKER.md)) and an RTX 4090 as a primary GPU test device. Consult [CONTRIBUTING.md](CONTRIBUTING.md) for the testing and PR policy.
 
 ## Documentation and work
 
