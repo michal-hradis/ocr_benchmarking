@@ -1,6 +1,16 @@
 # Architecture decision records (ADRs)
 
-Create short ADRs for agreed cross-engine decisions, including output schema, coordinate conventions, scoring normalization/alignment, and Docker engine interfaces. [#3](https://github.com/michal-hradis/ocr_benchmarking/issues/3) will establish the first formal decisions.
+Create short ADRs for agreed cross-engine decisions, including output schema, coordinate conventions, scoring normalization/alignment, and Docker engine interfaces.
+
+## Records
+
+| ADR | Status |
+| --- | --- |
+| [0001: Image-only samples and engine-owned preprocessing](0001-image-only-samples-engine-owned-preprocessing.md) | accepted |
+| [0002: Ground-truth isolation from inference](0002-ground-truth-isolation.md) | accepted |
+| [0003: Engine, run and output contract boundaries](0003-engine-run-output-contract-boundaries.md) | accepted |
+
+## Conventions
 
 - Name records `0001-short-decision.md`, `0002-next-decision.md`, etc.
 - Include **status** (proposed/accepted/superseded), date, context, decision, alternatives, consequences, and links to the motivating issues/PRs.

@@ -17,7 +17,7 @@ For initial development, there is a **small, separately held set of six images w
 
 ## Planned outputs and scoring
 
-Engines provide UTF-8 transcription plus versioned JSON with optional typed, positioned regions and nested text lines; native OCR outputs are retained. Initial metrics will include CER/WER (including flexible line/chunk alignment), bag-of-words precision/recall/F1 and ROUGE-2. Details are to be finalized in [contract issues #3–#9](https://github.com/michal-hradis/ocr_benchmarking/issues/1).
+Engines provide UTF-8 transcription plus versioned JSON with optional typed, positioned regions and nested text lines; native OCR outputs are retained. Initial metrics will include CER/WER (including flexible line/chunk alignment), bag-of-words precision/recall/F1 and ROUGE-2. See [evaluation](docs/EVALUATION.md) for the metric families; exact definitions are owned by [roadmap](https://github.com/michal-hradis/ocr_benchmarking/issues/1) issues #5–#9.
 
 ## Quick start (planned)
 
@@ -38,7 +38,7 @@ Linux is the target platform, with per-engine Docker environments (shared CUDA/C
 - [Contributing](CONTRIBUTING.md) — development, selective verification and PR rules.
 - [Agent instructions](AGENTS.md) — additional guidance for coding agents.
 - [Issue workflow](docs/ISSUE_WORKFLOW.md) — define and refine implementation-ready work.
-- [Architecture](docs/ARCHITECTURE.md) and [ADR index](docs/adr/README.md) — component boundaries and recorded decisions.
+- [Architecture](docs/ARCHITECTURE.md), [evaluation](docs/EVALUATION.md) and [ADR index](docs/adr/README.md) — component boundaries, metric families and recorded decisions.
 - [Work index](docs/TODO.md) and [roadmap #1](https://github.com/michal-hradis/ocr_benchmarking/issues/1) — issue dependencies and priorities.
 
 The development workflow is inspired by [DCGM/semant-demo](https://github.com/DCGM/semant-demo), especially its [AGENTS.md](https://github.com/DCGM/semant-demo/blob/main/AGENTS.md) and [issue workflow](https://github.com/DCGM/semant-demo/blob/main/docs/ISSUE_WORKFLOW.md); its application architecture and CI workflow are not copied.
