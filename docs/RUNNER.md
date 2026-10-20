@@ -106,7 +106,7 @@ The runner decides the final status of every sample. The engine's claim is accep
 
 **Restarts.** After a timeout or a crash, only the sample in progress fails: the first unfinished sample in job order. A new container then continues with the remaining samples. If the container cannot start at all (Docker exit status 125–127 before any sample finishes), the run stops with an error and the samples stay pending.
 
-A sample without any record is **pending**, for example after Ctrl-C. Pending samples are processed by `resume`. A failure is never turned into an empty successful transcript; how the evaluator scores failures is defined in [EVALUATION.md](EVALUATION.md#failed-partial-and-truncated-samples).
+A sample without any record is **pending**, for example after Ctrl-C. Pending samples are processed by `resume`. A failure is never turned into an empty successful transcript; how the evaluator scores failures is defined in [EVALUATION.md](EVALUATION.md#failed-partial-and-truncated-samples). `ocrbench evaluate` refuses runs with pending samples.
 
 ## Run directory
 
@@ -123,9 +123,10 @@ runs/<run-id>/
     output/                     the engine's sample directory, unchanged
     prediction.json             standardized prediction (valid outputs only)
     prediction.txt              its page text, UTF-8
+  evaluations/<n>/scores.json   scores of one `ocrbench evaluate` ([EVALUATION.md](EVALUATION.md#command-and-stored-scores))
 ```
 
-- `run.json` records the engine configuration and its hash, the resolved image ID, the manifest path and hash, and the ocrbench version. It also records the host (platform, CPU count, memory, Docker version and, for GPU engines, the GPU names) and, for every sample, the image path, SHA-256 and size, the exact job entry passed to the engine, and the GT path and SHA-256 (`gt`, `gt_sha256`). When the GT cannot be read, or does not match `gt_sha256` in the manifest, `gt_sha256` is `null` and `gt_error` says why; OCR still runs, because it never needs GT. The GT fields stay on the host and never reach `job.json` or the container.
+- `run.json` records the engine configuration and its hash, the resolved image ID, the manifest path and hash, and the ocrbench version. It also records the host (platform, CPU count, memory, Docker version and, for GPU engines, the GPU names) and, for every sample, the image path, SHA-256 and size, the exact job entry passed to the engine, the GT path and SHA-256 (`gt`, `gt_sha256`), and the manifest `doc_type` for evaluation strata. When the GT cannot be read, or does not match `gt_sha256` in the manifest, `gt_sha256` is `null` and `gt_error` says why; OCR still runs, because it never needs GT. The GT fields stay on the host and never reach `job.json` or the container; `doc_type` reaches the job only when the configuration enables it.
 - Scoring must compare predictions only against the GT frozen with the run. `ocrbench.runner.verify_ground_truth` reports `gt-changed`, `gt-unreadable` and `gt-unpinned` samples, and `run status` prints them. A corrected GT file is detected even if the manifest is unchanged.
 - Directories are created with exclusive numbering and never reused. `run.json` is written once. A run directory is locked while a runner uses it.
 - `run.json` and `record.json` are standard JSON (no `NaN` or `Infinity`). `record.json` (`ocrbench.execution-record`, version 1) holds `status`, `reason`, `message`, `engine_status`, `attempt`, `container`, `started`, `finished`, `seconds`, `engine_seconds`, `image_sha256`, `primary`, `prediction`, `findings` (validation findings), `outputs` (files with sizes; symbolic links are listed, never followed) and `engine_extra`. `seconds` is measured by the runner from the previous sample's end, or from the container start for the first sample, so it includes model loading.

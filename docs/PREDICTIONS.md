@@ -73,7 +73,7 @@ The recommended types are `text`, `heading`, `list-item`, `caption`, `footnote`,
 - **Page text agrees with the structure.** When any region carries text, the **structure text** is built in reading order: lines of a region joined by `\n`, regions joined by a blank line (`\n\n`). The page text must equal it up to whitespace: the comparison treats any run of whitespace as one separator and ignores leading and trailing whitespace.
   - If they agree, the page text is kept as the engine wrote it.
   - If not, there is a `text-mismatch` warning and the **line/region text has priority**: the standardized page text is replaced by the structure text.
-- **No normalization.** Text is kept exactly as produced. Normalization and the way lines are joined for scoring belong to the evaluator ([#8](https://github.com/michal-hradis/ocr_benchmarking/issues/8)). The joining above is used only for the agreement check and the rebuilt page text.
+- **No normalization.** Text is kept exactly as produced. Normalization and the way lines are joined for scoring belong to the evaluator ([EVALUATION.md](EVALUATION.md#text-preparation)). The joining above is used only for the agreement check and the rebuilt page text.
 
 ### Positions
 

@@ -9,6 +9,7 @@ dependencies = [
     "markdown-it-py==4.2.0",
     "mdit-py-plugins==0.6.1",
     "pillow==12.3.0",
+    "rapidfuzz==3.14.6",
 ]
 
 [project.scripts]

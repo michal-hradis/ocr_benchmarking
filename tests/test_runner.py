@@ -214,6 +214,9 @@ def test_engine_sees_only_images_and_allowed_metadata(tmp_path):
         "language": ["ces"],
         "year": 1900,
     }
+    # doc_type is frozen host-side for evaluation strata, but not enabled for the engine
+    assert frozen["samples"][1]["doc_type"] == "newspaper"
+    assert run.samples[1].doc_type == "newspaper"
 
 
 def test_docker_command_is_isolated(tmp_path):

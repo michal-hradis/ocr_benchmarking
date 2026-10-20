@@ -117,6 +117,7 @@ class RunSample:
     gt_sha256: str | None  # None when the GT could not be read at run creation
     error: str | None = None  # input problem found at run creation
     gt_error: str | None = None  # why gt_sha256 is None
+    doc_type: str | None = None  # for evaluation strata; in the job only when enabled
 
 
 @dataclass(frozen=True)
@@ -236,6 +237,7 @@ def create_run(
                 "gt": str(sample.gt),
                 "gt_sha256": gt_digest,
                 "gt_error": gt_error,
+                "doc_type": sample.doc_type,
             }
         )
     data = {
@@ -283,6 +285,7 @@ def load_run(path: Path) -> Run:
             gt_sha256=s["gt_sha256"],
             error=s["error"],
             gt_error=s["gt_error"],
+            doc_type=s["doc_type"],
         )
         for s in data["samples"]
     )
