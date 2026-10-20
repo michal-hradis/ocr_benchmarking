@@ -4,6 +4,7 @@ Runs are produced by the fake engine (tests/fixtures/fake-engine) as a host proc
 synthetic PAGE XML whose reference text is chosen per test.
 """
 
+import hashlib
 import json
 import sys
 from pathlib import Path
@@ -22,7 +23,7 @@ from ocrbench.evaluate import (
     parse_eval_config,
     write_scores,
 )
-from ocrbench.runner import ProcessLauncher, create_run, execute
+from ocrbench.runner import ProcessLauncher, create_run, execute, load_run
 
 FAKE = [sys.executable, str(Path(__file__).parent / "fixtures" / "fake-engine" / "fake_engine.py")]
 
@@ -41,13 +42,14 @@ def page_xml(lines):
 
 
 def make_run(tmp_path, samples, *, execute_run=True):
-    """``samples``: id -> (fake engine behavior, reference lines, unit, doc_type)."""
+    """``samples``: id -> (behavior, reference lines or raw GT text, unit, doc_type)."""
     data = tmp_path / "data"
     data.mkdir(parents=True)
     entries = []
     for sid, (_, lines, unit, doc_type) in samples.items():
         Image.new("L", (60, 40), 255).save(data / f"{sid}.png")
-        (data / f"{sid}.xml").write_text(page_xml(lines), encoding="utf-8")
+        gt = lines if isinstance(lines, str) else page_xml(lines)
+        (data / f"{sid}.xml").write_text(gt, encoding="utf-8")
         entry = {"id": sid, "image": f"{sid}.png", "gt": f"{sid}.xml", "unit": unit}
         entries.append(entry | ({"doc_type": doc_type} if doc_type else {}))
     manifest = data / "manifest.json"
@@ -253,3 +255,47 @@ def test_cli_evaluate(tmp_path, capsys):
     assert main(["evaluate", str(run.path), "--config", str(config)]) == 1
     assert "failure_policy" in capsys.readouterr().err
     assert not (run.path / "evaluations" / "3").exists()
+
+
+@pytest.mark.parametrize("policy", ["empty-output", "exclude"])
+def test_invalid_gt_is_refused_even_for_an_excluded_failure(tmp_path, policy):
+    # The GT is malformed already when the run is created, so its hash is pinned and unchanged.
+    samples = {"md": SAMPLES["md"], "failed": ("failed", "<PcGts>not PAGE", "page", None)}
+    run = make_run(tmp_path, samples)
+    assert run.samples[1].gt_sha256 is not None
+    with pytest.raises(EvaluationError, match="failed: invalid GT"):
+        evaluate_run(run, EvalConfig(failure_policy=policy))
+
+
+def test_stored_prediction_is_revalidated_against_the_frozen_image_size(tmp_path):
+    run = make_run(tmp_path, {"md": SAMPLES["md"]})
+    stored = run.path / "samples" / "md" / "attempt-1" / "prediction.json"
+    data = json.loads(stored.read_text(encoding="utf-8"))
+    stored.write_text(json.dumps(data | {"image": {"width": 61, "height": 40}}), "utf-8")
+    with pytest.raises(EvaluationError, match="image-size-mismatch"):
+        evaluate_run(run)
+    stored.write_text(json.dumps(data | {"image": {"width": 60, "height": 40}}), "utf-8")
+    entry = by_id(evaluate_run(run))["md"]
+    assert entry["prediction_sha256"] == hashlib.sha256(stored.read_bytes()).hexdigest()
+
+
+def test_prediction_hash_is_recorded_only_for_scored_predictions(tmp_path):
+    samples = by_id(evaluate_run(make_run(tmp_path, SAMPLES)))
+    assert all(len(samples[sid]["prediction_sha256"]) == 64 for sid in ("md", "txt", "trunc"))
+    assert samples["failed"]["prediction_sha256"] is None
+
+
+def test_runs_created_without_doc_type_are_still_evaluated(tmp_path):
+    run = make_run(tmp_path, SAMPLES)
+    frozen = json.loads((run.path / "run.json").read_text(encoding="utf-8"))
+    for sample in frozen["samples"]:
+        del sample["doc_type"]  # run.json as written before #8
+    (run.path / "run.json").write_text(json.dumps(frozen), encoding="utf-8")
+    scores = evaluate_run(load_run(run.path))
+    assert [g["group"] for g in scores["aggregates"]] == [
+        {},
+        {"unit": "page"},
+        {"unit": "page", "doc_type": None},
+        {"unit": "paragraph"},
+        {"unit": "paragraph", "doc_type": None},
+    ]

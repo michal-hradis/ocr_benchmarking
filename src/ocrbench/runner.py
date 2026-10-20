@@ -285,7 +285,7 @@ def load_run(path: Path) -> Run:
             gt_sha256=s["gt_sha256"],
             error=s["error"],
             gt_error=s["gt_error"],
-            doc_type=s["doc_type"],
+            doc_type=s.get("doc_type"),  # absent in runs created before #8
         )
         for s in data["samples"]
     )

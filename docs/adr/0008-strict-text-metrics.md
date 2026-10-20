@@ -16,7 +16,7 @@ Every engine is compared through the same scores, so small choices in how text i
 - **Bag-of-words and ROUGE-2** are multiset overlaps of words and word bigrams with precision, recall and F1 = 2·matched / (reference + predicted). ROUGE-1 is not reported.
 - **Failures** are scored as empty predictions by default (`empty-output`). `exclude` leaves them out of the aggregates and reports coverage. `partial` and `truncated` outputs are scored as produced. The evaluator never creates a prediction for a failure.
 - **Aggregates.** Micro (summed counts) and macro (mean of defined per-sample values, with the number left out) are computed overall, per unit, and per document type within a unit.
-- **Identity.** Scoring refuses runs with pending samples or with GT that differs from the GT frozen in `run.json`. Each evaluation is written to a new directory with the configuration and its hash, the metrics version, the text rules and the library versions.
+- **Identity.** Scoring refuses runs with pending samples, with GT that differs from the GT frozen in `run.json`, with invalid GT for any sample (also an excluded one), or with a stored prediction that no longer validates against the frozen image size. Each evaluation is written to a new directory with the configuration and its hash, the metrics version, the text rules and the library versions; each scored prediction is identified by its SHA-256.
 
 ## Alternatives considered
 
@@ -29,5 +29,5 @@ Every engine is compared through the same scores, so small choices in how text i
 ## Consequences and verification
 
 - The definitions are documented in [EVALUATION.md](../EVALUATION.md#strict-metrics-metrics-version-1) and implemented in `ocrbench.metrics`, `ocrbench.evaluate` and `ocrbench evaluate`. Any rule change increments `METRICS_VERSION`; the configuration has its own version.
-- Tests cover hand-computed S/D/I and denominators, hallucination, missing text, repetition, split and merged words, line breaks, empty pages, Unicode normalization, a 2,500-line page, comparison against a pure-Python edit distance, micro versus macro averages, strata, both failure policies with coverage, truncated output, Markdown output, and refusal of changed GT and pending samples.
+- Tests cover hand-computed S/D/I and denominators, hallucination, missing text, repetition, split and merged words, line breaks, empty pages, Unicode normalization, a 2,500-line page, comparison against a pure-Python edit distance, micro versus macro averages, strata, both failure policies with coverage, truncated output, Markdown output, and refusal of changed GT, invalid GT under both failure policies, stored predictions with a changed image size, and pending samples.
 - Flexible alignment (#9) and reports (#10) build on these counts and must use the same text preparation.

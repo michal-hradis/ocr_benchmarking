@@ -62,7 +62,7 @@ Implemented in `ocrbench.metrics` and `ocrbench.evaluate`. Any change to these r
 
 ### Aggregates
 
-Aggregates are computed for all samples, for each unit (`page`, `paragraph`) and for each document type within a unit (`doc_type` from the manifest, frozen in `run.json`; `null` when not given).
+Aggregates are computed for all samples, for each unit (`page`, `paragraph`) and for each document type within a unit (`doc_type` from the manifest, frozen in `run.json`; `null` when not given, or for runs created before it was frozen).
 
 - **Micro:** the counts summed over the group, then the rates, precision, recall and F1 from the sums. Long pages weigh more.
 - **Macro:** the mean of the per-sample values. Samples whose value is `null` (for example an empty reference) are left out, and their number is reported as `undefined`.
@@ -78,7 +78,8 @@ It prints the micro scores per group and writes `runs/<run-id>/evaluations/<n>/s
 
 - a sample is still **pending** (finish the run with `run resume` first);
 - a GT file **changed**, cannot be read, or was not pinned when the run was created (`ocrbench.runner.verify_ground_truth`), so predictions are only ever compared with the GT frozen with the run;
-- the PAGE XML reader reports an error for a GT file, or a stored prediction no longer validates.
+- the PAGE XML reader reports an error for the GT of **any** sample, whatever the failure policy (`exclude` only decides which scores are aggregated);
+- a stored prediction no longer validates, including against the image size frozen in `run.json` (`image-size-mismatch`).
 
 The configuration is a TOML file; every field is optional:
 
@@ -88,7 +89,7 @@ unicode = "NFC"                  # NFC (default) or NFKC
 failure_policy = "empty-output"  # empty-output (default) or exclude
 ```
 
-`scores.json` (`ocrbench.scores`, version 1) records the run ID and the SHA-256 of `run.json`, the configuration and its hash, the metrics version, the fixed text rules, and the ocrbench and rapidfuzz versions. Per sample it holds the status, failure reason, attempt, GT hash, `scored_as` (`prediction`, `empty` or `excluded`) and the counts and values of every metric; then the aggregates per group.
+`scores.json` (`ocrbench.scores`, version 1) records the run ID and the SHA-256 of `run.json`, the configuration and its hash, the metrics version, the fixed text rules, and the ocrbench and rapidfuzz versions. Per sample it holds the status, failure reason, attempt, GT hash, the SHA-256 of the scored `prediction.json` (`null` when no prediction was scored), `scored_as` (`prediction`, `empty` or `excluded`) and the counts and values of every metric; then the aggregates per group.
 
 ## Failed, partial and truncated samples
 
