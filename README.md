@@ -2,7 +2,7 @@
 
 Compare OCR and handwritten text recognition (HTR) systems on **raster images of books, magazines and newspapers**, particularly complex and historical prints.
 
-**Project status:** early implementation. Python project tooling, shared CPU/CUDA Docker base images ([setup](CONTRIBUTING.md#development-setup-and-commands), [Docker](docs/DOCKER.md)) and dataset manifests with a PAGE XML reader and validator ([datasets](docs/DATASETS.md)), the standardized prediction format with its validator and Markdown/HTML conversion ([predictions](docs/PREDICTIONS.md)), and the Docker runner with per-sample execution records ([runner](docs/RUNNER.md)) exist. Engine adapters and evaluation code are *not yet implemented*.
+**Project status:** early implementation. Python project tooling, shared CPU/CUDA Docker base images ([setup](CONTRIBUTING.md#development-setup-and-commands), [Docker](docs/DOCKER.md)) and dataset manifests with a PAGE XML reader and validator ([datasets](docs/DATASETS.md)), the standardized prediction format with its validator and Markdown/HTML conversion ([predictions](docs/PREDICTIONS.md)), the Docker runner with per-sample execution records ([runner](docs/RUNNER.md)) and strict ordered CER/WER, bag-of-words and ROUGE-2 scoring of stored runs ([evaluation](docs/EVALUATION.md)) exist. Engine adapters, flexible alignment and reports are *not yet implemented*.
 
 ## Use cases
 
@@ -17,16 +17,16 @@ For initial development, there is a **small, separately held set of page images 
 
 ## Planned outputs and scoring
 
-Engines provide UTF-8 transcription plus versioned JSON with optional typed regions, optional lines and optional positions ([predictions](docs/PREDICTIONS.md)); native OCR outputs are retained. Initial metrics will include CER/WER (including flexible line/chunk alignment), bag-of-words precision/recall/F1 and ROUGE-2. See [evaluation](docs/EVALUATION.md) for the metric families; exact definitions are owned by [roadmap](https://github.com/michal-hradis/ocr_benchmarking/issues/1) issues #5–#9.
+Engines provide UTF-8 transcription plus versioned JSON with optional typed regions, optional lines and optional positions ([predictions](docs/PREDICTIONS.md)); native OCR outputs are retained. Strict ordered CER/WER, bag-of-words precision/recall/F1 and ROUGE-2 are implemented; flexible line/chunk alignment is planned (#9). See [evaluation](docs/EVALUATION.md) for the metric families and the exact definitions.
 
 ## Quick start (planned)
 
-`dataset validate|text`, `prediction validate|convert` and `run start|resume|status` work today (see [datasets](docs/DATASETS.md), [predictions](docs/PREDICTIONS.md) and [runner](docs/RUNNER.md)); no engine adapter exists yet. `evaluate` and `report` are a **proposed workflow, not runnable commands**:
+`dataset validate|text`, `prediction validate|convert`, `run start|resume|status` and `evaluate` work today (see [datasets](docs/DATASETS.md), [predictions](docs/PREDICTIONS.md), [runner](docs/RUNNER.md) and [evaluation](docs/EVALUATION.md#command-and-stored-scores)); no engine adapter exists yet. `report` is a **proposed command, not runnable**:
 
 ```sh
 ocrbench dataset validate <dataset-manifest>
 ocrbench run start --engine <engine.toml> --dataset <dataset-manifest>
-ocrbench evaluate --run <run-id>   # planned
+ocrbench evaluate runs/<run-id>
 ocrbench report --run <run-id>     # planned
 ```
 

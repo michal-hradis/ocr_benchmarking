@@ -70,7 +70,7 @@ Unknown fields are errors, so typos do not pass silently. A new field or a chang
   - Text from `Word` and `Glyph` elements is not used.
 - **Choice of `TextEquiv`.** When an element has several, the one with the lowest `@index` is used; otherwise the first one.
 - **Missing text.** A `TextLine` without `TextEquiv/Unicode`, or with only whitespace, is skipped and reported as a warning. A page without any reference text is also a warning.
-- **No normalization.** Text is kept exactly as annotated, including Unicode form, inner and outer whitespace and historic characters such as `ſ`. Normalization and the way lines are joined into page text belong to the evaluator ([#8](https://github.com/michal-hradis/ocr_benchmarking/issues/8)).
+- **No normalization.** Text is kept exactly as annotated, including Unicode form, inner and outer whitespace and historic characters such as `ſ`. Normalization and the way lines are joined into page text belong to the evaluator ([EVALUATION.md](EVALUATION.md#text-preparation)).
 - **Geometry.** Coordinates are kept as annotated. Points outside the image are counted and reported as info, never as an error. Code that uses geometry clips it to the image.
 
 ## Validation findings

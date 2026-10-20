@@ -1,4 +1,4 @@
-"""Command-line interface: ``ocrbench dataset``, ``prediction`` and ``run`` commands."""
+"""Command-line interface: ``ocrbench dataset``, ``prediction``, ``run`` and ``evaluate``."""
 
 from __future__ import annotations
 
@@ -12,6 +12,14 @@ from PIL import Image
 
 from ocrbench.convert import FORMATS, SUFFIXES, convert_native
 from ocrbench.engine import EngineConfigError, load_engine_config
+from ocrbench.evaluate import (
+    DEFAULT_CONFIG,
+    EvalConfigError,
+    EvaluationError,
+    evaluate_run,
+    load_eval_config,
+    write_scores,
+)
 from ocrbench.issues import Issue, Severity
 from ocrbench.manifest import load_manifest, validate_dataset, validate_sample
 from ocrbench.prediction import (
@@ -201,6 +209,33 @@ def _run_status(args: argparse.Namespace) -> int:
     return 0
 
 
+def _percent(value: float | None) -> str:
+    return "-" if value is None else f"{100 * value:.2f}"
+
+
+def _evaluate(args: argparse.Namespace) -> int:
+    try:
+        config = load_eval_config(args.config) if args.config else DEFAULT_CONFIG
+        run = load_run(args.run)
+        scores = evaluate_run(run, config)
+        path = write_scores(run, scores)
+    except (EvalConfigError, EvaluationError, RunnerError, OSError) as error:
+        print(f"error: {error}", file=sys.stderr)
+        return 1
+    columns = (("CER", "chars", "rate"), ("WER", "words", "rate"))
+    columns += (("BoW F1", "bag_of_words", "f1"), ("R-2 F1", "rouge2", "f1"))
+    print(f"{'group':<32} {'samples':>7} {'coverage':>8}", *(f"{c[0]:>7}" for c in columns))
+    for group in scores["aggregates"]:
+        name = "/".join("-" if v is None else str(v) for v in group["group"].values()) or "all"
+        values = [_percent((group[key]["micro"] or {}).get(m)) for _, key, m in columns]
+        print(
+            f"{name:<32} {group['samples']:>7} {_percent(group['coverage']):>8}",
+            *(f"{v:>7}" for v in values),
+        )
+    print(f"micro averages in %, failure policy {config.failure_policy}; scores: {path}")
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="ocrbench", description="OCR/HTR benchmark tools")
     commands = parser.add_subparsers(dest="command", required=True)
@@ -262,6 +297,11 @@ def build_parser() -> argparse.ArgumentParser:
     status = actions.add_parser("status", help="count samples by status and list failures")
     status.add_argument("run", type=Path, help="run directory")
     status.set_defaults(handler=_run_status)
+
+    evaluate = commands.add_parser("evaluate", help="score a finished run against its GT")
+    evaluate.add_argument("run", type=Path, help="run directory")
+    evaluate.add_argument("--config", type=Path, help="evaluation configuration (TOML)")
+    evaluate.set_defaults(handler=_evaluate)
     return parser
 
 
