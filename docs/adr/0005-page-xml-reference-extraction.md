@@ -12,7 +12,7 @@ Every score compares a prediction with reference text extracted from PAGE XML. P
 
 - Datasets are described by a versioned **JSON manifest** with explicit, stable sample IDs and paths relative to the manifest. Metadata (document type, language, year, split) is optional, and no split is required.
 - A **paragraph-crop** sample is an independent image with its own PAGE XML in crop coordinates. Deriving crops from a parent page is out of scope.
-- Reference text comes from **line** `TextEquiv` when any line in a region has text. Region text is used only as a fallback, so the same text is never counted twice. Word and glyph text are not used.
+- Reference text comes from **line** `TextEquiv`. A region's own `TextEquiv` is a fallback for its **whole subtree**: it is used only when neither its lines nor any nested region provide text. This way the same text is never counted twice, even when a parent region aggregates the text of nested regions. Word and glyph text are not used.
 - A line without text is **skipped with a warning**.
 - Region order follows `ReadingOrder` when present, and XML document order otherwise. Line order follows `TextLine/@index` when it is complete and unique, and document order otherwise.
 - Text is stored **exactly as annotated**. Normalization and joining lines into page text belong to the evaluator ([#8](https://github.com/michal-hradis/ocr_benchmarking/issues/8)).
@@ -28,5 +28,5 @@ Every score compares a prediction with reference text extracted from PAGE XML. P
 ## Consequences and verification
 
 - The rules are documented in [DATASETS.md](../DATASETS.md) and implemented in `ocrbench.pagexml` and `ocrbench.manifest`. `ocrbench dataset validate` reports findings with their severity.
-- Synthetic fixtures in `tests/fixtures/pagexml/` cover these cases: reading order that differs from document order, legacy namespaces with `<Point>` coordinates, nested regions and table cells, repeated lines, missing text, region-text fallback and out-of-bounds points.
+- Synthetic fixtures in `tests/fixtures/pagexml/` cover these cases: reading order that differs from document order, legacy namespaces with `<Point>` coordinates, nested regions and table cells, parent region text that aggregates nested regions, nested regions without IDs, repeated lines, missing text, region-text fallback and out-of-bounds points.
 - Changing any of these rules changes the reference text, so it requires a new ADR and must be considered when comparing evaluation versions.

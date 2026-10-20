@@ -90,6 +90,58 @@ def test_region_text_is_never_counted_twice(tmp_path):
     assert [line.text for line in page.reference_lines] == ["a", "b"]
 
 
+@pytest.mark.parametrize("reading_order", [False, True])
+def test_parent_region_text_is_not_counted_twice_with_nested_regions(tmp_path, reading_order):
+    order = (
+        '<ReadingOrder><OrderedGroup id="g"><RegionRefIndexed index="0" regionRef="parent"/>'
+        "</OrderedGroup></ReadingOrder>"
+        if reading_order
+        else ""
+    )
+    path = write_page(
+        tmp_path,
+        order + '<TextRegion id="parent"><TextEquiv><Unicode>Child text</Unicode></TextEquiv>'
+        '<TextRegion id="child"><TextLine id="line">'
+        "<TextEquiv><Unicode>Child text</Unicode></TextEquiv></TextLine></TextRegion>"
+        "</TextRegion>",
+    )
+    page, issues = read_page_xml(path)
+    assert [(line.text, line.line_id) for line in page.reference_lines] == [("Child text", "line")]
+    ignored = [i for i in issues if i.code == "region-text-ignored"]
+    assert [i.location for i in ignored] == ["page.xml#parent"]
+
+
+def test_region_text_fallback_applies_to_whole_subtree(tmp_path):
+    path = write_page(
+        tmp_path,
+        # grandparent aggregates text provided two levels down: ignored
+        '<TextRegion id="gp"><TextEquiv><Unicode>deep</Unicode></TextEquiv>'
+        '<TextRegion id="p"><TextRegion id="c"><TextEquiv><Unicode>deep</Unicode></TextEquiv>'
+        "</TextRegion></TextRegion></TextRegion>"
+        # nested region without any text: the parent's text is the only reference
+        '<TextRegion id="q"><TextEquiv><Unicode>only parent</Unicode></TextEquiv>'
+        '<TextRegion id="empty"><TextLine id="blank"/></TextRegion></TextRegion>',
+    )
+    page, _ = read_page_xml(path)
+    assert [(line.text, line.region_id) for line in page.reference_lines] == [
+        ("deep", "c"),
+        ("only parent", "q"),
+    ]
+
+
+def test_nested_regions_without_id_with_reading_order(tmp_path):
+    path = write_page(
+        tmp_path,
+        "<ReadingOrder/>"
+        "<TextRegion><TextLine><TextEquiv><Unicode>outer</Unicode></TextEquiv></TextLine>"
+        "<TextRegion><TextLine><TextEquiv><Unicode>inner</Unicode></TextEquiv></TextLine>"
+        "</TextRegion></TextRegion>",
+    )
+    page, issues = read_page_xml(path)
+    assert [line.text for line in page.reference_lines] == ["outer", "inner"]
+    assert "missing-id" in codes(issues, Severity.WARNING)
+
+
 def test_region_text_used_when_lines_have_no_text(tmp_path):
     path = write_page(
         tmp_path,

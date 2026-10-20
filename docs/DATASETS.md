@@ -64,8 +64,9 @@ Unknown fields are errors, so typos do not pass silently. A new field or a chang
   Without a `ReadingOrder`, regions keep XML document order, with an info finding.
 - **Line order.** Lines within a region are sorted by `TextLine/@index` when every line has a distinct integer index. Otherwise they keep document order, with a warning when the indexes are only partial or duplicated.
 - **Text precedence (no double counting).**
-  - If any line of a region has text, the region's reference is its line texts, and region-level text is ignored.
-  - If no line has text, the region-level `TextEquiv` is used as one reference unit, without a line ID.
+  - Each region contributes the text of its own lines.
+  - A region's own `TextEquiv` usually aggregates everything inside it. It is therefore used only as a fallback for the region's **whole subtree**: when neither the region's lines nor any nested region (at any depth) provide text. It then becomes one reference unit, without a line ID.
+  - Otherwise it is ignored, with an info finding. For example, a parent region whose text repeats a nested child's line yields that text once, from the child's line.
   - Text from `Word` and `Glyph` elements is not used.
 - **Choice of `TextEquiv`.** When an element has several, the one with the lowest `@index` is used; otherwise the first one.
 - **Missing text.** A `TextLine` without `TextEquiv/Unicode`, or with only whitespace, is skipped and reported as a warning. A page without any reference text is also a warning.
