@@ -2,7 +2,7 @@
 
 Compare OCR and handwritten text recognition (HTR) systems on **raster images of books, magazines and newspapers**, particularly complex and historical prints.
 
-**Project status:** early implementation. Python project tooling, shared CPU/CUDA Docker base images ([setup](CONTRIBUTING.md#development-setup-and-commands), [Docker](docs/DOCKER.md)) and dataset manifests with a PAGE XML reader and validator ([datasets](docs/DATASETS.md)) exist. The runner, engine adapters and evaluation code are *not yet implemented*.
+**Project status:** early implementation. Python project tooling, shared CPU/CUDA Docker base images ([setup](CONTRIBUTING.md#development-setup-and-commands), [Docker](docs/DOCKER.md)) and dataset manifests with a PAGE XML reader and validator ([datasets](docs/DATASETS.md)), and the standardized prediction format with its validator and Markdown/HTML conversion ([predictions](docs/PREDICTIONS.md)) exist. The runner, engine adapters and evaluation code are *not yet implemented*.
 
 ## Use cases
 
@@ -17,11 +17,11 @@ For initial development, there is a **small, separately held set of page images 
 
 ## Planned outputs and scoring
 
-Engines provide UTF-8 transcription plus versioned JSON with optional typed, positioned regions and nested text lines; native OCR outputs are retained. Initial metrics will include CER/WER (including flexible line/chunk alignment), bag-of-words precision/recall/F1 and ROUGE-2. See [evaluation](docs/EVALUATION.md) for the metric families; exact definitions are owned by [roadmap](https://github.com/michal-hradis/ocr_benchmarking/issues/1) issues #5–#9.
+Engines provide UTF-8 transcription plus versioned JSON with optional typed regions, optional lines and optional positions ([predictions](docs/PREDICTIONS.md)); native OCR outputs are retained. Initial metrics will include CER/WER (including flexible line/chunk alignment), bag-of-words precision/recall/F1 and ROUGE-2. See [evaluation](docs/EVALUATION.md) for the metric families; exact definitions are owned by [roadmap](https://github.com/michal-hradis/ocr_benchmarking/issues/1) issues #5–#9.
 
 ## Quick start (planned)
 
-Only `dataset validate` works today (`uv run ocrbench dataset validate <dataset-manifest>`, see [datasets](docs/DATASETS.md)). The other commands are a **proposed workflow, not runnable commands**; the CLI and flags may change during [runner implementation #7](https://github.com/michal-hradis/ocr_benchmarking/issues/7):
+Only `dataset validate|text` and `prediction validate|convert` work today (see [datasets](docs/DATASETS.md) and [predictions](docs/PREDICTIONS.md)). The other commands are a **proposed workflow, not runnable commands**; the CLI and flags may change during [runner implementation #7](https://github.com/michal-hradis/ocr_benchmarking/issues/7):
 
 ```sh
 ocrbench dataset validate <dataset-manifest>

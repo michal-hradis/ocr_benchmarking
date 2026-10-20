@@ -44,6 +44,7 @@ make check   # ruff lint + format check, then offline unit tests
 | `make lint` / `make format` | Ruff check and format check / apply fixes and formatting |
 | `make test` | Offline unit tests; select tests with `ARGS`, e.g. `make test ARGS="tests/test_package.py -k version"` |
 | `uv run ocrbench dataset validate <manifest>` | Validate a dataset manifest and its PAGE XML, see [docs/DATASETS.md](docs/DATASETS.md) |
+| `uv run ocrbench prediction validate\|convert …` | Validate a prediction JSON or convert native text/Markdown/HTML, see [docs/PREDICTIONS.md](docs/PREDICTIONS.md) |
 | `make docker-cpu`, `make docker-cu130-torch` | Build base images |
 | `make docker-smoke`, `make gpu-preflight`, `make gpu-smoke` | Opt-in Docker and GPU checks, see [docs/DOCKER.md](docs/DOCKER.md) |
 

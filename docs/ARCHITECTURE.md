@@ -47,7 +47,7 @@ Everything runs **locally on one Linux machine**. The OCR inference component ru
 | --- | --- | --- | --- |
 | Dataset manifest and PAGE XML reader | Pair images with GT; validate files, image sizes and geometry; extract reference text, lines, regions and reading order ([DATASETS.md](DATASETS.md), [ADR 0005](adr/0005-page-xml-reference-extraction.md)) | Expose GT to OCR inference containers | [#5](https://github.com/michal-hradis/ocr_benchmarking/issues/5) |
 | Engine adapter (container) | Every preprocessing step: resizing, region/line detection, tiling and stitching, plus OCR/HTR and prompting. Emits native output, UTF-8 text and standardized JSON | Read GT; invent geometry | [#11–#17](https://github.com/michal-hradis/ocr_benchmarking/issues/1) |
-| Output contract | Versioned JSON for page text and optional positioned regions and lines; validator | Prescribe how engines segment | [#6](https://github.com/michal-hradis/ocr_benchmarking/issues/6) |
+| Output contract | Versioned JSON for page text, flat optional regions with optional lines and positions; validator; shared host-side conversion of plain-text, Markdown and HTML output ([PREDICTIONS.md](PREDICTIONS.md), [ADR 0006](adr/0006-standardized-prediction-format.md)) | Prescribe how engines segment | [#6](https://github.com/michal-hradis/ocr_benchmarking/issues/6) |
 | Runner and CLI | Launch isolated containers with the image and allowed metadata; record status, provenance and resources; persist outputs | Tile, crop or resize images; expose GT to an engine container | [#7](https://github.com/michal-hradis/ocr_benchmarking/issues/7) |
 | Evaluator | Compute ordered and flexible metrics against GT from stored outputs, using a versioned evaluation config | Run engines | [#8](https://github.com/michal-hradis/ocr_benchmarking/issues/8), [#9](https://github.com/michal-hradis/ocr_benchmarking/issues/9) |
 | Reporter | Per-sample and aggregate results, GT-versus-prediction inspection, diagnostics, enumerated failures and truncations, provenance | Recompute or alter scores | [#10](https://github.com/michal-hradis/ocr_benchmarking/issues/10) |
@@ -70,8 +70,10 @@ PAGE XML and derived reference text, region/line geometry and reading order are 
 For an invocation that **produces a valid OCR prediction**, the engine adapter provides:
 
 1. Required **UTF-8 page transcription** in plain text, without Markdown or HTML markup.
-2. A **versioned standardized JSON** prediction. If the engine genuinely localizes text, it contains **typed regions** with positions and nested **lines** with text, positions and optional type. Positions refer to pixels of the **original input image**.
+2. A **versioned standardized JSON** prediction. If the engine genuinely localizes text, it contains **typed regions** with positions and, where the engine reports them, nested **lines** with text, positions and optional type. Positions refer to pixels of the **original input image**.
 3. The **native outputs** that were produced, preserved unchanged (e.g. TXT, Markdown, HTML, hOCR or PAGE XML).
+
+The format is specified in [PREDICTIONS.md](PREDICTIONS.md) ([ADR 0006](adr/0006-standardized-prediction-format.md)): regions are a flat list, lines and positions are optional, and page text must agree with the line/region text. For engines whose native output is plain text, Markdown or HTML, items 1 and 2 are produced on the host by shared, versioned conversion code from the stored native output, after inference.
 
 Image-to-text models without reliable segmentation are first-class participants: keep their page text without inventing regions, physical lines or coordinates. **When inference fails, a separate per-sample execution record with status, reason and provenance is required even if no valid OCR text/JSON result exists.** The evaluator, not the engine, may interpret that failure as an empty prediction for scoring.
 
@@ -106,7 +108,6 @@ The issues below own these choices. The architecture deliberately leaves them un
 
 | Choice | Owner |
 | --- | --- |
-| JSON field names, nullability, bounding-box and polygon convention, encoding of unlocalized results, aggregation of page text versus line text | [#6](https://github.com/michal-hradis/ocr_benchmarking/issues/6) |
 | Container invocation, I/O mount protocol, per-sample versus batch lifecycle, allowed-metadata list, final status vocabulary | [#7](https://github.com/michal-hradis/ocr_benchmarking/issues/7) |
 | Unicode normalization, grapheme handling, word tokenization, edit-count and empty-case definitions | [#8](https://github.com/michal-hradis/ocr_benchmarking/issues/8) |
 | Flexible matching algorithm, split/merge accounting, candidate retrieval, treatment of unmatched predictions | [#9](https://github.com/michal-hradis/ocr_benchmarking/issues/9) |
