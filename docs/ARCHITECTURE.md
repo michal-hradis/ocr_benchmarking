@@ -48,7 +48,7 @@ Everything runs **locally on one Linux machine**. The OCR inference component ru
 | Dataset manifest and PAGE XML reader | Pair images with GT; validate files, image sizes and geometry; extract reference text, lines, regions and reading order ([DATASETS.md](DATASETS.md), [ADR 0005](adr/0005-page-xml-reference-extraction.md)) | Expose GT to OCR inference containers | [#5](https://github.com/michal-hradis/ocr_benchmarking/issues/5) |
 | Engine adapter (container) | Every preprocessing step: resizing, region/line detection, tiling and stitching, plus OCR/HTR and prompting. Emits native output, UTF-8 text and standardized JSON | Read GT; invent geometry | [#11–#17](https://github.com/michal-hradis/ocr_benchmarking/issues/1) |
 | Output contract | Versioned JSON for page text, flat optional regions with optional lines and positions; validator; shared host-side conversion of plain-text, Markdown and HTML output ([PREDICTIONS.md](PREDICTIONS.md), [ADR 0006](adr/0006-standardized-prediction-format.md)) | Prescribe how engines segment | [#6](https://github.com/michal-hradis/ocr_benchmarking/issues/6) |
-| Runner and CLI | Launch isolated containers with the image and allowed metadata; record status, provenance and resources; persist outputs | Tile, crop or resize images; expose GT to an engine container | [#7](https://github.com/michal-hradis/ocr_benchmarking/issues/7) |
+| Runner and CLI | Launch isolated containers with the image and allowed metadata; record status, provenance and resources; persist outputs ([RUNNER.md](RUNNER.md), [ADR 0007](adr/0007-runner-and-engine-protocol.md)) | Tile, crop or resize images; expose GT to an engine container | [#7](https://github.com/michal-hradis/ocr_benchmarking/issues/7) |
 | Evaluator | Compute ordered and flexible metrics against GT from stored outputs, using a versioned evaluation config | Run engines | [#8](https://github.com/michal-hradis/ocr_benchmarking/issues/8), [#9](https://github.com/michal-hradis/ocr_benchmarking/issues/9) |
 | Reporter | Per-sample and aggregate results, GT-versus-prediction inspection, diagnostics, enumerated failures and truncations, provenance | Recompute or alter scores | [#10](https://github.com/michal-hradis/ocr_benchmarking/issues/10) |
 | Development tooling and base images | Linux Python environment; shared CPU/CUDA base image families | Add CI | [#4](https://github.com/michal-hradis/ocr_benchmarking/issues/4) |
@@ -63,7 +63,7 @@ Everything runs **locally on one Linux machine**. The OCR inference component ru
 
 ### Ground-truth isolation ([ADR 0002](adr/0002-ground-truth-isolation.md))
 
-PAGE XML and derived reference text, region/line geometry and reading order are available to the **local dataset reader, evaluator and reports**. An OCR inference container receives only the image and **allowed inference metadata** (for example language hints and sample type); it never receives GT paths, reference content or statistics derived from GT. #7 defines the allowed-metadata list.
+PAGE XML and derived reference text, region/line geometry and reading order are available to the **local dataset reader, evaluator and reports**. An OCR inference container receives only the image and **allowed inference metadata** (for example language hints and sample type); it never receives GT paths, reference content or statistics derived from GT. The allowed metadata are the sample ID and unit, plus `language`, `doc_type` and `year` when the engine configuration enables them ([RUNNER.md](RUNNER.md#engine-protocol)).
 
 ### Standardized prediction ([ADR 0003](adr/0003-engine-run-output-contract-boundaries.md))
 
@@ -88,7 +88,7 @@ Image-to-text models without reliable segmentation are first-class participants:
 
 - **Separate versions.** The output schema, the run configuration and the evaluation configuration (normalization, tokenization, alignment and failure policy) are versioned independently. Every score is identifiable by sample, run and evaluation version.
 - **Raw and normalized output.** The run store keeps native output unchanged, next to the standardized text and JSON derived from it. Evaluator-side normalization is applied at scoring time and is never written back over predictions.
-- **Execution records and prediction results are separate:** the runner records a status for every sample (`success`, `partial`, `truncated` or `failure`) and a reason for failures, such as a crash, timeout or invalid output. A failure does **not** require fabricating a valid OCR text/JSON result. Output that fails schema validation is never treated as `success`. #7 finalizes status values and failure reasons.
+- **Execution records and prediction results are separate:** the runner records a status for every sample (`success`, `partial`, `truncated` or `failure`) and a reason for failures, such as a crash, timeout or invalid output. A failure does **not** require fabricating a valid OCR text/JSON result. Output that fails schema validation is never treated as `success`. Status values and failure reasons are defined in [RUNNER.md](RUNNER.md#statuses-and-failures).
 - **Re-evaluation without rerunning models.** Local evaluation reads stored execution records, available predictions, and PAGE XML ground truth. Changing the evaluation config produces new scores under a new version, without new inference.
 - **Failure accounting.** The primary default is **empty-output**: a failed OCR invocation is scored as an empty prediction, retaining its missing GT text in the score. Explicit configuration may instead **exclude** failures from an alternate metric calculation, always with coverage reported. See [EVALUATION.md](EVALUATION.md#failed-partial-and-truncated-samples).
 
@@ -108,7 +108,6 @@ The issues below own these choices. The architecture deliberately leaves them un
 
 | Choice | Owner |
 | --- | --- |
-| Container invocation, I/O mount protocol, per-sample versus batch lifecycle, allowed-metadata list, final status vocabulary | [#7](https://github.com/michal-hradis/ocr_benchmarking/issues/7) |
 | Unicode normalization, grapheme handling, word tokenization, edit-count and empty-case definitions | [#8](https://github.com/michal-hradis/ocr_benchmarking/issues/8) |
 | Flexible matching algorithm, split/merge accounting, candidate retrieval, treatment of unmatched predictions | [#9](https://github.com/michal-hradis/ocr_benchmarking/issues/9) |
 | Report layout and formats; primary empty-output score, optional exclude view, and coverage/failure displays | [#10](https://github.com/michal-hradis/ocr_benchmarking/issues/10) |

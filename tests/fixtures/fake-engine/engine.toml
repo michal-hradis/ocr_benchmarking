@@ -1,0 +1,17 @@
+# Engine configuration of the fake test engine (format: docs/RUNNER.md).
+name = "fake"
+engine_version = "1"
+image = "ocrbench-test/fake-engine:test-v1"
+model = "fake-model@rev1"
+metadata = ["language"]
+
+[params]
+default = "markdown"
+
+[resources]
+cpus = 1
+memory = "512m"
+
+[timeouts]
+sample = 30
+startup = 30
