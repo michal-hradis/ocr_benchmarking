@@ -9,6 +9,7 @@ CONVERTER_VERSION, which is recorded in every converted prediction.
 
 from __future__ import annotations
 
+import html
 import re
 from dataclasses import dataclass
 from html.parser import HTMLParser
@@ -66,13 +67,12 @@ def convert_native(content: str, source_format: str, sample_id: str) -> dict[str
 
 
 def _tidy(text: str) -> str:
-    """Strip each line and drop blank lines inside a block."""
-    return "\n".join(line.strip() for line in text.split("\n") if line.strip())
+    """Collapse spaces as rendering would, strip each line and drop blank lines in a block."""
+    lines = (re.sub(r"[ \t\r\f]+", " ", line).strip() for line in text.split("\n"))
+    return "\n".join(line for line in lines if line)
 
 
 # Markdown ------------------------------------------------------------------------------------
-
-_BR_RE = re.compile(r"^<br\s*/?>$", re.IGNORECASE)
 
 
 def _parser() -> MarkdownIt:
@@ -80,16 +80,29 @@ def _parser() -> MarkdownIt:
     return parser.use(dollarmath_plugin, allow_space=True, double_inline=True)
 
 
+_TEXT_TOKENS = ("text", "code_inline", "math_inline", "math_inline_double")
+
+
 def _inline(token: Token) -> str:
+    children = token.children or []
+    if any(child.type == "html_inline" for child in children):
+        # Inline HTML uses the HTML rules, so text inside <script>, <style>, … is dropped.
+        fragment = []
+        for child in children:
+            if child.type in _TEXT_TOKENS:
+                fragment.append(html.escape(child.content, quote=False))
+            elif child.type in ("softbreak", "hardbreak"):
+                fragment.append("<br>")
+            elif child.type == "html_inline":
+                fragment.append(child.content)
+        return _text(_parse_html("".join(fragment)), pre=False)
     parts = []
-    for child in token.children or []:
-        if child.type in ("text", "code_inline", "math_inline", "math_inline_double"):
+    for child in children:
+        if child.type in _TEXT_TOKENS:
             parts.append(child.content)
-        elif child.type in ("softbreak", "hardbreak") or (
-            child.type == "html_inline" and _BR_RE.match(child.content.strip())
-        ):
+        elif child.type in ("softbreak", "hardbreak"):
             parts.append("\n")
-        # images (alt text is not page text), markup and other inline HTML tags add nothing
+        # images (alt text is not page text) and markup add nothing
     return "".join(parts)
 
 
@@ -320,10 +333,14 @@ def _walk(node: _Node, blocks: list[_Block]) -> None:
     flush()
 
 
-def _html(content: str) -> list[_Block]:
+def _parse_html(content: str) -> _Node:
     builder = _TreeBuilder()
     builder.feed(content)
     builder.close()
+    return builder.root
+
+
+def _html(content: str) -> list[_Block]:
     blocks: list[_Block] = []
-    _walk(builder.root, blocks)
+    _walk(_parse_html(content), blocks)
     return blocks

@@ -76,15 +76,23 @@ def _finish_prediction(
         return 1
     if args.output:
         text = json.dumps(prediction_to_json(prediction), ensure_ascii=False, indent=1)
-        args.output.write_text(text + "\n", encoding="utf-8")
+        try:
+            args.output.write_text(text + "\n", encoding="utf-8")
+        except OSError as error:
+            print(f"error: cannot write {args.output}: {error}", file=sys.stderr)
+            return 1
     return 0
 
 
 def _prediction_validate(args: argparse.Namespace) -> int:
     size = None
     if args.image:
-        with Image.open(args.image) as image:  # reads the header only
-            size = image.size
+        try:
+            with Image.open(args.image) as image:  # reads the header only
+                size = image.size
+        except OSError as error:  # includes missing files and unidentified images
+            print(f"error: cannot read image {args.image}: {error}", file=sys.stderr)
+            return 1
     prediction, issues = load_prediction(args.prediction, sample_id=args.sample_id, image_size=size)
     return _finish_prediction(prediction, issues, args)
 
@@ -98,6 +106,9 @@ def _prediction_convert(args: argparse.Namespace) -> int:
         content = args.native.read_bytes().decode("utf-8")
     except UnicodeDecodeError as error:
         print(f"error: {args.native} is not UTF-8: {error}", file=sys.stderr)
+        return 1
+    except OSError as error:
+        print(f"error: cannot read {args.native}: {error}", file=sys.stderr)
         return 1
     data = convert_native(content, source_format, args.sample_id)
     prediction, issues = validate_prediction(

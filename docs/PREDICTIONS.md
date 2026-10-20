@@ -100,7 +100,7 @@ Converted predictions contain plain text and typed regions **without positions**
 | `$$…$$`, block `<math>` | `formula` | TeX source; for MathML the TeX annotation when present, otherwise its text |
 | Code block, `<pre>` | `other` | Verbatim |
 
-Inline rules: emphasis, links and other markup keep only their text; inline `$…$` math keeps its TeX source; images (including alt text), horizontal rules, `<script>`, `<style>` and `<head>` add nothing; HTML entities and Markdown escapes are decoded. HTML whitespace is collapsed as a browser would, except in `<pre>`. HTML embedded in Markdown uses the HTML rules.
+Inline rules: emphasis, links and other markup keep only their text; inline `$…$` math keeps its TeX source; images (including alt text), horizontal rules, `<script>`, `<style>` and `<head>` add nothing; HTML entities and Markdown escapes are decoded. Whitespace is collapsed as a browser would render it (runs of spaces become one space), except in code blocks and `<pre>`. HTML embedded in Markdown uses the HTML rules: an HTML block is converted as HTML, and a paragraph containing inline HTML has its text converted with the HTML inline rules, so the content of inline `<script>` or `<style>` adds nothing while text in tags such as `<span>` is kept.
 
 Known limitations of converter version 1: `\[…\]` and `\(…\)` math delimiters are treated as ordinary Markdown escapes, and a whole page wrapped in a code fence stays one `other` region.
 

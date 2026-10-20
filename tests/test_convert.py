@@ -77,6 +77,10 @@ def test_html_becomes_plain_text_and_typed_regions():
         ("Setext\n======", [("heading", "Setext")]),
         ("a \\*b\\* [link](http://x)", [("text", "a *b* link")]),
         ("", []),
+        # inline HTML uses the HTML rules: hidden content is not page text, visible text is
+        ("Text <script>alert(1)</script> next", [("text", "Text next")]),
+        ("A <style>h1{display:none}</style> Z", [("text", "A Z")]),
+        ("a <span>visible</span> *b*<br>c &amp; `x<y`", [("text", "a visible b\nc & x<y")]),
     ],
 )
 def test_markdown_rules(markdown, expected):
@@ -129,3 +133,27 @@ def test_cli_validate_checks_image_size_and_writes_standardized_output(tmp_path,
     Image.new("L", (200, 150), 255).save(image)
     assert main(["prediction", "validate", str(source), "--image", str(image)]) == 1
     assert "image-size-mismatch" in capsys.readouterr().err
+
+
+def test_cli_reports_unreadable_inputs_without_traceback(tmp_path, capsys):
+    missing = str(tmp_path / "missing.md")
+    assert main(["prediction", "convert", missing, "--sample-id", "s1"]) == 1
+    assert "cannot read" in capsys.readouterr().err
+    source = str(FIXTURES / "newspaper_columns.json")
+    for image in (tmp_path / "missing.jpg", FIXTURES / "vlm_page.md"):
+        assert main(["prediction", "validate", source, "--image", str(image)]) == 1
+        assert "cannot read image" in capsys.readouterr().err
+    out = str(tmp_path / "no-dir" / "pred.json")
+    assert (
+        main(
+            ["prediction", "convert", str(FIXTURES / "vlm_page.md"), "--sample-id", "s1", "-o", out]
+        )
+        == 1
+    )
+    assert "cannot write" in capsys.readouterr().err
+
+
+def test_html_and_markdown_inline_html_agree():
+    html = convert("<p>A <script>x()</script> <span>visible</span>  Z</p>", "html")
+    markdown = convert("A <script>x()</script> <span>visible</span>  Z", "markdown")
+    assert regions(html) == regions(markdown) == [("text", "A visible Z")]
