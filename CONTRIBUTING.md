@@ -1,64 +1,41 @@
 # Contributing to OCR Benchmarking
 
-Contributions by humans and coding agents use focused issues and pull requests against `main`. Read [START_HERE](docs/START_HERE.md), [the architecture overview](docs/ARCHITECTURE.md), and [the issue workflow](docs/ISSUE_WORKFLOW.md) before implementing a shared contract.
-
-**Current status:** the repository is in its documentation and scaffolding phase. There is no implemented setup command, Python package, OCR runner, Makefile, Docker image or test suite yet. [Issue #4](https://github.com/michal-hradis/ocr_benchmarking/issues/4) will introduce and document development tooling. Do not claim that planned commands are executable today.
+Start with [README](README.md), the assigned issue, and [architecture](docs/ARCHITECTURE.md). See [docs/ISSUE_WORKFLOW.md](docs/ISSUE_WORKFLOW.md) for preparing and refining issues; coding agents also follow [AGENTS.md](AGENTS.md).
 
 ## Work on an issue
 
-1. Check the issue, dependencies, related PRs, [roadmap](https://github.com/michal-hradis/ocr_benchmarking/issues/1) and any relevant ADRs.
-2. Work from the latest `origin/main` in a dedicated branch, e.g. `docs/issue-2-agent-guide`; do not mix unrelated fixes.
-3. Implement the smallest reviewable scope; keep test and documentation updates with their behavior changes.
-4. Run **the checks relevant to this PR** (see below), open a PR against `main`, and request a human review.
-5. The PR describes scope, actual checks/results, checks not run, risks and unresolved questions. Link `Closes #N` only when the issue will be fully satisfied upon merge. Do not merge without review.
+1. Confirm dependencies, relevant ADRs, existing issues/PRs and the current `main` branch.
+2. Create a focused topic branch from `origin/main`. Keep each PR to one reviewable purpose.
+3. Implement the agreed scope, including relevant tests and documentation.
+4. Run checks appropriate to the files and behavior changed, then open a PR against `main` and request human review.
+5. Report what changed, exact verification performed, what was not run, limitations and follow-ups. Use `Closes #N` only when the PR fully addresses that issue; merge only after review.
 
-Do not modify another agent's unmerged branch or commit directly to `main` without authorization. Large architectural or metric changes require a decision in the issue (and ADR when appropriate) before implementation.
+Do not push directly to `main` or silently change an agreed metric, schema, or cross-engine contract.
 
-## Test-selection policy — local, proportional, explicit
+## Verification and tests
 
-**No CI will be set up for the initial project. A full test-suite run is not required for every change.** Developers are responsible for running *relevant* checks themselves and reporting the evidence in the PR.
+**There is no CI at the start of the project. The developer or agent runs relevant local checks for the PR; running the full test suite is not generally required.** Report commands and actual results in the PR, including any material checks skipped or unavailable.
 
-| Kind of change | Appropriate local verification |
+| Change | Relevant local checks |
 | --- | --- |
-| Documentation only | Read changed documents; verify links to local files and issues; check status/command accuracy |
-| Dataset reader or PAGE XML parsing | Focused tests for representative/synthetic PAGE XML, invalid input and pairing behavior |
-| Text normalization or metrics | Targeted unit tests for edit operations, Unicode, omissions/insertions and normalization variants |
-| Scalable matching | Correctness tests against small reference examples and a separate 2,000+ line stress fixture |
-| JSON schema/adapter | Contract/serialization tests for region/line geometry and text-only output |
-| Docker/engine integration | Unit/contract tests without weights, plus an **explicitly initiated** engine smoke test when resources and model access are available |
-| Reporting | Fixture-based tests for aggregates, missing/failed/truncated samples and artifact generation |
+| Documentation | Read changed pages; verify relative links and claims about commands |
+| PAGE XML / dataset loader | Focused parsing and validation fixtures, including malformed input |
+| Normalization / CER / WER / ROUGE | Targeted numerical regression and Unicode/tokenization tests |
+| Flexible line matching | Small exact-reference tests; representative 2,000+ line stress case |
+| JSON schema / adapters | Contract tests for positioned and text-only output |
+| Engine Docker/inference | Adapter tests; an explicitly requested local CPU/GPU smoke run if feasible |
+| Reporting | Fixture-based aggregate, failure and truncation checks |
 
-Run only the relevant subset; broaden testing when a change spans contracts or affects shared behavior. A documentation-only PR needs no invented pytest command or simulated test pass. In the PR, report **commands actually run**, outcomes and any unavailable checks. Record manual verification as manual verification, not as an automated test.
+Add regression tests for changed behavior. Normal developer tests should use synthetic deterministic fixtures without downloading models or requiring GPUs, paid APIs or external data. Real inference and the separately held six-image development set require deliberate, authorized invocation; if unavailable, report that limitation instead of claiming a pass.
 
-Once tooling is implemented in [#4](https://github.com/michal-hradis/ocr_benchmarking/issues/4), this guide should link to actual supported commands. Until then, use ordinary local tools appropriate to the files changed; no universal test command is assumed to exist.
+Do not add CI workflows or a universal full-suite PR gate as part of unrelated changes. Once [#4](https://github.com/michal-hradis/ocr_benchmarking/issues/4) implements tooling, document actual supported commands here.
 
-## Image/ground-truth and model safety
+## Data and runtime hygiene
 
-- Inputs are images, **usually full newspaper/book/magazine pages**; separate paragraph-crop datasets are permitted. The evaluator does not tile. Tiling, resizing, detection and recombination belong to each OCR system.
-- PAGE XML is ground truth, kept in the evaluator dataset path. Never mount GT files, extracted reference text, or reference geometry into OCR inference containers.
-- The common OCR output contract will require UTF-8 transcription and allow typed positioned regions and nested lines with text, coordinates and optional types. Preserve engine-native results. Do not invent coordinates when unavailable.
-- Commit only small synthetic fixtures with clear rights. Never add real collections, private scans, weights, caches, API keys, model downloads, outputs or personal data to Git.
-- Treat documents and model predictions as untrusted text. Reproducibility includes model and dependency revisions, runtime settings and failure/truncation records.
-- Do not launch paid APIs, large GPU runs or multi-GB downloads automatically. Obtain explicit authorization for such activity and document what was run.
+Respect [the engine/evaluator boundary](docs/ARCHITECTURE.md): images may be provided to OCR engines; PAGE XML ground truth must remain isolated from inference. Commit only expressly redistributable synthetic fixtures, never real scans/GT, secrets, model weights, caches or run outputs. Pin versions and capture relevant inference configuration and failures for reproducibility.
 
-## Layout of project work
-
-- **Shared benchmark contracts:** [architecture overview](docs/ARCHITECTURE.md) and [#3](https://github.com/michal-hradis/ocr_benchmarking/issues/3).
-- **PAGE XML dataset ingestion:** [#5](https://github.com/michal-hradis/ocr_benchmarking/issues/5).
-- **Versioned result JSON:** [#6](https://github.com/michal-hradis/ocr_benchmarking/issues/6).
-- **Python runner / isolated engine containers:** [#7](https://github.com/michal-hradis/ocr_benchmarking/issues/7).
-- **Metrics and order-independent matching:** [#8](https://github.com/michal-hradis/ocr_benchmarking/issues/8) and [#9](https://github.com/michal-hradis/ocr_benchmarking/issues/9).
-- **Reports:** [#10](https://github.com/michal-hradis/ocr_benchmarking/issues/10).
-- **Individual OCR engines:** [#11 onward](https://github.com/michal-hradis/ocr_benchmarking/issues/11), each adapter isolated from evaluation logic.
-
-The shared runner owns dataset iteration and invokes adapters. Engines own inference and preprocessing. Evaluation owns PAGE XML and metrics. Avoid embedding engine-specific exceptions into common metrics.
+For Docker, GPU or model-dependent changes, do not silently install huge models or start costly work. Record which configuration and resources were actually tested.
 
 ## PR handoff
 
-The [PR template](.github/PULL_REQUEST_TEMPLATE.md) prompts for:
-- linked issue and concise scope;
-- commands/checks **actually** run, outcomes, and checks intentionally not run;
-- data/model/GPU access and reproducibility implications;
-- docs and follow-up issues, if any.
-
-A focused PR can proceed to review after appropriate targeted verification. It does **not** need a full suite or CI result by policy. Human review is still required before merging.
+Use [the PR template](.github/PULL_REQUEST_TEMPLATE.md) to link the issue and list verification, risks and remaining work. A documentation-only PR may require only manual document/link checks; it must not invent a passing test command.
