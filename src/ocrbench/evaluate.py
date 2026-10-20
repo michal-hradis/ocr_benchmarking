@@ -164,28 +164,37 @@ def _reference_text(sample_id: str, gt: Path) -> str:
     return " ".join(line.text for line in page.reference_lines)
 
 
-def _predicted_text(run: Run, sample_id: str, record: dict[str, Any]) -> str:
-    """The standardized page text of a valid output; never native Markdown or HTML."""
+def _predicted_text(run: Run, sample: RunSample, record: dict[str, Any]) -> tuple[str, str]:
+    """The standardized page text of a valid output (never native Markdown or HTML) and the
+    SHA-256 of the stored prediction, revalidated against the image size frozen with the run."""
     if record["prediction"] is None:
-        raise EvaluationError(f"{sample_id}: status {record['status']!r} without a prediction")
-    attempt = run.path / "samples" / sample_id / f"attempt-{record['attempt']}"
-    prediction, issues = load_prediction(attempt / record["prediction"], sample_id=sample_id)
+        raise EvaluationError(f"{sample.id}: status {record['status']!r} without a prediction")
+    path = run.path / "samples" / sample.id / f"attempt-{record['attempt']}" / record["prediction"]
+    try:
+        digest = sha256_file(path)
+    except OSError as error:
+        raise EvaluationError(f"{sample.id}: cannot read the stored prediction: {error}") from error
+    prediction, issues = load_prediction(path, sample_id=sample.id, image_size=sample.size)
     if prediction is None:
         errors = "\n".join(issue.format() for issue in issues)
-        raise EvaluationError(f"{sample_id}: stored prediction is invalid:\n{errors}")
-    return prediction.text
+        raise EvaluationError(f"{sample.id}: stored prediction is invalid:\n{errors}")
+    return prediction.text, digest
 
 
 def _sample(
     run: Run, sample: RunSample, record: dict[str, Any], config: EvalConfig
 ) -> tuple[dict[str, Any], TextScores | None]:
+    # GT is checked for every sample: the failure policy only decides what is aggregated.
+    reference = _reference_text(sample.id, sample.gt)
     failed = record["status"] == "failure"
+    prediction_sha256 = None
     if failed and config.failure_policy == "exclude":
         source, scores = "excluded", None
     else:
-        reference = _reference_text(sample.id, sample.gt)
         # A failure is scored as an empty input here; no prediction is created or stored.
-        hypothesis = "" if failed else _predicted_text(run, sample.id, record)
+        hypothesis = ""
+        if not failed:
+            hypothesis, prediction_sha256 = _predicted_text(run, sample, record)
         source = "empty" if failed else "prediction"
         scores = score_text(reference, hypothesis, config.unicode)
     entry = {
@@ -196,6 +205,7 @@ def _sample(
         "reason": record["reason"],
         "attempt": record["attempt"],
         "gt_sha256": sample.gt_sha256,
+        "prediction_sha256": prediction_sha256,
         "scored_as": source,
         **_scores_json(scores),
     }
