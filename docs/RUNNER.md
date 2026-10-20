@@ -65,7 +65,7 @@ Unknown fields are errors. The parsed configuration is frozen into `run.json` wi
 }
 ```
 
-- `job.json` and `images/<id><suffix>` are the only files in the input. Each image is byte-identical to the dataset image. The runner never resizes, crops or tiles it ([ADR 0001](adr/0001-image-only-samples-engine-owned-preprocessing.md)).
+- `job.json` and `images/<id><suffix>` are the only files in the input. Each image is a copy of the dataset image, byte-identical to the SHA-256 frozen in `run.json` and checked after staging. It is never a hard link, so editing the source during a run cannot change what the engine reads. The runner never resizes, crops or tiles it ([ADR 0001](adr/0001-image-only-samples-engine-owned-preprocessing.md)).
 - **Allowed metadata.** Every sample has `id`, `unit` (`page` or `paragraph`) and `image`. `language`, `doc_type` and `year` are included only when listed in the configuration's `metadata` and present in the manifest. GT paths, GT content, statistics derived from GT, splits and checksums are never passed ([ADR 0002](adr/0002-ground-truth-isolation.md)).
 
 **Output** (`$OCRBENCH_OUTPUT`, mounted at `/output`): for each sample the engine writes a directory `<id>/` with its native outputs and, **last**, `result.json`:
@@ -78,9 +78,9 @@ Unknown fields are errors. The parsed configuration is frozen into `run.json` wi
 | --- | --- |
 | `status` | `ok`, `truncated` (for example the output token limit was reached), `partial` (part of the page was not processed) or `failed` |
 | `primary` | The file to evaluate, relative to the sample directory. It is required unless `status` is `failed`. `.txt`, `.md`/`.markdown` and `.html`/`.htm` are converted on the host ([PREDICTIONS.md](PREDICTIONS.md#host-side-conversion-of-native-output)); `.json` must be a prediction JSON |
-| `message`, `seconds`, `extra` | Optional: a short explanation, the engine's own processing time and any engine-specific data |
+| `message`, `seconds`, `extra` | Optional: a short explanation, the engine's own processing time (a finite number, at least 0) and any engine-specific data |
 
-Write `result.json` atomically (write a temporary file in the same directory, then rename it). Its appearance tells the runner that the sample is finished. An engine that cannot process a sample writes `status: failed` and continues with the next one.
+`result.json` must be standard JSON: `NaN`, `Infinity` and numbers that overflow (such as `1e999`) make the output `invalid-output`. Write `result.json` atomically (write a temporary file in the same directory, then rename it). Its appearance tells the runner that the sample is finished. An engine that cannot process a sample writes `status: failed` and continues with the next one.
 
 **Container environment.** Containers run with `--network none`, a read-only root filesystem with a writable `/tmp`, the host user's UID/GID (so output files belong to the host user) and `HOME=/tmp`. The configured CPU, memory, shared-memory and GPU limits are applied, and `/cache` is mounted only with `--cache`. The image's own user is therefore not used. Engines must not rely on writing anywhere except `/output`, `/tmp` and `/cache`.
 
@@ -125,9 +125,10 @@ runs/<run-id>/
     prediction.txt              its page text, UTF-8
 ```
 
-- `run.json` records the engine configuration and its hash, the resolved image ID, the manifest path and hash, and the ocrbench version. It also records the host (platform, CPU count, memory, Docker version and, for GPU engines, the GPU names) and, for every sample, the image path, SHA-256 and size and the exact job entry passed to the engine.
+- `run.json` records the engine configuration and its hash, the resolved image ID, the manifest path and hash, and the ocrbench version. It also records the host (platform, CPU count, memory, Docker version and, for GPU engines, the GPU names) and, for every sample, the image path, SHA-256 and size, the exact job entry passed to the engine, and the GT path and SHA-256 (`gt`, `gt_sha256`). When the GT cannot be read, or does not match `gt_sha256` in the manifest, `gt_sha256` is `null` and `gt_error` says why; OCR still runs, because it never needs GT. The GT fields stay on the host and never reach `job.json` or the container.
+- Scoring must compare predictions only against the GT frozen with the run. `ocrbench.runner.verify_ground_truth` reports `gt-changed`, `gt-unreadable` and `gt-unpinned` samples, and `run status` prints them. A corrected GT file is detected even if the manifest is unchanged.
 - Directories are created with exclusive numbering and never reused. `run.json` is written once. A run directory is locked while a runner uses it.
-- `record.json` (`ocrbench.execution-record`, version 1) holds `status`, `reason`, `message`, `engine_status`, `attempt`, `container`, `started`, `finished`, `seconds`, `engine_seconds`, `image_sha256`, `primary`, `prediction`, `findings` (validation findings), `outputs` (files with sizes; symbolic links are listed, never followed) and `engine_extra`. `seconds` is measured by the runner from the previous sample's end, or from the container start for the first sample, so it includes model loading.
+- `run.json` and `record.json` are standard JSON (no `NaN` or `Infinity`). `record.json` (`ocrbench.execution-record`, version 1) holds `status`, `reason`, `message`, `engine_status`, `attempt`, `container`, `started`, `finished`, `seconds`, `engine_seconds`, `image_sha256`, `primary`, `prediction`, `findings` (validation findings), `outputs` (files with sizes; symbolic links are listed, never followed) and `engine_extra`. `seconds` is measured by the runner from the previous sample's end, or from the container start for the first sample, so it includes model loading.
 - The newest attempt with a record is the sample's current state.
 
 ## Tests and the fake engine

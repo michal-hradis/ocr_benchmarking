@@ -16,6 +16,7 @@ from pathlib import Path
 import pytest
 from PIL import Image
 
+from ocrbench import runner
 from ocrbench.cli import main
 from ocrbench.engine import EngineConfigError, load_engine_config, parse_engine_config
 from ocrbench.runner import (
@@ -27,6 +28,7 @@ from ocrbench.runner import (
     latest_record,
     load_run,
     summarize,
+    verify_ground_truth,
     verify_image,
 )
 
@@ -109,6 +111,8 @@ def test_every_sample_gets_a_record_and_valid_outputs_a_prediction(tmp_path):
         "invalid": "invalid",
         "escape": "escape",
         "badres": "bad-result",
+        "nan": "nan-seconds",
+        "inf": "inf-extra",
         "skipped": "skip",
     }
     units = {sid: "paragraph" if sid == "txt" else "page" for sid in behaviors}
@@ -123,13 +127,15 @@ def test_every_sample_gets_a_record_and_valid_outputs_a_prediction(tmp_path):
         "invalid": ("failure", "invalid-output"),
         "escape": ("failure", "invalid-output"),
         "badres": ("failure", "invalid-output"),
+        "nan": ("failure", "invalid-output"),
+        "inf": ("failure", "invalid-output"),
         "skipped": ("failure", "no-output"),
     }
     assert summary["counts"] == {
         "success": 3,
         "truncated": 1,
         "partial": 0,
-        "failure": 5,
+        "failure": 7,
         "pending": 0,
     }
     md = attempt_dir(run, "md")
@@ -144,6 +150,14 @@ def test_every_sample_gets_a_record_and_valid_outputs_a_prediction(tmp_path):
     assert records(run)["trunc"]["message"] == "output token limit reached"
     assert records(run)["failed"]["message"] == "unsupported page"
     assert "sample-id-mismatch" in records(run)["invalid"]["findings"][0]
+    # nonstandard JSON constants and overflowing numbers never reach a record
+    assert "NaN is not valid JSON" in records(run)["nan"]["message"]
+    assert "infinite" in records(run)["inf"]["message"]
+    for sid in ("nan", "inf"):
+        text = (attempt_dir(run, sid) / "record.json").read_text(encoding="utf-8")
+        record = json.loads(text, parse_constant=pytest.fail)  # standard JSON only
+        assert record["engine_seconds"] is None
+        assert record["engine_extra"] is None
     # a failure keeps no prediction, and the symlink is listed but never followed
     escape = records(run)["escape"]
     assert escape["prediction"] is None
@@ -176,7 +190,8 @@ def test_engine_sees_only_images_and_allowed_metadata(tmp_path):
     units = {"page1": "page", "para1": "paragraph"}
     run, _ = run_fake(tmp_path, units, metadata=["language", "year"])
     job = (run.path / "containers" / "1" / "job.json").read_text(encoding="utf-8")
-    for leak in (GT_MARKER, ".xml", "secret-split", "newspaper", "data set"):
+    gt_hashes = [sample.gt_sha256 for sample in run.samples]
+    for leak in (GT_MARKER, ".xml", "secret-split", "newspaper", "data set", *gt_hashes):
         assert leak not in job
     for sample in run.samples:
         seen = json.loads((attempt_dir(run, sample.id) / "output" / "seen.json").read_text())
@@ -290,6 +305,79 @@ def test_image_changed_after_creation_is_an_input_error(tmp_path):
     Image.new("L", (10, 10), 0).save(manifest.parent / "s1.PNG")
     execute(run, ProcessLauncher(FAKE), poll_interval=0.02)
     assert "changed" in records(run)["s1"]["message"]
+
+
+def test_negative_engine_seconds_is_invalid_output(tmp_path):
+    out = tmp_path / "s1"
+    out.mkdir()
+    (out / "page.txt").write_text("text\n", encoding="utf-8")
+    (out / "result.json").write_text('{"status": "ok", "primary": "page.txt", "seconds": -1}')
+    outcome = runner._evaluate(out, None)
+    assert outcome.reason == "invalid-output"
+    assert "finite nonnegative" in outcome.message
+
+
+def test_staged_images_are_copies_not_links_to_the_source(tmp_path):
+    """An in-place edit of the source after staging must not change what the engine reads."""
+    manifest = make_dataset(tmp_path, {"s1": "page", "s2": "page"})
+    run = create_run(engine(), manifest, tmp_path / "runs", runtime="process")
+    frozen = {sample.id: sample.image_sha256 for sample in run.samples}
+
+    class EditingLauncher(ProcessLauncher):
+        def start(self, name, input_dir, output_dir, log):
+            for sample in run.samples:  # same inode, new bytes
+                with open(sample.image, "r+b") as stream:
+                    stream.seek(-1, os.SEEK_END)
+                    stream.write(b"\x00")
+            return super().start(name, input_dir, output_dir, log)
+
+    execute(run, EditingLauncher(FAKE), poll_interval=0.02)
+    for sample in run.samples:
+        seen = json.loads((attempt_dir(run, sample.id) / "output" / "seen.json").read_text())
+        assert seen["image_sha256"] == frozen[sample.id]
+        assert hashlib.sha256(sample.image.read_bytes()).hexdigest() != frozen[sample.id]
+        assert records(run)[sample.id]["status"] == "success"
+
+
+def test_gt_identity_is_frozen_and_changes_are_detected(tmp_path, capsys):
+    manifest = make_dataset(tmp_path, {"same": "page", "edited": "page", "gone": "page"})
+    run = create_run(engine(), manifest, tmp_path / "runs", runtime="process")
+    data = manifest.parent
+    frozen = json.loads((run.path / "run.json").read_text(encoding="utf-8"))["samples"]
+    for entry in frozen:
+        gt = data / f"{entry['id']}.xml"
+        assert entry["gt"] == str(gt)
+        assert entry["gt_sha256"] == hashlib.sha256(gt.read_bytes()).hexdigest()
+        assert entry["gt_error"] is None
+    assert verify_ground_truth(run) == []
+    # the GT is corrected in place; the manifest (and its hash) stays the same
+    manifest_before = manifest.read_bytes()
+    (data / "edited.xml").write_text("<PcGts>corrected</PcGts>", encoding="utf-8")
+    (data / "gone.xml").unlink()
+    assert manifest.read_bytes() == manifest_before
+    found = {issue.sample_id: issue.code for issue in verify_ground_truth(load_run(run.path))}
+    assert found == {"edited": "gt-changed", "gone": "gt-unreadable"}
+    assert main(["run", "status", str(run.path)]) == 0
+    err = capsys.readouterr().err
+    assert "[gt-changed] edited" in err
+    assert "[gt-unreadable] gone" in err
+
+
+def test_unavailable_gt_is_recorded_as_unpinned(tmp_path):
+    manifest = make_dataset(tmp_path, {"missing": "page", "wrong": "page"})
+    (manifest.parent / "missing.xml").unlink()
+    data = json.loads(manifest.read_text(encoding="utf-8"))
+    data["samples"][1]["gt_sha256"] = "0" * 64
+    manifest.write_text(json.dumps(data), encoding="utf-8")
+    run = create_run(engine(), manifest, tmp_path / "runs", runtime="process")
+    pinned = {s.id: (s.gt_sha256, s.gt_error) for s in run.samples}
+    assert pinned["missing"][0] is None
+    assert "cannot read GT" in pinned["missing"][1]
+    assert pinned["wrong"] == (None, "GT does not match gt_sha256 in the manifest")
+    assert {i.code for i in verify_ground_truth(run)} == {"gt-unpinned"}
+    # OCR does not need GT: both samples still run
+    execute(run, ProcessLauncher(FAKE), poll_interval=0.02)
+    assert {r["status"] for r in records(run).values()} == {"success"}
 
 
 def test_run_is_locked_against_a_second_runner(tmp_path):
