@@ -2,7 +2,7 @@
 
 Compare OCR and handwritten text recognition (HTR) systems on **raster images of books, magazines and newspapers**, particularly complex and historical prints.
 
-**Project status:** early implementation. Python project tooling, shared CPU/CUDA Docker base images ([setup](CONTRIBUTING.md#development-setup-and-commands), [Docker](docs/DOCKER.md)) and dataset manifests with a PAGE XML reader and validator ([datasets](docs/DATASETS.md)), the standardized prediction format with its validator and Markdown/HTML conversion ([predictions](docs/PREDICTIONS.md)), the Docker runner with per-sample execution records ([runner](docs/RUNNER.md)) and strict ordered and flexible (order-independent) CER/WER, bag-of-words and ROUGE-2 scoring of stored runs ([evaluation](docs/EVALUATION.md)) exist. Engine adapters and reports are *not yet implemented*.
+**Project status:** early implementation. Python project tooling, shared CPU/CUDA Docker base images ([setup](CONTRIBUTING.md#development-setup-and-commands), [Docker](docs/DOCKER.md)) and dataset manifests with a PAGE XML reader and validator ([datasets](docs/DATASETS.md)), the standardized prediction format with its validator and Markdown/HTML conversion ([predictions](docs/PREDICTIONS.md)), the Docker runner with per-sample execution records ([runner](docs/RUNNER.md)) and strict ordered and flexible (order-independent) CER/WER, bag-of-words and ROUGE-2 scoring of stored runs ([evaluation](docs/EVALUATION.md)) and comparison reports of evaluated runs in CSV, JSON and HTML ([reports](docs/REPORTS.md)) exist. Engine adapters are *not yet implemented*.
 
 ## Use cases
 
@@ -19,15 +19,15 @@ For initial development, there is a **small, separately held set of page images 
 
 Engines provide UTF-8 transcription plus versioned JSON with optional typed regions, optional lines and optional positions ([predictions](docs/PREDICTIONS.md)); native OCR outputs are retained. Strict ordered CER/WER, flexible CER/WER that tolerate column order and segmentation differences, bag-of-words precision/recall/F1 and ROUGE-2 are implemented. See [evaluation](docs/EVALUATION.md) for the metric families and the exact definitions.
 
-## Quick start (planned)
+## Quick start
 
-`dataset validate|text`, `prediction validate|convert`, `run start|resume|status` and `evaluate` work today (see [datasets](docs/DATASETS.md), [predictions](docs/PREDICTIONS.md), [runner](docs/RUNNER.md) and [evaluation](docs/EVALUATION.md#command-and-stored-scores)); no engine adapter exists yet. `report` is a **proposed command, not runnable**:
+`dataset validate|text`, `prediction validate|convert`, `run start|resume|status`, `evaluate` and `report` work today (see [datasets](docs/DATASETS.md), [predictions](docs/PREDICTIONS.md), [runner](docs/RUNNER.md), [evaluation](docs/EVALUATION.md#command-and-stored-scores) and [reports](docs/REPORTS.md)); no engine adapter exists yet, so there is nothing real to run:
 
 ```sh
 ocrbench dataset validate <dataset-manifest>
 ocrbench run start --engine <engine.toml> --dataset <dataset-manifest>
 ocrbench evaluate runs/<run-id>
-ocrbench report --run <run-id>     # planned
+ocrbench report runs/<run-id> [runs/<other-run-id> ...] -o reports/<name> [--inspect]
 ```
 
 Linux is the target platform, with per-engine Docker environments (shared CUDA/CPU bases where compatible, see [docs/DOCKER.md](docs/DOCKER.md)) and an RTX 4090 as a primary GPU test device. Consult [CONTRIBUTING.md](CONTRIBUTING.md) for the testing and PR policy.

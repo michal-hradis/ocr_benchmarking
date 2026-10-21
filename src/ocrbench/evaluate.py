@@ -192,7 +192,7 @@ def _scores_json(scores: SampleScores | None) -> dict[str, Any]:
     }
 
 
-def _reference_lines(sample_id: str, gt: Path) -> list[str]:
+def reference_lines(sample_id: str, gt: Path) -> list[str]:
     page, issues = read_page_xml(gt, sample_id)
     errors = [issue.format() for issue in issues if issue.severity is Severity.ERROR]
     if page is None or errors:
@@ -200,7 +200,9 @@ def _reference_lines(sample_id: str, gt: Path) -> list[str]:
     return [line.text for line in page.reference_lines]
 
 
-def _prediction(run: Run, sample: RunSample, record: dict[str, Any]) -> tuple[Prediction, str]:
+def stored_prediction(
+    run: Run, sample: RunSample, record: dict[str, Any]
+) -> tuple[Prediction, str]:
     """The standardized prediction of a valid output (never native Markdown or HTML) and the
     SHA-256 of the stored file, revalidated against the image size frozen with the run."""
     if record["prediction"] is None:
@@ -221,7 +223,7 @@ def _sample(
     run: Run, sample: RunSample, record: dict[str, Any], config: EvalConfig
 ) -> tuple[dict[str, Any], SampleScores | None]:
     # GT is checked for every sample: the failure policy only decides what is aggregated.
-    reference = _reference_lines(sample.id, sample.gt)
+    reference = reference_lines(sample.id, sample.gt)
     failed = record["status"] == "failure"
     prediction_sha256 = None
     if failed and config.failure_policy == "exclude":
@@ -230,7 +232,7 @@ def _sample(
         # A failure is scored as an empty input here; no prediction is created or stored.
         hypothesis, lines = "", []
         if not failed:
-            prediction, prediction_sha256 = _prediction(run, sample, record)
+            prediction, prediction_sha256 = stored_prediction(run, sample, record)
             hypothesis, lines = prediction.text, prediction_lines(prediction)
         source = "empty" if failed else "prediction"
         scores = SampleScores(

@@ -88,7 +88,7 @@ Aggregates are computed for all samples, for each unit (`page`, `paragraph`) and
 uv run ocrbench evaluate runs/<run-id> [--config eval.toml]
 ```
 
-It prints the micro scores per group, including flexible CER/WER (`fCER`, `fWER`). A flexible score marked `*` includes samples whose result is not proven optimal; a closing line gives their number for fCER and fWER and points to `exact` and `lower_bound` in `scores.json`. The command writes `runs/<run-id>/evaluations/<n>/scores.json` in a new numbered directory; earlier evaluations are never overwritten. The command exits with status 1, and writes nothing, when the run cannot be scored:
+It logs every non-`success` sample on stderr with its status, reason and how it was scored, and prints the micro scores per group, including flexible CER/WER (`fCER`, `fWER`). A flexible score marked `*` includes samples whose result is not proven optimal; a closing line gives their number for fCER and fWER and points to `exact` and `lower_bound` in `scores.json`. The command writes `runs/<run-id>/evaluations/<n>/scores.json` in a new numbered directory; earlier evaluations are never overwritten. The command exits with status 1, and writes nothing, when the run cannot be scored:
 
 - a sample is still **pending** (finish the run with `run resume` first);
 - a GT file **changed**, cannot be read, or was not pinned when the run was created (`ocrbench.runner.verify_ground_truth`), so predictions are only ever compared with the GT frozen with the run;
@@ -111,7 +111,7 @@ failure_policy = "empty-output"  # empty-output (default) or exclude
 - **Explicit override: `exclude`.** A user may configure an alternate calculation that excludes failed samples from its metric aggregate; this is **not the default primary score**. Any excluded-sample score must be clearly labelled and shown with coverage (scored samples / all benchmark samples), with counts and reasons for failures. Results computed with different failure policies must not be silently compared.
 - **`partial` and `truncated`** samples are scored using the output actually produced (including omissions); their status is retained. If the output cannot be validated as a prediction, record a `failure` instead.
 - **Execution failure is not a successful empty transcription.** The runner records each sample's execution status/reason/provenance even if no valid OCR prediction exists. The evaluator may synthesize an **empty scoring input** for a failure; it must never silently invent or persist a successful OCR result.
-- Every non-`success` sample is **logged, counted and enumerated** in reports. The default/override is stored in the evaluation configuration and versioned score ([#10](https://github.com/michal-hradis/ocr_benchmarking/issues/10)).
+- Every non-`success` sample is **logged** by `ocrbench evaluate`, and **counted and enumerated** in reports under both policies ([REPORTS.md](REPORTS.md#failures)). The policy is stored in the evaluation configuration and versioned score, and runs scored under different policies are never put in one report.
 
 ## Later extensions
 

@@ -50,7 +50,7 @@ Everything runs **locally on one Linux machine**. The OCR inference component ru
 | Output contract | Versioned JSON for page text, flat optional regions with optional lines and positions; validator; shared host-side conversion of plain-text, Markdown and HTML output ([PREDICTIONS.md](PREDICTIONS.md), [ADR 0006](adr/0006-standardized-prediction-format.md)) | Prescribe how engines segment | [#6](https://github.com/michal-hradis/ocr_benchmarking/issues/6) |
 | Runner and CLI | Launch isolated containers with the image and allowed metadata; record status, provenance and resources; persist outputs ([RUNNER.md](RUNNER.md), [ADR 0007](adr/0007-runner-and-engine-protocol.md)) | Tile, crop or resize images; expose GT to an engine container | [#7](https://github.com/michal-hradis/ocr_benchmarking/issues/7) |
 | Evaluator | Compute ordered and flexible metrics against GT from stored outputs, using a versioned evaluation config ([EVALUATION.md](EVALUATION.md), [ADRs 0008](adr/0008-strict-text-metrics.md), [0009](adr/0009-flexible-line-alignment.md)) | Run engines | [#8](https://github.com/michal-hradis/ocr_benchmarking/issues/8), [#9](https://github.com/michal-hradis/ocr_benchmarking/issues/9) |
-| Reporter | Per-sample and aggregate results, GT-versus-prediction inspection, diagnostics, enumerated failures and truncations, provenance | Recompute or alter scores | [#10](https://github.com/michal-hradis/ocr_benchmarking/issues/10) |
+| Reporter | Per-sample and aggregate results, GT-versus-prediction inspection, diagnostics, enumerated failures and truncations, provenance ([REPORTS.md](REPORTS.md), [ADR 0010](adr/0010-reports.md)) | Recompute or alter scores | [#10](https://github.com/michal-hradis/ocr_benchmarking/issues/10) |
 | Development tooling and base images | Linux Python environment; shared CPU/CUDA base image families | Add CI | [#4](https://github.com/michal-hradis/ocr_benchmarking/issues/4) |
 
 ## Contracts
@@ -104,10 +104,6 @@ Every engine adapter requires the common contracts in #4–#7. Evaluation and re
 
 ## Open implementation choices
 
-The issues below own these choices. The architecture deliberately leaves them undecided. Normalization, tokenization, edit counts and empty cases were decided in [#8](https://github.com/michal-hradis/ocr_benchmarking/issues/8) ([EVALUATION.md](EVALUATION.md#strict-metrics-metrics-version-1)). Flexible matching, split/merge accounting, candidate retrieval and unmatched predictions were decided in [#9](https://github.com/michal-hradis/ocr_benchmarking/issues/9) ([EVALUATION.md](EVALUATION.md#flexible-cer-and-wer-metrics-version-2)).
-
-| Choice | Owner |
-| --- | --- |
-| Report layout and formats; primary empty-output score, optional exclude view, and coverage/failure displays | [#10](https://github.com/michal-hradis/ocr_benchmarking/issues/10) |
+The issues below own these choices. The architecture deliberately leaves them undecided. Normalization, tokenization, edit counts and empty cases were decided in [#8](https://github.com/michal-hradis/ocr_benchmarking/issues/8) ([EVALUATION.md](EVALUATION.md#strict-metrics-metrics-version-1)). Flexible matching, split/merge accounting, candidate retrieval and unmatched predictions were decided in [#9](https://github.com/michal-hradis/ocr_benchmarking/issues/9) ([EVALUATION.md](EVALUATION.md#flexible-cer-and-wer-metrics-version-2)). Report layout, formats and the failure and coverage displays were decided in [#10](https://github.com/michal-hradis/ocr_benchmarking/issues/10) ([REPORTS.md](REPORTS.md)). No open choice is currently assigned.
 
 Development and testing rules are in [CONTRIBUTING.md](../CONTRIBUTING.md).

@@ -47,6 +47,7 @@ make check   # ruff lint + format check, then offline unit tests
 | `uv run ocrbench prediction validate\|convert …` | Validate a prediction JSON or convert native text/Markdown/HTML, see [docs/PREDICTIONS.md](docs/PREDICTIONS.md) |
 | `uv run ocrbench run start\|resume\|status …` | Run an engine image over a dataset and record every sample, see [docs/RUNNER.md](docs/RUNNER.md) |
 | `uv run ocrbench evaluate <run-dir> [--config eval.toml]` | Score a finished run against its frozen GT, see [docs/EVALUATION.md](docs/EVALUATION.md#command-and-stored-scores) |
+| `uv run ocrbench report <run-dir>... -o <new-dir> [--inspect]` | Compare evaluated runs in CSV, JSON and HTML, see [docs/REPORTS.md](docs/REPORTS.md) |
 | `make docker-cpu`, `make docker-cu130-torch` | Build base images |
 | `make docker-smoke`, `make gpu-preflight`, `make gpu-smoke` | Opt-in Docker and GPU checks (including the fake-engine runner tests), see [docs/DOCKER.md](docs/DOCKER.md) |
 
