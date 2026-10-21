@@ -10,6 +10,7 @@ layout grouping; all lines of a page go into one region in PaddleOCR's order.
 from __future__ import annotations
 
 import json
+import math
 import os
 import re
 import sys
@@ -32,8 +33,13 @@ DEFAULT_PARAMS: dict[str, Any] = {
     "text_recognition_batch_size": None,
 }
 INT_PARAMS = {"text_det_limit_side_len": 1, "text_recognition_batch_size": 1}  # name: minimum
-FLOAT_PARAMS = {"text_det_thresh", "text_det_box_thresh", "text_det_unclip_ratio"}
-FLOAT_PARAMS |= {"text_rec_score_thresh"}
+# name: (check, description); scores are in [0, 1], detection parameters must be positive.
+FLOAT_PARAMS = {
+    "text_det_thresh": (lambda v: 0 < v <= 1, "a number with 0 < value <= 1"),
+    "text_det_box_thresh": (lambda v: 0 < v <= 1, "a number with 0 < value <= 1"),
+    "text_det_unclip_ratio": (lambda v: v > 0, "a finite number greater than 0"),
+    "text_rec_score_thresh": (lambda v: 0 <= v <= 1, "a number from 0 to 1"),
+}
 
 
 class AdapterError(Exception):
@@ -55,10 +61,12 @@ def parse_params(params: dict[str, Any]) -> dict[str, Any]:
         value = merged[key]
         if value is not None and (type(value) is not int or value < low):
             raise AdapterError(f"{key} must be an integer of at least {low}: {value!r}")
-    for key in FLOAT_PARAMS:
+    for key, (check, description) in FLOAT_PARAMS.items():
         value = merged[key]
-        if value is not None and (type(value) not in (int, float) or not 0 <= value <= 10):
-            raise AdapterError(f"{key} must be a number from 0 to 10: {value!r}")
+        if value is None:
+            continue
+        if type(value) not in (int, float) or not math.isfinite(value) or not check(value):
+            raise AdapterError(f"{key} must be {description}: {value!r}")
     return merged
 
 

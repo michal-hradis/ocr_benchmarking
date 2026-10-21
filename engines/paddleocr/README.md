@@ -39,9 +39,10 @@ The container runs with `--gpus all` (`[resources]` in `engine.toml`) and uses `
 | Parameter | Default | Meaning |
 | --- | --- | --- |
 | `device` | `gpu:0` | Paddle device, `gpu:<n>` |
-| `text_det_limit_side_len`, `text_det_limit_type` | 64, `min` | Detection input scaling: the shorter (`min`) or longer (`max`) side is scaled to at least / at most this many pixels; the pipeline also caps the longer side at 4000 |
-| `text_det_thresh`, `text_det_box_thresh`, `text_det_unclip_ratio` | 0.3, 0.6, 1.5 | DB detector pixel threshold, box score threshold and box expansion |
-| `text_rec_score_thresh` | 0.0 | Lines with a lower recognition score are dropped |
+| `text_det_limit_side_len`, `text_det_limit_type` | 64, `min` | Detection input scaling: the shorter (`min`) or longer (`max`) side is scaled to at least / at most this many pixels; the pipeline also caps the longer side at 4000 (`max_side_limit`, not configurable by this adapter) |
+| `text_det_thresh`, `text_det_box_thresh` | 0.3, 0.6 | DB detector pixel threshold and box score threshold, `0 < value <= 1` |
+| `text_det_unclip_ratio` | 1.5 | DB box expansion ratio, a finite number `> 0` |
+| `text_rec_score_thresh` | 0.0 | Lines with a lower recognition score are dropped, `0 <= value <= 1` (a higher value would silently drop every line, so it is rejected) |
 | `text_recognition_batch_size` | 6 | Lines recognized per batch |
 
 Fixed: document orientation classification and unwarping are **off**, because they would transform the image so that positions no longer refer to the input; the text line orientation classifier is off because its model is not in the image. The sample `language` is not used; the recognition model is multilingual.

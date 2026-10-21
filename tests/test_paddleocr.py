@@ -105,11 +105,31 @@ def test_inconsistent_or_preprocessed_results_are_rejected():
         ({"text_recognition_batch_size": 2.5}, "text_recognition_batch_size"),
         ({"text_det_thresh": "0.3"}, "text_det_thresh"),
         ({"text_rec_score_thresh": -1}, "text_rec_score_thresh"),
+        ({"text_rec_score_thresh": 2}, "text_rec_score_thresh"),  # would drop every line
+        ({"text_det_box_thresh": 2}, "text_det_box_thresh"),
+        ({"text_det_thresh": 0}, "text_det_thresh"),
+        ({"text_det_box_thresh": 0.0}, "text_det_box_thresh"),
+        ({"text_det_unclip_ratio": 0}, "text_det_unclip_ratio"),
+        ({"text_det_unclip_ratio": float("inf")}, "text_det_unclip_ratio"),
+        ({"text_det_thresh": float("nan")}, "text_det_thresh"),
+        ({"text_rec_score_thresh": True}, "text_rec_score_thresh"),
     ],
 )
 def test_invalid_params_are_rejected(params, message):
     with pytest.raises(pocr.AdapterError, match=message):
         pocr.parse_params(params)
+
+
+@pytest.mark.parametrize(
+    "params",
+    [
+        {"text_rec_score_thresh": 0},  # the pipeline default
+        {"text_rec_score_thresh": 1.0, "text_det_thresh": 1, "text_det_box_thresh": 0.01},
+        {"text_det_unclip_ratio": 25.0},  # an expansion ratio, not a score: no upper bound
+    ],
+)
+def test_valid_thresholds_are_accepted(params):
+    assert pocr.parse_params(params).items() >= params.items()
 
 
 def test_pipeline_uses_pinned_models_without_document_preprocessing():
