@@ -1,0 +1,21 @@
+# Tesseract CPU baseline (README.md next to this file; format: docs/RUNNER.md).
+name = "tesseract"
+engine_version = "1"
+image = "ocrbench/engine-tesseract:5.3.0-v1"
+model = "tessdata_fast@4.1.0"
+
+[params]
+lang = "ces+deu+eng"  # traineddata in the image: ces, deu, eng (and osd)
+psm = 3               # fully automatic page segmentation
+oem = 1               # LSTM; the fast models have no legacy engine
+
+[env]
+OMP_THREAD_LIMIT = "1"  # Tesseract's OpenMP threads; single-threaded, matching cpus
+
+[resources]
+cpus = 1
+memory = "2g"
+
+[timeouts]
+sample = 300
+startup = 60
