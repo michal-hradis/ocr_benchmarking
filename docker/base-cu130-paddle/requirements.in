@@ -1,0 +1,6 @@
+# PaddlePaddle GPU 3.4.0 for CUDA 13.0, by direct URL from the official wheel host (the
+# target of https://www.paddlepaddle.org.cn/packages/stable/cu130/), so that only this
+# package comes from there; its dependencies come from PyPI.
+paddlepaddle-gpu @ https://paddle-whl.cdn.bcebos.com/stable/cu130/paddlepaddle-gpu/paddlepaddle_gpu-3.4.0-cp312-cp312-linux_x86_64.whl
+# PaddleX 3.7 (PaddleOCR 3.7) requires numpy<2.4.
+numpy<2.4

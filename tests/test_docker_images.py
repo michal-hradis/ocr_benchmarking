@@ -22,10 +22,17 @@ CPU_IMAGE = os.environ.get("CPU_IMAGE", "ocrbench/base-cpu:py3.12-v1")
 CU130_TORCH_IMAGE = os.environ.get(
     "CU130_TORCH_IMAGE", "ocrbench/base-cu130-torch:torch2.14.1-py3.12-v1"
 )
+CU130_PADDLE_IMAGE = os.environ.get(
+    "CU130_PADDLE_IMAGE", "ocrbench/base-cu130-paddle:paddle3.4.0-py3.12-v1"
+)
 
 
 def test_base_dockerfiles_exist():
-    assert {p.parent.name for p in DOCKERFILES} >= {"base-cpu", "base-cu130-torch"}
+    assert {p.parent.name for p in DOCKERFILES} >= {
+        "base-cpu",
+        "base-cu130-torch",
+        "base-cu130-paddle",
+    }
 
 
 @pytest.mark.parametrize("dockerfile", DOCKERFILES, ids=lambda p: str(p.parent.relative_to(ROOT)))
@@ -61,11 +68,21 @@ def test_final_user_is_not_root(dockerfile):
     assert users[-1] not in {"root", "0"}
 
 
-def test_torch_requirements_are_hashed():
-    lines = (DOCKER_DIR / "base-cu130-torch" / "requirements.txt").read_text().splitlines()
+@pytest.mark.parametrize(
+    ("requirements", "pinned"),
+    [
+        (DOCKER_DIR / "base-cu130-torch" / "requirements.txt", "torch==2.14.1+cu130"),
+        (DOCKER_DIR / "base-cu130-paddle" / "requirements.txt", "paddlepaddle-gpu @ https://"),
+        (ROOT / "engines" / "paddleocr" / "requirements.txt", "paddleocr==3.7.0"),
+    ],
+    ids=lambda v: v.parent.name if isinstance(v, Path) else None,
+)
+def test_requirements_are_pinned_and_hashed(requirements, pinned):
+    lines = requirements.read_text().splitlines()
     pins = [line for line in lines if re.match(r"^[A-Za-z0-9]", line)]
-    assert any(line.startswith("torch==2.14.1+cu130") for line in pins)
-    assert all("==" in line for line in pins)
+    assert any(line.startswith(pinned) for line in pins)
+    assert all("==" in line or " @ https://" in line for line in pins)
+    assert all(line.endswith("\\") for line in pins)  # each pin is followed by its hashes
     assert "--hash=sha256:" in "\n".join(lines)
 
 
