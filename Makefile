@@ -1,7 +1,7 @@
 # Local developer commands. There is no CI; run the targets relevant to your change.
 .PHONY: help setup lint format test check docker-cpu docker-cu130-torch docker-lock \
         docker-smoke gpu-preflight gpu-smoke docker-tesseract tesseract-smoke \
-        docker-cu130-paddle docker-paddleocr paddleocr-smoke
+        docker-cu130-paddle docker-paddleocr paddleocr-smoke docker-kraken kraken-smoke
 
 UV ?= uv
 BASE_VERSION ?= 1
@@ -10,6 +10,7 @@ CU130_TORCH_IMAGE ?= ocrbench/base-cu130-torch:torch2.14.1-py3.12-v$(BASE_VERSIO
 CU130_PADDLE_IMAGE ?= ocrbench/base-cu130-paddle:paddle3.4.0-py3.12-v$(BASE_VERSION)
 TESSERACT_IMAGE := ocrbench/engine-tesseract:5.3.0-v1
 PADDLEOCR_IMAGE := ocrbench/engine-paddleocr:3.7.0-v1
+KRAKEN_IMAGE := ocrbench/engine-kraken:7.1.1-v1
 LOCK := $(UV) pip compile --python-version 3.12 --python-platform x86_64-manylinux_2_28 \
 	--generate-hashes --no-header --custom-compile-command "make docker-lock"
 export CPU_IMAGE CU130_TORCH_IMAGE CU130_PADDLE_IMAGE
@@ -45,13 +46,17 @@ docker-cu130-paddle:  ## Build the CUDA 13.0 + PaddlePaddle base image (multi-GB
 	docker build -t $(CU130_PADDLE_IMAGE) docker/base-cu130-paddle
 	@docker image inspect --format '$(CU130_PADDLE_IMAGE) {{.Id}}' $(CU130_PADDLE_IMAGE)
 
-docker-lock:  ## Re-lock the hashed requirements of the CUDA bases and the PaddleOCR engine
+docker-lock:  ## Re-lock the hashed requirements of the CUDA bases and the GPU engines
 	$(LOCK) docker/base-cu130-torch/requirements.in \
 		--index-url https://download.pytorch.org/whl/cu130 \
 		-o docker/base-cu130-torch/requirements.txt
 	$(LOCK) docker/base-cu130-paddle/requirements.in -o docker/base-cu130-paddle/requirements.txt
 	$(LOCK) engines/paddleocr/requirements.in -c docker/base-cu130-paddle/requirements.txt \
 		-o engines/paddleocr/requirements.txt
+	$(LOCK) engines/kraken/requirements.in -c docker/base-cu130-torch/requirements.txt \
+		--override engines/kraken/overrides.txt --index-url https://pypi.org/simple \
+		--extra-index-url https://download.pytorch.org/whl/cu130 --index-strategy unsafe-best-match \
+		-o engines/kraken/requirements.txt
 
 docker-smoke:  ## Smoke-test built bases, a derived CPU image and the fake-engine runner (opt-in)
 	$(UV) run --locked pytest -m docker --run-docker tests/test_docker_images.py tests/test_runner.py
@@ -69,6 +74,13 @@ docker-paddleocr:  ## Build the PaddleOCR engine image (needs the Paddle base) a
 
 paddleocr-smoke:  ## Build the PaddleOCR image and run, evaluate and report a synthetic dataset on the GPU (opt-in)
 	$(UV) run --locked pytest -m gpu --run-docker --run-gpu tests/test_paddleocr.py
+
+docker-kraken:  ## Build the Kraken engine image (needs the torch base) and print its image ID
+	docker build -t $(KRAKEN_IMAGE) engines/kraken
+	@docker image inspect --format '$(KRAKEN_IMAGE) {{.Id}}' $(KRAKEN_IMAGE)
+
+kraken-smoke:  ## Build the Kraken image and run, evaluate and report a synthetic dataset on the GPU (opt-in)
+	$(UV) run --locked pytest -m gpu --run-docker --run-gpu tests/test_kraken.py
 
 gpu-preflight:  ## Check host driver, Docker and NVIDIA Container Toolkit
 	scripts/gpu_preflight.sh

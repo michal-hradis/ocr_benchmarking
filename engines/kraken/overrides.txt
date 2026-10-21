@@ -1,0 +1,2 @@
+# Kraken 7.1.1 declares torch<=2.14, which excludes the base's 2.14.1 patch release (README.md).
+torch==2.14.1+cu130
