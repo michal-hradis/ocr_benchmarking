@@ -27,7 +27,7 @@ Changing the evaluation configuration, or rerunning failed samples with `run res
 - a scored `prediction.json` no longer matches its stored SHA-256;
 - a GT file differs from the GT frozen with the run (`gt-changed`, `gt-unreadable`, `gt-unpinned`).
 
-Runs in one report must also be **comparable**. They need the same metrics version, the same evaluation configuration (`config_sha256`, which includes the Unicode form and the failure policy) and the same sample IDs with the same GT hashes. A run may appear only once. Otherwise the report is refused, so scores computed under different failure policies are never shown side by side.
+Runs in one report must also be **comparable**. They need the same metrics version and the same evaluation configuration (`config_sha256`, which includes the Unicode form and the failure policy). Every sample ID must have the same frozen input in every run: image SHA-256, GT SHA-256, unit and document type. A sample whose image or GT was not pinned when its run was created cannot be compared, so a report with more than one run refuses it. A run may appear only once. Otherwise the report is refused, so scores computed under different failure policies, or on different images, are never shown side by side.
 
 ## Output
 
@@ -58,7 +58,7 @@ reports/<name>/
 - for `fcer` and `fwer` also `lower_bound_rate` and `not_exact`;
 - for `bow` and `rouge2`: micro precision, recall, F1, matched, reference and hypothesis counts, and the macro F1 with its sample count.
 
-Rates are fractions, not percentages, and an undefined value is an empty cell.
+Rates are fractions, not percentages, and an undefined value is an empty cell. A text cell that a spreadsheet could read as a formula (one starting with `=`, `+`, `-` or `@`, also after leading whitespace, or with a tab or carriage return) gets a leading `'`. This matters for free-text fields such as the model or the document type.
 
 **`samples.csv`** has one row per run and sample:
 
@@ -91,7 +91,7 @@ With `--inspect`, each run and sample gets a page that shows:
 - the status, reason, the engine's message and a link to the execution record;
 - the counts (S, D, I and reference length) of CER, WER, fCER and fWER;
 - the **ordered differences**: the normalized reference in reading order against the normalized page text of the stored prediction. Missing reference text is marked as deleted, extra predicted text as inserted;
-- the **flexible groups** of fCER, in prediction order. Each group shows its reference and prediction line ranges, from the stored `group_lines`, with the differences inside it. The unmatched reference and prediction lines are listed with their line numbers.
+- the **flexible groups** of fCER, in prediction order. Each group shows its reference and prediction line ranges, from the stored `group_lines`, with the differences inside it. The ranges are indices of the input lines; lines that normalize to nothing are skipped, as in the alignment. The unmatched non-empty reference and prediction lines are listed with their line numbers.
 
 A failure scored as `empty` shows the whole reference as deleted. An `excluded` sample shows only its reference text.
 
@@ -99,4 +99,4 @@ The pages read the PAGE XML and the stored prediction on the host. The differenc
 
 ## Safety
 
-OCR text, GT text and engine messages are untrusted. Every value in the HTML is escaped, and the pages contain no scripts. Links to execution records and `scores.json` are relative paths to the local run directory.
+OCR text, GT text and engine messages are untrusted. Every value in the HTML is escaped, and the pages contain no scripts. CSV text cells are protected against formula evaluation (see above). Links to execution records and `scores.json` are relative paths to the local run directory.
