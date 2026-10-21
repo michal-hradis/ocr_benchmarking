@@ -7,12 +7,15 @@ synthetic PAGE XML whose reference text is chosen per test.
 import hashlib
 import json
 import sys
+from dataclasses import replace
 from pathlib import Path
 from xml.sax.saxutils import escape
 
 import pytest
 from PIL import Image
 
+from ocrbench import evaluate
+from ocrbench.alignment import score_flexible
 from ocrbench.cli import main
 from ocrbench.engine import parse_engine_config
 from ocrbench.evaluate import (
@@ -259,6 +262,27 @@ def test_cli_evaluate(tmp_path, capsys):
     assert not (run.path / "evaluations" / "3").exists()
 
 
+def test_cli_marks_flexible_scores_that_are_not_proven_optimal(tmp_path, capsys, monkeypatch):
+    run = make_run(tmp_path, SAMPLES)
+    assert main(["evaluate", str(run.path)]) == 0
+    assert "not proven optimal" not in capsys.readouterr().out
+
+    def inexact(*args, **kwargs):
+        scores = score_flexible(*args, **kwargs)
+        return replace(scores, chars=replace(scores.chars, exact=False))
+
+    monkeypatch.setattr(evaluate, "score_flexible", inexact)
+    assert main(["evaluate", str(run.path)]) == 0
+    lines = capsys.readouterr().out.splitlines()
+    header = lines[0].split()
+    overall = next(line.split() for line in lines if line.startswith("all "))
+    fcer, fwer = header.index("fCER"), header.index("fWER")
+    assert overall[fcer].endswith("*")
+    assert not overall[fwer].endswith("*")
+    assert "* not proven optimal, may overstate errors: fCER 4 of 4, fWER 0 of 4" in lines[-1]
+    assert "lower_bound" in lines[-1]
+
+
 @pytest.mark.parametrize("policy", ["empty-output", "exclude"])
 def test_invalid_gt_is_refused_even_for_an_excluded_failure(tmp_path, policy):
     # The GT is malformed already when the run is created, so its hash is pinned and unchanged.
@@ -324,6 +348,8 @@ def test_flexible_scores_tolerate_reordered_output(tmp_path):
         "exact": True,
         "method": "exhaustive",
         "groups": 2,
+        # GT line and prediction line ranges; prediction line 1 is the empty Markdown line.
+        "group_lines": [[1, 2, 0, 1], [0, 1, 2, 3]],
         "order_breaks": 1,
         "unmatched_reference_units": 0,
         "unmatched_hypothesis_units": 0,

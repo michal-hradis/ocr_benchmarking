@@ -150,13 +150,14 @@ def _overlap_json(counts: Overlap) -> dict[str, Any]:
     }
 
 
-def _alignment_json(alignment: Alignment) -> dict[str, Any]:
+def _alignment_json(alignment: Alignment, flexible: FlexibleScores) -> dict[str, Any]:
     return {
         **_edit_json(alignment.counts),
         "lower_bound": alignment.lower_bound,
         "exact": alignment.exact,
         "method": alignment.method,
         "groups": len(alignment.groups),
+        "group_lines": [list(r) for r in flexible.line_ranges(alignment)],
         "order_breaks": alignment.order_breaks,
         "unmatched_reference_units": alignment.unmatched_reference,
         "unmatched_hypothesis_units": alignment.unmatched_hypothesis,
@@ -181,8 +182,8 @@ def _scores_json(scores: SampleScores | None) -> dict[str, Any]:
         "words": _edit_json(text.words),
         "bag_of_words": _overlap_json(text.bag_of_words),
         "rouge2": _overlap_json(text.rouge2),
-        "flexible_chars": _alignment_json(flexible.chars),
-        "flexible_words": _alignment_json(flexible.words),
+        "flexible_chars": _alignment_json(flexible.chars, flexible),
+        "flexible_words": _alignment_json(flexible.words, flexible),
         "flexible_units": {
             "reference": flexible.reference_units,
             "hypothesis": flexible.hypothesis_units,

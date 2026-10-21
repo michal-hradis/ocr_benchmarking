@@ -228,13 +228,26 @@ def _evaluate(args: argparse.Namespace) -> int:
     print(f"{'group':<32} {'samples':>7} {'coverage':>8}", *(f"{c[0]:>7}" for c in columns))
     for group in scores["aggregates"]:
         name = "/".join("-" if v is None else str(v) for v in group["group"].values()) or "all"
-        values = [_percent((group[key]["micro"] or {}).get(m)) for _, key, m in columns]
+        # "*": the flexible score of some samples in the group is not proven optimal.
+        values = [
+            _percent((group[key]["micro"] or {}).get(m))
+            + ("*" if group[key].get("not_exact") else "")
+            for _, key, m in columns
+        ]
         print(
             f"{name:<32} {group['samples']:>7} {_percent(group['coverage']):>8}",
             *(f"{v:>7}" for v in values),
         )
     print(f"micro averages in %, failure policy {config.failure_policy}; scores: {path}")
     print("fCER/fWER: flexible (order-independent) CER/WER")
+    overall = scores["aggregates"][0]
+    not_exact = [(m, overall[key]["not_exact"]) for m, key, _ in columns[2:4]]
+    if any(n for _, n in not_exact):
+        counts = ", ".join(f"{m} {n} of {overall['scored']}" for m, n in not_exact)
+        print(
+            f"* not proven optimal, may overstate errors: {counts} scored samples;"
+            " see exact, lower_bound and flexible_units in scores.json"
+        )
     return 0
 
 

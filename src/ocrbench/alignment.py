@@ -44,6 +44,11 @@ def reference_units(lines: Sequence[str], form: str = "NFC") -> list[str]:
     return [unit for unit in (normalize(line, form) for line in lines) if unit]
 
 
+def _unit_lines(lines: Sequence[str], form: str) -> tuple[int, ...]:
+    """The index of the input line behind each unit of ``reference_units(lines, form)``."""
+    return tuple(n for n, line in enumerate(lines) if normalize(line, form))
+
+
 def prediction_lines(prediction: Prediction) -> list[str]:
     """The lines of the structure text: prediction lines, the lines of a region's own text, or
     the lines of the page text when no region carries text. Paragraphs are never split further."""
@@ -361,6 +366,17 @@ class FlexibleScores:
     reference_units: int
     hypothesis_units: int
     anchored_units: int  # prediction units with retrieval evidence
+    reference_lines: tuple[int, ...]  # input line index of every reference unit
+    hypothesis_lines: tuple[int, ...]  # input line index of every prediction unit
+
+    def line_ranges(self, alignment: Alignment) -> list[tuple[int, int, int, int]]:
+        """The groups as half-open ranges of input lines, (reference start, stop, prediction
+        start, stop), in prediction order. Empty lines inside a range belong to no unit."""
+        ref, hyp = self.reference_lines, self.hypothesis_lines
+        return [
+            (ref[g.ref_start], ref[g.ref_stop - 1] + 1, hyp[g.hyp_start], hyp[g.hyp_stop - 1] + 1)
+            for g in sorted(alignment.groups, key=lambda g: g.hyp_start)
+        ]
 
 
 def score_flexible(
@@ -381,4 +397,6 @@ def score_flexible(
         reference_units=len(ref),
         hypothesis_units=len(hyp),
         anchored_units=sum(anchor is not None for anchor in anchors),
+        reference_lines=_unit_lines(reference_lines, form),
+        hypothesis_lines=_unit_lines(hypothesis_lines, form),
     )
