@@ -44,6 +44,8 @@ Publishing bases to a registry and pinning them by digest would also work, but w
 | `make docker-cu130-torch` | Build the CUDA/torch base (several GB pulled; cached afterwards) |
 | `make docker-lock` | Re-lock `docker/base-cu130-torch/requirements.txt` with hashes after editing `requirements.in` |
 | `make docker-smoke` | Opt-in: run the built images with `--network none --read-only` and check Python, the non-root user and that torch imports without a GPU; also build a minimal derived image (`tests/fixtures/derived-cpu`) from the CPU base and check it inherits the base layers; build the fake engine (`tests/fixtures/fake-engine`) and run it with `ocrbench run start` ([RUNNER.md](RUNNER.md)) |
+| `make docker-tesseract` | Build the Tesseract engine image from the CPU base ([engines/tesseract](../engines/tesseract/README.md)) |
+| `make tesseract-smoke` | Opt-in: build the Tesseract image and run it on synthetic samples through the runner, evaluation and reports |
 | `make gpu-preflight` | Opt-in: host/Docker/toolkit GPU check described above |
 | `make gpu-smoke` | Opt-in: check that torch in the CUDA image sees the GPU and runs a matrix product, and that the runner passes `resources.gpus` to an engine container |
 
@@ -51,7 +53,7 @@ The default `make test` only checks the conventions of every `Dockerfile` in the
 
 ## Engine image conventions
 
-Engine adapters ([#11–#17](https://github.com/michal-hradis/ocr_benchmarking/issues/1)) follow these rules:
+Engine adapters ([#11–#17](https://github.com/michal-hradis/ocr_benchmarking/issues/1)) live in `engines/<name>/` and follow these rules; [`engines/tesseract`](../engines/tesseract/README.md) is the reference example:
 
 - **Pin everything.** External `FROM` and `COPY --from` images by digest, shared bases by their versioned `ocrbench/base-*:...-vN` tag; Python packages by version with hashes (uv lock or `uv pip compile --generate-hashes`); engine source by commit or release; model weights by revision and checksum.
 - **Install as root, run as `ocr`.** Switch to `USER root` for system packages and back to `USER ocr` at the end.

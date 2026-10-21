@@ -1,0 +1,61 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN"
+    "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en" lang="en">
+ <head>
+  <title></title>
+  <meta http-equiv="Content-Type" content="text/html;charset=utf-8"/>
+  <meta name='ocr-system' content='tesseract 5.3.0' />
+  <meta name='ocr-capabilities' content='ocr_page ocr_carea ocr_par ocr_line ocrx_word ocrp_wconf'/>
+ </head>
+ <body>
+  <div class='ocr_page' id='page_1' title='image "/input/images/page.png"; bbox 0 0 900 400; ppageno 0; scan_res 70 70'>
+   <div class='ocr_carea' id='block_1_1' title="bbox 41 39 390 78">
+    <p class='ocr_par' id='par_1_1' lang='eng' title="bbox 41 39 390 78">
+     <span class='ocr_line' id='line_1_1' title="bbox 41 39 390 78; baseline 0.003 -9; x_size 39; x_descenders 9; x_ascenders 8">
+      <span class='ocrx_word' id='word_1_1' title='bbox 41 39 108 70; x_wconf 96'>The</span>
+      <span class='ocrx_word' id='word_1_2' title='bbox 123 39 207 78; x_wconf 95'>Daily</span>
+      <span class='ocrx_word' id='word_1_3' title='bbox 219 39 390 70; x_wconf 96'>Chronicle</span>
+     </span>
+    </p>
+   </div>
+   <div class='ocr_carea' id='block_1_2' title="bbox 41 127 444 193">
+    <p class='ocr_par' id='par_1_2' lang='eng' title="bbox 41 127 444 193">
+     <span class='ocr_line' id='line_1_2' title="bbox 41 127 444 153; baseline 0 -5; x_size 26; x_descenders 5; x_ascenders 6">
+      <span class='ocrx_word' id='word_1_4' title='bbox 41 127 89 148; x_wconf 95'>The</span>
+      <span class='ocrx_word' id='word_1_5' title='bbox 97 128 166 153; x_wconf 95'>quick</span>
+      <span class='ocrx_word' id='word_1_6' title='bbox 175 128 253 148; x_wconf 96'>brown</span>
+      <span class='ocrx_word' id='word_1_7' title='bbox 262 127 299 148; x_wconf 96'>fox</span>
+      <span class='ocrx_word' id='word_1_8' title='bbox 306 129 382 153; x_wconf 96'>jumps</span>
+      <span class='ocrx_word' id='word_1_9' title='bbox 390 133 444 148; x_wconf 96'>over</span>
+     </span>
+     <span class='ocr_line' id='line_1_3' title="bbox 41 167 374 193; baseline 0 -5; x_size 26; x_descenders 5; x_ascenders 6">
+      <span class='ocrx_word' id='word_1_10' title='bbox 41 167 81 188; x_wconf 96'>the</span>
+      <span class='ocrx_word' id='word_1_11' title='bbox 90 168 138 193; x_wconf 96'>lazy</span>
+      <span class='ocrx_word' id='word_1_12' title='bbox 145 168 192 193; x_wconf 96'>dog</span>
+      <span class='ocrx_word' id='word_1_13' title='bbox 202 173 257 188; x_wconf 96'>near</span>
+      <span class='ocrx_word' id='word_1_14' title='bbox 265 167 305 188; x_wconf 96'>the</span>
+      <span class='ocrx_word' id='word_1_15' title='bbox 314 169 374 188; x_wconf 96'>river.</span>
+     </span>
+    </p>
+   </div>
+   <div class='ocr_carea' id='block_1_3' title="bbox 40 247 445 313">
+    <p class='ocr_par' id='par_1_3' lang='eng' title="bbox 40 247 445 313">
+     <span class='ocr_line' id='line_1_4' title="bbox 41 247 445 273; baseline 0 -5; x_size 24; x_descenders 5; x_ascenders 4">
+      <span class='ocrx_word' id='word_1_16' title='bbox 41 248 156 268; x_wconf 89'>Asecond</span>
+      <span class='ocrx_word' id='word_1_17' title='bbox 166 247 295 273; x_wconf 93'>paragraph</span>
+      <span class='ocrx_word' id='word_1_18' title='bbox 305 249 321 268; x_wconf 93'>&amp;</span>
+      <span class='ocrx_word' id='word_1_19' title='bbox 329 253 391 268; x_wconf 95'>more</span>
+      <span class='ocrx_word' id='word_1_20' title='bbox 399 250 445 268; x_wconf 95'>text</span>
+     </span>
+     <span class='ocr_line' id='line_1_5' title="bbox 40 287 373 313; baseline 0 -5; x_size 26; x_descenders 5; x_ascenders 6">
+      <span class='ocrx_word' id='word_1_21' title='bbox 40 287 93 308; x_wconf 93'>with</span>
+      <span class='ocrx_word' id='word_1_22' title='bbox 104 288 202 313; x_wconf 90'>&lt;angle&gt;</span>
+      <span class='ocrx_word' id='word_1_23' title='bbox 213 288 320 308; x_wconf 96'>brackets</span>
+      <span class='ocrx_word' id='word_1_24' title='bbox 328 290 373 308; x_wconf 95'>too.</span>
+     </span>
+    </p>
+   </div>
+  </div>
+ </body>
+</html>

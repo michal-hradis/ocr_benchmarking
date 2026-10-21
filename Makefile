@@ -1,11 +1,12 @@
 # Local developer commands. There is no CI; run the targets relevant to your change.
 .PHONY: help setup lint format test check docker-cpu docker-cu130-torch docker-lock \
-        docker-smoke gpu-preflight gpu-smoke
+        docker-smoke gpu-preflight gpu-smoke docker-tesseract tesseract-smoke
 
 UV ?= uv
 BASE_VERSION ?= 1
 CPU_IMAGE ?= ocrbench/base-cpu:py3.12-v$(BASE_VERSION)
 CU130_TORCH_IMAGE ?= ocrbench/base-cu130-torch:torch2.14.1-py3.12-v$(BASE_VERSION)
+TESSERACT_IMAGE := ocrbench/engine-tesseract:5.3.0-v1
 export CPU_IMAGE CU130_TORCH_IMAGE
 
 help:  ## List targets
@@ -44,6 +45,13 @@ docker-lock:  ## Re-lock the hashed torch requirements for the CUDA image
 
 docker-smoke:  ## Smoke-test built bases, a derived CPU image and the fake-engine runner (opt-in)
 	$(UV) run --locked pytest -m docker --run-docker tests/test_docker_images.py tests/test_runner.py
+
+docker-tesseract:  ## Build the Tesseract engine image (needs the CPU base) and print its image ID
+	docker build -t $(TESSERACT_IMAGE) engines/tesseract
+	@docker image inspect --format '$(TESSERACT_IMAGE) {{.Id}}' $(TESSERACT_IMAGE)
+
+tesseract-smoke:  ## Build the Tesseract image and run, evaluate and report a synthetic dataset (opt-in)
+	$(UV) run --locked pytest -m docker --run-docker tests/test_tesseract.py
 
 gpu-preflight:  ## Check host driver, Docker and NVIDIA Container Toolkit
 	scripts/gpu_preflight.sh

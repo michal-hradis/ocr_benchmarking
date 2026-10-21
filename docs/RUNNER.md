@@ -19,14 +19,14 @@ uv run ocrbench run status runs/<run-id>
 
 ## Engine configuration
 
-An engine configuration is a TOML file, usually next to the engine's Dockerfile.
+An engine configuration is a TOML file, usually next to the engine's Dockerfile. The example below shows every field; a real one is [`engines/tesseract/engine.toml`](../engines/tesseract/engine.toml).
 
 ```toml
-name = "tesseract"                    # [a-z0-9][a-z0-9._-]*
+name = "example"                      # [a-z0-9][a-z0-9._-]*
 engine_version = "1"                  # version of the adapter
-image = "ocrbench/engine-tesseract:5.5.1-v1"
+image = "ocrbench/engine-example:1.0-v1"
 command = []                          # optional; empty uses the image's CMD
-model = "ces+deu@4.1.0"               # optional model name and revision, passed to the engine
+model = "example-model@rev1"          # optional model name and revision, passed to the engine
 metadata = ["language"]               # optional metadata to pass: language, doc_type, year
 env = { OMP_THREAD_LIMIT = "4" }      # optional container environment
 
@@ -56,8 +56,8 @@ Unknown fields are errors. The parsed configuration is frozen into `run.json` wi
 {
   "format": "ocrbench.job",
   "version": 1,
-  "engine": "tesseract",
-  "model": "ces+deu@4.1.0",
+  "engine": "example",
+  "model": "example-model@rev1",
   "params": {"max_new_tokens": 8192},
   "samples": [
     {"id": "page-0001", "unit": "page", "language": ["ces"], "image": "images/page-0001.jpg"}
