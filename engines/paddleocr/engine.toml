@@ -1,0 +1,18 @@
+# PaddleOCR PP-OCRv6 GPU pipeline (README.md next to this file; format: docs/RUNNER.md).
+name = "paddleocr"
+engine_version = "1"
+image = "ocrbench/engine-paddleocr:3.7.0-v1"
+model = "PP-OCRv6_medium@det-8e0f56fb,rec-e5a92bcb"  # Hugging Face PaddlePaddle/* commits
+
+[params]
+device = "gpu:0"  # other parameters keep the pipeline defaults (README.md)
+
+[resources]
+cpus = 4
+memory = "16g"
+gpus = "all"
+shm_size = "2g"
+
+[timeouts]
+sample = 300
+startup = 300

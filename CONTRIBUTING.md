@@ -48,8 +48,9 @@ make check   # ruff lint + format check, then offline unit tests
 | `uv run ocrbench run start\|resume\|status …` | Run an engine image over a dataset and record every sample, see [docs/RUNNER.md](docs/RUNNER.md) |
 | `uv run ocrbench evaluate <run-dir> [--config eval.toml]` | Score a finished run against its frozen GT, see [docs/EVALUATION.md](docs/EVALUATION.md#command-and-stored-scores) |
 | `uv run ocrbench report <run-dir>... -o <new-dir> [--inspect]` | Compare evaluated runs in CSV, JSON and HTML, see [docs/REPORTS.md](docs/REPORTS.md) |
-| `make docker-cpu`, `make docker-cu130-torch` | Build base images |
+| `make docker-cpu`, `make docker-cu130-torch`, `make docker-cu130-paddle` | Build base images |
 | `make docker-tesseract`, `make tesseract-smoke` | Build the Tesseract engine image / opt-in: run it through `run`, `evaluate` and `report` on synthetic samples, see [engines/tesseract](engines/tesseract/README.md) |
+| `make docker-paddleocr`, `make paddleocr-smoke` | Build the PaddleOCR engine image / opt-in, GPU: run it through `run`, `evaluate` and `report` on synthetic samples, see [engines/paddleocr](engines/paddleocr/README.md) |
 | `make docker-smoke`, `make gpu-preflight`, `make gpu-smoke` | Opt-in Docker and GPU checks (including the fake-engine runner tests), see [docs/DOCKER.md](docs/DOCKER.md) |
 
 `make help` lists all targets. Unit tests run with network sockets disabled (`pytest-socket`). Tests that need Docker or a GPU are marked `docker` / `gpu` and run only with `--run-docker` / `--run-gpu`. Add dependencies with `uv add` (or `uv add --dev`) so that `uv.lock` is updated in the same PR. Fixture rules are in [tests/fixtures/README.md](tests/fixtures/README.md).

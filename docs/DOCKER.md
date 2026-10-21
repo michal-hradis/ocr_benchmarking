@@ -17,6 +17,7 @@ Engines run in per-engine Docker images on one Linux machine ([architecture](ARC
 | --- | --- | --- | --- |
 | CPU | `docker/base-cpu` | `ocrbench/base-cpu:py3.12-v1` | Debian bookworm slim, Python 3.12.15, uv, empty venv |
 | CUDA 13.0 + PyTorch | `docker/base-cu130-torch` | `ocrbench/base-cu130-torch:torch2.14.1-py3.12-v1` | Ubuntu 24.04 `nvidia/cuda` base, Python 3.12.15, torch 2.14.1+cu130 from a hash-locked requirements file |
+| CUDA 13.0 + PaddlePaddle | `docker/base-cu130-paddle` | `ocrbench/base-cu130-paddle:paddle3.4.0-py3.12-v1` | The same `nvidia/cuda` base, Python 3.12.15, `libgomp1`, paddlepaddle-gpu 3.4.0 (cu130) from a hash-locked requirements file. A separate family because Paddle pins other cuDNN and nvJitLink wheels than torch; numpy is held below 2.4 for PaddleX 3.7 |
 
 Both images provide:
 
@@ -42,10 +43,13 @@ Publishing bases to a registry and pinning them by digest would also work, but w
 | --- | --- |
 | `make docker-cpu` | Build the CPU base (small pull) |
 | `make docker-cu130-torch` | Build the CUDA/torch base (several GB pulled; cached afterwards) |
-| `make docker-lock` | Re-lock `docker/base-cu130-torch/requirements.txt` with hashes after editing `requirements.in` |
+| `make docker-cu130-paddle` | Build the CUDA/Paddle base (several GB pulled) |
+| `make docker-lock` | Re-lock the hashed `requirements.txt` of both CUDA bases and of the PaddleOCR engine (against the Paddle base) after editing a `requirements.in` |
 | `make docker-smoke` | Opt-in: run the built images with `--network none --read-only` and check Python, the non-root user and that torch imports without a GPU; also build a minimal derived image (`tests/fixtures/derived-cpu`) from the CPU base and check it inherits the base layers; build the fake engine (`tests/fixtures/fake-engine`) and run it with `ocrbench run start` ([RUNNER.md](RUNNER.md)) |
 | `make docker-tesseract` | Build the Tesseract engine image from the CPU base ([engines/tesseract](../engines/tesseract/README.md)) |
 | `make tesseract-smoke` | Opt-in: build the Tesseract image and run it on synthetic samples through the runner, evaluation and reports |
+| `make docker-paddleocr` | Build the PaddleOCR PP-OCRv6 GPU engine image from the Paddle base ([engines/paddleocr](../engines/paddleocr/README.md)) |
+| `make paddleocr-smoke` | Opt-in, GPU: build the PaddleOCR image and run it on synthetic samples through the runner, evaluation and reports |
 | `make gpu-preflight` | Opt-in: host/Docker/toolkit GPU check described above |
 | `make gpu-smoke` | Opt-in: check that torch in the CUDA image sees the GPU and runs a matrix product, and that the runner passes `resources.gpus` to an engine container |
 
@@ -53,7 +57,7 @@ The default `make test` only checks the conventions of every `Dockerfile` in the
 
 ## Engine image conventions
 
-Engine adapters ([#11–#17](https://github.com/michal-hradis/ocr_benchmarking/issues/1)) live in `engines/<name>/` and follow these rules; [`engines/tesseract`](../engines/tesseract/README.md) is the reference example:
+Engine adapters ([#11–#17](https://github.com/michal-hradis/ocr_benchmarking/issues/1)) live in `engines/<name>/` and follow these rules; [`engines/tesseract`](../engines/tesseract/README.md) (CPU) and [`engines/paddleocr`](../engines/paddleocr/README.md) (GPU, Python dependencies locked against a base) are examples:
 
 - **Pin everything.** External `FROM` and `COPY --from` images by digest, shared bases by their versioned `ocrbench/base-*:...-vN` tag; Python packages by version with hashes (uv lock or `uv pip compile --generate-hashes`); engine source by commit or release; model weights by revision and checksum.
 - **Install as root, run as `ocr`.** Switch to `USER root` for system packages and back to `USER ocr` at the end.

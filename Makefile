@@ -1,13 +1,18 @@
 # Local developer commands. There is no CI; run the targets relevant to your change.
 .PHONY: help setup lint format test check docker-cpu docker-cu130-torch docker-lock \
-        docker-smoke gpu-preflight gpu-smoke docker-tesseract tesseract-smoke
+        docker-smoke gpu-preflight gpu-smoke docker-tesseract tesseract-smoke \
+        docker-cu130-paddle docker-paddleocr paddleocr-smoke
 
 UV ?= uv
 BASE_VERSION ?= 1
 CPU_IMAGE ?= ocrbench/base-cpu:py3.12-v$(BASE_VERSION)
 CU130_TORCH_IMAGE ?= ocrbench/base-cu130-torch:torch2.14.1-py3.12-v$(BASE_VERSION)
+CU130_PADDLE_IMAGE ?= ocrbench/base-cu130-paddle:paddle3.4.0-py3.12-v$(BASE_VERSION)
 TESSERACT_IMAGE := ocrbench/engine-tesseract:5.3.0-v1
-export CPU_IMAGE CU130_TORCH_IMAGE
+PADDLEOCR_IMAGE := ocrbench/engine-paddleocr:3.7.0-v1
+LOCK := $(UV) pip compile --python-version 3.12 --python-platform x86_64-manylinux_2_28 \
+	--generate-hashes --no-header --custom-compile-command "make docker-lock"
+export CPU_IMAGE CU130_TORCH_IMAGE CU130_PADDLE_IMAGE
 
 help:  ## List targets
 	@grep -E '^[a-z0-9-]+:.*## ' $(MAKEFILE_LIST) | awk -F':.*## ' '{printf "  %-20s %s\n", $$1, $$2}'
@@ -36,12 +41,17 @@ docker-cu130-torch:  ## Build the CUDA 13.0 + torch base image (multi-GB downloa
 	docker build -t $(CU130_TORCH_IMAGE) docker/base-cu130-torch
 	@docker image inspect --format '$(CU130_TORCH_IMAGE) {{.Id}}' $(CU130_TORCH_IMAGE)
 
-docker-lock:  ## Re-lock the hashed torch requirements for the CUDA image
-	$(UV) pip compile docker/base-cu130-torch/requirements.in \
+docker-cu130-paddle:  ## Build the CUDA 13.0 + PaddlePaddle base image (multi-GB download)
+	docker build -t $(CU130_PADDLE_IMAGE) docker/base-cu130-paddle
+	@docker image inspect --format '$(CU130_PADDLE_IMAGE) {{.Id}}' $(CU130_PADDLE_IMAGE)
+
+docker-lock:  ## Re-lock the hashed requirements of the CUDA bases and the PaddleOCR engine
+	$(LOCK) docker/base-cu130-torch/requirements.in \
 		--index-url https://download.pytorch.org/whl/cu130 \
-		--python-version 3.12 --python-platform x86_64-manylinux_2_28 \
-		--generate-hashes --no-header --custom-compile-command "make docker-lock" \
 		-o docker/base-cu130-torch/requirements.txt
+	$(LOCK) docker/base-cu130-paddle/requirements.in -o docker/base-cu130-paddle/requirements.txt
+	$(LOCK) engines/paddleocr/requirements.in -c docker/base-cu130-paddle/requirements.txt \
+		-o engines/paddleocr/requirements.txt
 
 docker-smoke:  ## Smoke-test built bases, a derived CPU image and the fake-engine runner (opt-in)
 	$(UV) run --locked pytest -m docker --run-docker tests/test_docker_images.py tests/test_runner.py
@@ -52,6 +62,13 @@ docker-tesseract:  ## Build the Tesseract engine image (needs the CPU base) and 
 
 tesseract-smoke:  ## Build the Tesseract image and run, evaluate and report a synthetic dataset (opt-in)
 	$(UV) run --locked pytest -m docker --run-docker tests/test_tesseract.py
+
+docker-paddleocr:  ## Build the PaddleOCR engine image (needs the Paddle base) and print its image ID
+	docker build -t $(PADDLEOCR_IMAGE) engines/paddleocr
+	@docker image inspect --format '$(PADDLEOCR_IMAGE) {{.Id}}' $(PADDLEOCR_IMAGE)
+
+paddleocr-smoke:  ## Build the PaddleOCR image and run, evaluate and report a synthetic dataset on the GPU (opt-in)
+	$(UV) run --locked pytest -m gpu --run-docker --run-gpu tests/test_paddleocr.py
 
 gpu-preflight:  ## Check host driver, Docker and NVIDIA Container Toolkit
 	scripts/gpu_preflight.sh
