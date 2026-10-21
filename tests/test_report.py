@@ -15,23 +15,31 @@ from pathlib import Path
 import pytest
 from PIL import Image
 
+from ocrbench.alignment import score_flexible
 from ocrbench.cli import main
 from ocrbench.engine import parse_engine_config
 from ocrbench.evaluate import EvalConfig, evaluate_run, write_scores
-from ocrbench.report import ReportError, diff_html, load_evaluation, write_report
+from ocrbench.report import (
+    ReportError,
+    csv_cell,
+    diff_html,
+    group_texts,
+    load_evaluation,
+    write_report,
+)
 from ocrbench.runner import ProcessLauncher, create_run, execute
 from test_evaluate import SAMPLES, page_xml
 
 FAKE = [sys.executable, str(Path(__file__).parent / "fixtures" / "fake-engine" / "fake_engine.py")]
 
 
-def make_dataset(tmp_path, samples):
+def make_dataset(tmp_path, samples, *, shade=255):
     """``samples``: id -> (behavior, reference lines, unit, doc_type); returns the manifest."""
     data = tmp_path / "data"
     data.mkdir(parents=True)
     entries = []
     for sid, (_, lines, unit, doc_type) in samples.items():
-        Image.new("L", (60, 40), 255).save(data / f"{sid}.png")
+        Image.new("L", (60, 40), shade).save(data / f"{sid}.png")
         (data / f"{sid}.xml").write_text(page_xml(lines), encoding="utf-8")
         entry = {"id": sid, "image": f"{sid}.png", "gt": f"{sid}.xml", "unit": unit}
         entries.append(entry | ({"doc_type": doc_type} if doc_type else {}))
@@ -321,7 +329,7 @@ def test_evaluations_that_differ_are_not_compared(tmp_path, two_runs):
         write_report([load_evaluation(first.path), load_evaluation(first.path)], out)
     other = make_dataset(tmp_path / "other", {"md": SAMPLES["md"]})
     third = make_run(tmp_path, other, "c", {"md": "markdown"})
-    with pytest.raises(ReportError, match="c: the samples or their GT differ"):
+    with pytest.raises(ReportError, match="c: the sample IDs differ from a"):
         write_report([load_evaluation(first.path), load_evaluation(third.path)], out)
     assert not out.exists()
     out.mkdir()
@@ -345,3 +353,83 @@ def test_cli_report_and_failure_logging(tmp_path, two_runs, capsys):
     assert (out / "samples" / "b" / "md.html").is_file()
     assert main(args) == 1
     assert "already exists" in capsys.readouterr().err
+
+
+def test_runs_on_different_images_or_strata_are_not_compared(tmp_path, two_runs):
+    _, first, _ = two_runs
+    out = tmp_path / "report"
+    # Same IDs and GT, but other image bytes (e.g. a rescanned or cropped page).
+    rescanned = make_dataset(tmp_path / "rescan", SAMPLES, shade=200)
+    other = make_run(tmp_path, rescanned, "rescan", dict.fromkeys(SAMPLES, "markdown"))
+    with pytest.raises(ReportError, match="rescan: md: image_sha256 differ from a"):
+        write_report([load_evaluation(first.path), load_evaluation(other.path)], out)
+    # Same IDs, GT and images, but another unit and document type for one sample.
+    relabelled = dict(SAMPLES, md=("markdown", SAMPLES["md"][1], "paragraph", "book"))
+    manifest = make_dataset(tmp_path / "relabel", relabelled)
+    other = make_run(tmp_path, manifest, "relabel", dict.fromkeys(SAMPLES, "markdown"))
+    with pytest.raises(ReportError, match="relabel: md: unit, doc_type differ from a"):
+        write_report([load_evaluation(first.path), load_evaluation(other.path)], out)
+    assert not out.exists()
+
+
+def test_inputs_that_were_not_pinned_are_not_compared(tmp_path, two_runs):
+    _, first, second = two_runs
+    frozen_path = second.path / "run.json"
+    frozen = json.loads(frozen_path.read_text(encoding="utf-8"))
+    frozen["samples"][0]["image_sha256"] = None  # as when the image was unreadable at creation
+    frozen_path.write_text(json.dumps(frozen), encoding="utf-8")
+    write_scores(second, evaluate_run(second))
+    evaluations = [load_evaluation(first.path), load_evaluation(second.path)]
+    with pytest.raises(ReportError, match="b: md: image_sha256 was not pinned"):
+        write_report(evaluations, tmp_path / "report")
+    write_report(evaluations[1:], tmp_path / "single")  # nothing to compare in one run
+
+
+@pytest.mark.parametrize(
+    ("reference", "hypothesis"),
+    [
+        (["A line", "B line"], ["B line", "", "  ", "A line"]),  # blank prediction lines
+        (["A line", "", "B line", "\u00a0"], ["B line", "A line"]),  # blank GT lines
+        (["A line", "", "B line"], ["", "B line", "", "", "A line", ""]),  # both
+    ],
+)
+def test_group_texts_follow_the_stored_input_line_ranges(reference, hypothesis):
+    flexible = score_flexible(reference, hypothesis)
+    ranges = [list(r) for r in flexible.line_ranges(flexible.chars)]
+    texts = group_texts(reference, hypothesis, ranges, "NFC")
+    assert flexible.chars.counts.errors == 0
+    assert sorted((ref, hyp) for _, ref, hyp in texts.groups) == [
+        ("A line", "A line"),
+        ("B line", "B line"),
+    ]
+    assert (texts.unmatched_reference, texts.unmatched_hypothesis) == ([], [])
+
+
+def test_group_texts_list_unmatched_lines_by_input_index():
+    reference, hypothesis = ["A line", "", "lost line"], ["", "A line", "", "extra"]
+    flexible = score_flexible(reference, hypothesis)
+    ranges = [list(r) for r in flexible.line_ranges(flexible.chars)]
+    texts = group_texts(reference, hypothesis, ranges, "NFC")
+    matched = [(r, h) for _, r, h in texts.groups]
+    unmatched = (texts.unmatched_reference, texts.unmatched_hypothesis)
+    # Either the extra line is grouped with the lost one, or both are unmatched; never blanks.
+    assert matched in ([("A line", "A line")], [("A line", "A line"), ("lost line", "extra")])
+    if len(matched) == 1:
+        assert unmatched == ([(2, "lost line")], [(3, "extra")])
+
+
+def test_csv_cells_cannot_become_spreadsheet_formulas(tmp_path):
+    for value in ('=HYPERLINK("http://x")', "+1", "-2+3", "@SUM(A1)", " =1", "\t=1", "\rx"):
+        assert csv_cell(value) == "'" + value
+    assert [csv_cell(v) for v in ("plain", "", None, 0.5, -1, 3)] == ["plain", "", "", 0.5, -1, 3]
+    samples = {"md": ("markdown", ["md", "Text of md."], "page", "=cmd|' /C calc'!A0")}
+    manifest = make_dataset(tmp_path, samples)
+    run = make_run(tmp_path, manifest, "f", {"md": "markdown"}, model="@SUM(1+1)")
+    out = tmp_path / "report"
+    write_report([load_evaluation(run.path)], out)
+    row = read_csv(out / "samples.csv")[0]
+    assert (row["model"], row["doc_type"]) == ("'@SUM(1+1)", "'=cmd|' /C calc'!A0")
+    assert row["cer_rate"] == "0.0"
+    rows = read_csv(out / "aggregates.csv")
+    assert {r["model"] for r in rows} == {"'@SUM(1+1)"}
+    assert "'=cmd|' /C calc'!A0" in {r["doc_type"] for r in rows}

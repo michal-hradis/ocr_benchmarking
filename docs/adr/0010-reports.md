@@ -18,7 +18,7 @@ Runs (#7) and their scores (#8, #9) are stored per run. Engines must be compared
   - the GT differs from the GT frozen with the run;
   - the scores format is old.
 
-  Runs in one report must share the metrics version, the evaluation configuration hash (including the failure policy) and the sample IDs with their GT hashes. The output directory must be new.
+  Runs in one report must share the metrics version and the evaluation configuration hash (including the failure policy). Each sample ID must have the same frozen image and GT hashes, unit and document type in every run, and inputs that were not pinned are refused when runs are compared. The output directory must be new.
 - **Outputs.** The report writes:
   - `report.json` with provenance (engine, model, image, run and evaluation versions and hashes);
   - `aggregates.csv` with one row per run and group, with micro and macro values, denominators, coverage and status counts;
@@ -29,7 +29,7 @@ Runs (#7) and their scores (#8, #9) are stored per run. Engines must be compared
 - **Failures.** Every non-`success` sample is listed with its status, reason, the engine's message and a link to its execution record, together with per-status counts, under both failure policies. `exclude` reports carry a warning that they are not the primary score.
 - **No split grouping.** Dataset splits are not frozen in `run.json` and not grouped; they can be added when a dataset uses them.
 - **Inspection pages are optional** (`--inspect`). They show text differences only: the ordered character diff and the flexible groups from the stored `group_lines`, with unmatched lines. Image and position overlays are deferred.
-- **Escaping.** All text in HTML is escaped, and the pages contain no scripts. Engine messages are not written to CSV.
+- **Escaping.** All text in HTML is escaped, and the pages contain no scripts. Engine messages are not written to CSV, and CSV text cells that start with a formula character get a leading `'`.
 
 ## Alternatives considered
 
@@ -48,6 +48,8 @@ Runs (#7) and their scores (#8, #9) are stored per run. Engines must be compared
   - listing of failed and truncated samples with messages under both failure policies, and a run without any success;
   - optional inspection pages and their differences, and flexible groups from stored ranges;
   - escaping of markup in predictions, GT and engine messages;
-  - refusal of newer attempts, changed predictions, changed GT, changed `run.json`, old scores, missing evaluations, different configurations, different samples, duplicate runs and existing output directories;
+  - refusal of newer attempts, changed predictions, changed GT, changed `run.json`, old scores, missing evaluations, different configurations, different samples, different images or unit/document type for the same sample, unpinned inputs, duplicate runs and existing output directories;
+  - group texts that follow the stored input-line ranges with blank GT and prediction lines;
+  - CSV cells that could become spreadsheet formulas;
   - the CLI.
 - A report format change increments `REPORT_VERSION`.

@@ -35,7 +35,15 @@ from ocrbench.evaluate import (
 )
 from ocrbench.manifest import sha256_file
 from ocrbench.metrics import normalize
-from ocrbench.runner import STATUSES, Run, RunnerError, latest_record, load_run, verify_ground_truth
+from ocrbench.runner import (
+    STATUSES,
+    Run,
+    RunnerError,
+    RunSample,
+    latest_record,
+    load_run,
+    verify_ground_truth,
+)
 
 REPORT_FORMAT = "ocrbench.report"
 REPORT_VERSION = 1
@@ -135,6 +143,16 @@ def load_evaluation(path: Path) -> Evaluation:
     )
 
 
+def _identity(sample: RunSample) -> dict[str, Any]:
+    """What makes two runs' samples the same input: the frozen image and GT, unit and type."""
+    return {
+        "image_sha256": sample.image_sha256,
+        "gt_sha256": sample.gt_sha256,
+        "unit": sample.job["unit"],
+        "doc_type": sample.doc_type,
+    }
+
+
 def check_comparable(evaluations: list[Evaluation]) -> None:
     """Refuse to put evaluations side by side that were not scored alike on the same samples."""
     if not evaluations:
@@ -152,11 +170,26 @@ def check_comparable(evaluations: list[Evaluation]) -> None:
                     f"{other.run.run_id}: {key} {other.scores[key]!r} differs from"
                     f" {first.scores[key]!r} of {first.run.run_id}"
                 )
-        samples = {(s.id, s.gt_sha256) for s in other.run.samples}
-        if samples != {(s.id, s.gt_sha256) for s in first.run.samples}:
-            problems.append(
-                f"{other.run.run_id}: the samples or their GT differ from {first.run.run_id}"
-            )
+        expected = {s.id: _identity(s) for s in first.run.samples}
+        found = {s.id: _identity(s) for s in other.run.samples}
+        if set(found) != set(expected):
+            problems.append(f"{other.run.run_id}: the sample IDs differ from {first.run.run_id}")
+        for sid in sorted(set(found) & set(expected)):
+            fields = [k for k in expected[sid] if found[sid][k] != expected[sid][k]]
+            if fields:
+                problems.append(
+                    f"{other.run.run_id}: {sid}: {', '.join(fields)} differ from {first.run.run_id}"
+                )
+    if len(evaluations) > 1:
+        # An input that was not pinned cannot be shown to be the same input.
+        for evaluation in evaluations:
+            for sample in evaluation.run.samples:
+                for key in ("image_sha256", "gt_sha256"):
+                    if getattr(sample, key) is None:
+                        problems.append(
+                            f"{evaluation.run.run_id}: {sample.id}: {key} was not pinned at run"
+                            " creation, so the input cannot be compared"
+                        )
     if problems:
         raise ReportError(
             "the evaluations are not comparable; evaluate every run with the same configuration"
@@ -327,13 +360,26 @@ def _aggregate_row(run: dict[str, Any], group: dict[str, Any], policy: str) -> d
     return row
 
 
+def csv_cell(value: Any) -> Any:
+    """A CSV value that spreadsheets do not evaluate: text starting with a formula character
+    (after leading whitespace) or with a tab or carriage return gets a leading apostrophe.
+    Numbers stay numbers; None is an empty cell."""
+    if value is None:
+        return ""
+    if isinstance(value, str) and (
+        value[:1] in ("\t", "\r") or value.lstrip()[:1] in ("=", "+", "-", "@")
+    ):
+        return "'" + value
+    return value
+
+
 def _write_csv(path: Path, rows: list[dict[str, Any]]) -> None:
     with open(path, "x", encoding="utf-8", newline="") as stream:
         if not rows:
             return
         writer = csv.DictWriter(stream, fieldnames=list(rows[0]))
         writer.writeheader()
-        writer.writerows({k: "" if v is None else v for k, v in row.items()} for row in rows)
+        writer.writerows({k: csv_cell(v) for k, v in row.items()} for row in rows)
 
 
 # HTML --------------------------------------------------------------------------------------------
@@ -601,16 +647,35 @@ def diff_html(reference: str, hypothesis: str) -> str:
     return "".join(parts)
 
 
-def _joined(lines: list[str], start: int, stop: int, form: str) -> str:
-    return " ".join(u for u in (normalize(line, form) for line in lines[start:stop]) if u)
+@dataclass(frozen=True)
+class GroupTexts:
+    """The stored flexible groups mapped onto the input lines, for display only."""
+
+    groups: list[tuple[tuple[int, int, int, int], str, str]]  # range, GT text, prediction text
+    unmatched_reference: list[tuple[int, str]]  # (input line index, normalized text)
+    unmatched_hypothesis: list[tuple[int, str]]
 
 
-def _unmatched(lines: list[str], covered: set[int], form: str) -> list[str]:
-    return [
-        f"{n}: {_e(normalize(line, form))}"
-        for n, line in enumerate(lines)
-        if n not in covered and normalize(line, form)
+def group_texts(
+    reference: list[str], hypothesis: list[str], group_lines: list[list[int]], form: str
+) -> GroupTexts:
+    """``group_lines`` holds half-open ranges of *input* line indices (FlexibleScores.line_ranges):
+    lines that normalize to nothing lie inside ranges but belong to no unit, so they are skipped
+    when joining, exactly as the alignment skipped them, and are never listed as unmatched."""
+    units = [[normalize(line, form) for line in lines] for lines in (reference, hypothesis)]
+    covered: list[set[int]] = [set(), set()]
+    groups = []
+    for ref_start, ref_stop, hyp_start, hyp_stop in group_lines:
+        texts = []
+        for side, (start, stop) in enumerate(((ref_start, ref_stop), (hyp_start, hyp_stop))):
+            covered[side].update(range(start, stop))
+            texts.append(" ".join(u for u in units[side][start:stop] if u))
+        groups.append(((ref_start, ref_stop, hyp_start, hyp_stop), texts[0], texts[1]))
+    unmatched = [
+        [(n, u) for n, u in enumerate(units[side]) if u and n not in covered[side]]
+        for side in (0, 1)
     ]
+    return GroupTexts(groups, unmatched[0], unmatched[1])
 
 
 def _inspect(evaluation: Evaluation, entry: dict[str, Any], out: Path) -> str:
@@ -671,14 +736,10 @@ def _inspect(evaluation: Evaluation, entry: dict[str, Any], out: Path) -> str:
         f" {flexible['order_breaks']} order breaks, proven optimal: {_e(flexible['exact'])}."
         " Groups in prediction order; GT and prediction line numbers start at 0.</p>"
     )
-    rows, ref_covered, hyp_covered = [], set(), set()
-    for ref_start, ref_stop, hyp_start, hyp_stop in flexible["group_lines"]:
-        ref_covered.update(range(ref_start, ref_stop))
-        hyp_covered.update(range(hyp_start, hyp_stop))
-        diff = diff_html(
-            _joined(reference, ref_start, ref_stop, form),
-            _joined(hypothesis, hyp_start, hyp_stop, form),
-        )
+    texts = group_texts(reference, hypothesis, flexible["group_lines"], form)
+    rows = []
+    for (ref_start, ref_stop, hyp_start, hyp_stop), ref_text, hyp_text in texts.groups:
+        diff = diff_html(ref_text, hyp_text)
         rows.append(
             [
                 f"#{ref_start}–{ref_stop - 1}",
@@ -688,14 +749,14 @@ def _inspect(evaluation: Evaluation, entry: dict[str, Any], out: Path) -> str:
         )
     if rows:
         body.append(_table(["GT lines", "prediction lines", "differences"], rows))
-    for title, lines, covered in (
-        ("Unmatched GT lines (deleted)", reference, ref_covered),
-        ("Unmatched prediction lines (inserted)", hypothesis, hyp_covered),
+    for title, unmatched in (
+        ("Unmatched GT lines (deleted)", texts.unmatched_reference),
+        ("Unmatched prediction lines (inserted)", texts.unmatched_hypothesis),
     ):
-        unmatched = _unmatched(lines, covered, form)
         body.append(f"<h3>{_e(title)}: {len(unmatched)}</h3>")
         if unmatched:
-            body.append('<p class="text">' + "\n".join(unmatched) + "</p>")
+            lines = "\n".join(f"{n}: {_e(text)}" for n, text in unmatched)
+            body.append(f'<p class="text">{lines}</p>')
     return _page(f"{sample.id} · {run.run_id}", body)
 
 
