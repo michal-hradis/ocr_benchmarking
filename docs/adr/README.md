@@ -15,6 +15,7 @@ Create short ADRs for agreed cross-engine decisions, including output schema, co
 | [0007: Runner lifecycle and engine container protocol](0007-runner-and-engine-protocol.md) | proposed |
 | [0008: Strict text metrics and failure accounting](0008-strict-text-metrics.md) | proposed |
 | [0009: Flexible line alignment for CER/WER](0009-flexible-line-alignment.md) | proposed |
+| [0010: Reports from stored evaluations](0010-reports.md) | proposed |
 
 ## Conventions
 

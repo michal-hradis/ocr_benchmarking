@@ -1,4 +1,5 @@
-"""Command-line interface: ``ocrbench dataset``, ``prediction``, ``run`` and ``evaluate``."""
+"""Command-line interface: ``ocrbench dataset``, ``prediction``, ``run``, ``evaluate`` and
+``report``."""
 
 from __future__ import annotations
 
@@ -28,6 +29,7 @@ from ocrbench.prediction import (
     prediction_to_json,
     validate_prediction,
 )
+from ocrbench.report import ReportError, load_evaluation, write_report
 from ocrbench.runner import (
     DockerLauncher,
     Run,
@@ -213,6 +215,19 @@ def _percent(value: float | None) -> str:
     return "-" if value is None else f"{100 * value:.2f}"
 
 
+def _log_non_success(samples: list[dict], run_id: str | None = None) -> None:
+    """One stderr line per sample that did not succeed, with how it was scored."""
+    prefix = f"{run_id}: " if run_id else ""
+    for entry in samples:
+        if entry["status"] != "success":
+            reason = f" ({entry['reason']})" if entry["reason"] else ""
+            print(
+                f"{prefix}{entry['sample_id']}: {entry['status']}{reason},"
+                f" scored as {entry['scored_as']}",
+                file=sys.stderr,
+            )
+
+
 def _evaluate(args: argparse.Namespace) -> int:
     try:
         config = load_eval_config(args.config) if args.config else DEFAULT_CONFIG
@@ -222,6 +237,7 @@ def _evaluate(args: argparse.Namespace) -> int:
     except (EvalConfigError, EvaluationError, RunnerError, OSError) as error:
         print(f"error: {error}", file=sys.stderr)
         return 1
+    _log_non_success(scores["samples"])
     columns = (("CER", "chars", "rate"), ("WER", "words", "rate"))
     columns += (("fCER", "flexible_chars", "rate"), ("fWER", "flexible_words", "rate"))
     columns += (("BoW F1", "bag_of_words", "f1"), ("R-2 F1", "rouge2", "f1"))
@@ -248,6 +264,23 @@ def _evaluate(args: argparse.Namespace) -> int:
             f"* not proven optimal, may overstate errors: {counts} scored samples;"
             " see exact, lower_bound and flexible_units in scores.json"
         )
+    return 0
+
+
+def _report(args: argparse.Namespace) -> int:
+    try:
+        evaluations = [load_evaluation(path) for path in args.evaluations]
+        report = write_report(evaluations, args.output, inspect=args.inspect)
+    except (ReportError, OSError) as error:
+        print(f"error: {error}", file=sys.stderr)
+        return 1
+    for evaluation in evaluations:
+        _log_non_success(evaluation.scores["samples"], evaluation.run.run_id)
+    for run in report["runs"]:
+        counts = ", ".join(f"{n} {s}" for s, n in run["statuses"].items() if n)
+        print(f"{run['run_id']}: {run['evaluation']} ({counts})")
+    policy = report["evaluation"]["config"]["failure_policy"]
+    print(f"failure policy {policy}; report: {args.output.resolve() / 'index.html'}")
     return 0
 
 
@@ -317,6 +350,23 @@ def build_parser() -> argparse.ArgumentParser:
     evaluate.add_argument("run", type=Path, help="run directory")
     evaluate.add_argument("--config", type=Path, help="evaluation configuration (TOML)")
     evaluate.set_defaults(handler=_evaluate)
+
+    report = commands.add_parser("report", help="compare evaluated runs in CSV, JSON and HTML")
+    report.add_argument(
+        "evaluations",
+        type=Path,
+        nargs="+",
+        help="run directories (their newest evaluation) or runs/<id>/evaluations/<n>",
+    )
+    report.add_argument(
+        "-o", "--output", type=Path, required=True, help="new directory for the report"
+    )
+    report.add_argument(
+        "--inspect",
+        action="store_true",
+        help="also write a GT-versus-prediction page per run and sample",
+    )
+    report.set_defaults(handler=_report)
     return parser
 
 
