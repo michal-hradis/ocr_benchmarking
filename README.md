@@ -2,7 +2,7 @@
 
 Compare OCR and handwritten text recognition (HTR) systems on **raster images of books, magazines and newspapers**, particularly complex and historical prints.
 
-**Project status:** early implementation. Python project tooling, shared CPU/CUDA Docker base images ([setup](CONTRIBUTING.md#development-setup-and-commands), [Docker](docs/DOCKER.md)) and dataset manifests with a PAGE XML reader and validator ([datasets](docs/DATASETS.md)), the standardized prediction format with its validator and Markdown/HTML conversion ([predictions](docs/PREDICTIONS.md)), the Docker runner with per-sample execution records ([runner](docs/RUNNER.md)) and strict ordered and flexible (order-independent) CER/WER, bag-of-words and ROUGE-2 scoring of stored runs ([evaluation](docs/EVALUATION.md)) and comparison reports of evaluated runs in CSV, JSON and HTML ([reports](docs/REPORTS.md)) exist. Engine adapters exist for the [Tesseract CPU baseline](engines/tesseract/README.md) and the [PaddleOCR PP-OCRv6 GPU pipeline](engines/paddleocr/README.md); other engines are *not yet implemented*.
+**Project status:** early implementation. Python project tooling, shared CPU/CUDA Docker base images ([setup](CONTRIBUTING.md#development-setup-and-commands), [Docker](docs/DOCKER.md)) and dataset manifests with a PAGE XML reader and validator ([datasets](docs/DATASETS.md)), the standardized prediction format with its validator and Markdown/HTML conversion ([predictions](docs/PREDICTIONS.md)), the Docker runner with per-sample execution records ([runner](docs/RUNNER.md)) and strict ordered and flexible (order-independent) CER/WER, bag-of-words and ROUGE-2 scoring of stored runs ([evaluation](docs/EVALUATION.md)) and comparison reports of evaluated runs in CSV, JSON and HTML ([reports](docs/REPORTS.md)) exist. Engine adapters exist for the [Tesseract CPU baseline](engines/tesseract/README.md), the [PaddleOCR PP-OCRv6 GPU pipeline](engines/paddleocr/README.md) and the [Kraken historical OCR/HTR pipeline](engines/kraken/README.md); other engines are *not yet implemented*.
 
 ## Use cases
 
@@ -21,7 +21,7 @@ Engines provide UTF-8 transcription plus versioned JSON with optional typed regi
 
 ## Quick start
 
-`dataset validate|text`, `prediction validate|convert`, `run start|resume|status`, `evaluate` and `report` work today (see [datasets](docs/DATASETS.md), [predictions](docs/PREDICTIONS.md), [runner](docs/RUNNER.md), [evaluation](docs/EVALUATION.md#command-and-stored-scores) and [reports](docs/REPORTS.md)). The engines so far are Tesseract on the CPU ([build and run](engines/tesseract/README.md#build-run-and-evaluate)) and PaddleOCR on the GPU ([build and run](engines/paddleocr/README.md#build-run-and-evaluate), `make docker-cu130-paddle docker-paddleocr`):
+`dataset validate|text`, `prediction validate|convert`, `run start|resume|status`, `evaluate` and `report` work today (see [datasets](docs/DATASETS.md), [predictions](docs/PREDICTIONS.md), [runner](docs/RUNNER.md), [evaluation](docs/EVALUATION.md#command-and-stored-scores) and [reports](docs/REPORTS.md)). The engines so far are Tesseract on the CPU ([build and run](engines/tesseract/README.md#build-run-and-evaluate)), PaddleOCR on the GPU ([build and run](engines/paddleocr/README.md#build-run-and-evaluate), `make docker-cu130-paddle docker-paddleocr`) and Kraken on the GPU ([build and run](engines/kraken/README.md#build-run-and-evaluate), `make docker-cu130-torch docker-kraken`):
 
 ```sh
 ocrbench dataset validate <dataset-manifest>

@@ -1,0 +1,19 @@
+# Kraken historical OCR/HTR pipeline (README.md next to this file; format: docs/RUNNER.md).
+name = "kraken"
+engine_version = "1"
+image = "ocrbench/engine-kraken:7.1.1-v1"
+model = "blla+catmus-print-fondue-large@zenodo.10592716"  # segmentation + recognition model
+
+[params]
+device = "cuda:0"
+recognition_model = "catmus-print-fondue-large.mlmodel"  # other parameters: README.md
+
+[resources]
+cpus = 4
+memory = "16g"
+gpus = "all"
+shm_size = "2g"
+
+[timeouts]
+sample = 600
+startup = 300

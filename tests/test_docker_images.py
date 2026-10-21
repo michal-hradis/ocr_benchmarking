@@ -74,6 +74,7 @@ def test_final_user_is_not_root(dockerfile):
         (DOCKER_DIR / "base-cu130-torch" / "requirements.txt", "torch==2.14.1+cu130"),
         (DOCKER_DIR / "base-cu130-paddle" / "requirements.txt", "paddlepaddle-gpu @ https://"),
         (ROOT / "engines" / "paddleocr" / "requirements.txt", "paddleocr==3.7.0"),
+        (ROOT / "engines" / "kraken" / "requirements.txt", "kraken==7.1.1"),
     ],
     ids=lambda v: v.parent.name if isinstance(v, Path) else None,
 )
