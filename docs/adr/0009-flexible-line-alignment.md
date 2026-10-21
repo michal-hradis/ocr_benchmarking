@@ -14,7 +14,7 @@ Ordered CER/WER ([ADR 0008](0008-strict-text-metrics.md)) penalize a newspaper r
 - **Accounting.** An unmatched unit costs its length plus one separator as deletions or insertions; separators between groups are matched. The denominator is the ordered reference length, so flexible and ordered rates are comparable, and the ordered alignment is always a candidate (flexible ≤ ordered). Without a group, the counts equal ordered CER/WER, so a failure scored as empty output deletes the whole reference.
 - **Words** use the same rules without separators and are optimized separately.
 - **Search.** Exhaustive for samples with at most 8 units on each side; otherwise q-gram anchors, blocks of consistently anchored units in reference order, line-boundary cuts with local shifts, and exact group costs. The cheaper of this and the ordered alignment is kept. Parameters are constants of the metrics version, not evaluation configuration.
-- **Approximation is reported.** Each result stores a lower bound (`max(|ref|, |hyp|)` minus the multiset overlap), `exact` (proven optimal), the method, groups, order breaks, unmatched units and retrieval coverage. Non-exact samples stay in the aggregates and are counted.
+- **Approximation is reported.** Each result stores a lower bound (`max(|ref|, |hyp|)` minus the multiset overlap), `exact` (proven optimal), the method, the groups as ranges of reference and prediction line indices, order breaks, unmatched units and retrieval coverage. Non-exact samples stay in the aggregates, are counted, and are marked in the `ocrbench evaluate` output.
 - **Versions.** `METRICS_VERSION` 2 and `ocrbench.scores` version 2 add `flexible_chars`, `flexible_words` and `flexible_units`; ordered metrics are unchanged.
 
 ## Alternatives considered

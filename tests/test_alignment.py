@@ -80,6 +80,16 @@ def test_substitutions_inside_groups_and_word_level_alignment():
     assert s.words.order_breaks == 1
 
 
+def test_groups_are_reported_as_ranges_of_input_lines():
+    s = score_flexible(["alpha beta", "  ", "gamma delta"], ["gamma delta", "", "alpha beta"])
+    # Empty lines are no units, so unit indices differ from line indices.
+    assert set(s.chars.groups) == {Group(1, 2, 0, 1), Group(0, 1, 1, 2)}
+    assert s.line_ranges(s.chars) == [(2, 3, 0, 1), (0, 1, 2, 3)]  # in prediction order
+    assert s.line_ranges(s.words) == [(2, 3, 0, 1), (0, 1, 2, 3)]
+    empty = score_flexible(["alpha"], [])
+    assert empty.line_ranges(empty.chars) == []
+
+
 def test_unicode_form_is_applied_to_units():
     s = score_flexible(["ﬁsch"], ["fisch"], form="NFKC")
     assert s.chars.counts.errors == 0
