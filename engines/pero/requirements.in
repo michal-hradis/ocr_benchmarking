@@ -1,0 +1,16 @@
+# Runtime dependencies of the pero-ocr inference path used by the adapter (PageParser with layout
+# CNN, region sorters, line cropper and transformer/CTC OCR; PAGE XML and ALTO export). pero-ocr
+# itself is installed from its pinned source archive with --no-deps (Dockerfile): its declared
+# dependencies pin numpy~=1.24.2, which has no Python 3.12 wheels, and include training, language
+# model decoding, music and PDF packages that inference does not import (README.md).
+# numpy 1.x, the closest to pero-ocr's own numpy~=1.24.2 pin with Python 3.12 wheels, and the
+# OpenCV 4 line (headless: the base has no libGL) that supports it.
+numpy==1.26.4
+scipy
+opencv-python-headless<5
+shapely
+lxml
+scikit-image
+scikit-learn
+numba
+arabic-reshaper
