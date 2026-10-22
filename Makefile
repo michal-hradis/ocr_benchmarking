@@ -2,7 +2,8 @@
 .PHONY: help setup lint format test check docker-cpu docker-cu130-torch docker-lock \
         docker-smoke gpu-preflight gpu-smoke docker-tesseract tesseract-smoke \
         docker-cu130-paddle docker-paddleocr paddleocr-smoke docker-kraken kraken-smoke \
-        docker-lightonocr lightonocr-model lightonocr-smoke
+        docker-lightonocr lightonocr-model lightonocr-smoke docker-fireredocr fireredocr-model \
+        fireredocr-smoke
 
 UV ?= uv
 BASE_VERSION ?= 1
@@ -13,6 +14,7 @@ TESSERACT_IMAGE := ocrbench/engine-tesseract:5.3.0-v1
 PADDLEOCR_IMAGE := ocrbench/engine-paddleocr:3.7.0-v1
 KRAKEN_IMAGE := ocrbench/engine-kraken:7.1.1-v1
 LIGHTONOCR_IMAGE := ocrbench/engine-lightonocr:2-1B-v1
+FIREREDOCR_IMAGE := ocrbench/engine-fireredocr:2B-v1
 # Host directory mounted as /cache for engines whose weights are not in the image.
 OCRBENCH_CACHE ?= $(HOME)/.cache/ocrbench
 LOCK := $(UV) pip compile --python-version 3.12 --python-platform x86_64-manylinux_2_28 \
@@ -64,6 +66,9 @@ docker-lock:  ## Re-lock the hashed requirements of the CUDA bases and the GPU e
 	$(LOCK) engines/lightonocr/requirements.in -c docker/base-cu130-torch/requirements.txt \
 		--index-url https://pypi.org/simple --extra-index-url https://download.pytorch.org/whl/cu130 \
 		--index-strategy unsafe-best-match -o engines/lightonocr/requirements.txt
+	$(LOCK) engines/fireredocr/requirements.in -c docker/base-cu130-torch/requirements.txt \
+		--index-url https://pypi.org/simple --extra-index-url https://download.pytorch.org/whl/cu130 \
+		--index-strategy unsafe-best-match -o engines/fireredocr/requirements.txt
 
 docker-smoke:  ## Smoke-test built bases, a derived CPU image and the fake-engine runner (opt-in)
 	$(UV) run --locked pytest -m docker --run-docker tests/test_docker_images.py tests/test_runner.py
@@ -98,6 +103,16 @@ lightonocr-model:  ## Download the pinned LightOnOCR-2 weights (2 GB) into $(OCR
 
 lightonocr-smoke:  ## Build the LightOnOCR-2 image and run, evaluate and report a synthetic dataset on the GPU (opt-in; needs lightonocr-model)
 	$(UV) run --locked pytest -m gpu --run-docker --run-gpu tests/test_lightonocr.py
+
+docker-fireredocr:  ## Build the FireRed-OCR engine image (needs the torch base) and print its image ID
+	docker build -t $(FIREREDOCR_IMAGE) engines/fireredocr
+	@docker image inspect --format '$(FIREREDOCR_IMAGE) {{.Id}}' $(FIREREDOCR_IMAGE)
+
+fireredocr-model:  ## Download the pinned FireRed-OCR weights (4.3 GB) into $(OCRBENCH_CACHE) (opt-in)
+	python3 engines/fireredocr/fetch_model.py $(OCRBENCH_CACHE)
+
+fireredocr-smoke:  ## Build the FireRed-OCR image and run, evaluate and report a synthetic dataset on the GPU (opt-in; needs fireredocr-model)
+	$(UV) run --locked pytest -m gpu --run-docker --run-gpu tests/test_fireredocr.py
 
 gpu-preflight:  ## Check host driver, Docker and NVIDIA Container Toolkit
 	scripts/gpu_preflight.sh

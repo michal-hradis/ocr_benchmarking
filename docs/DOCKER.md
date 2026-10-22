@@ -44,7 +44,7 @@ Publishing bases to a registry and pinning them by digest would also work, but w
 | `make docker-cpu` | Build the CPU base (small pull) |
 | `make docker-cu130-torch` | Build the CUDA/torch base (several GB pulled; cached afterwards) |
 | `make docker-cu130-paddle` | Build the CUDA/Paddle base (several GB pulled) |
-| `make docker-lock` | Re-lock the hashed `requirements.txt` of both CUDA bases and of the PaddleOCR (against the Paddle base) and Kraken and LightOnOCR (against the torch base) engines after editing a `requirements.in` |
+| `make docker-lock` | Re-lock the hashed `requirements.txt` of both CUDA bases and of the PaddleOCR (against the Paddle base) and Kraken, LightOnOCR and FireRed-OCR (against the torch base) engines after editing a `requirements.in` |
 | `make docker-smoke` | Opt-in: run the built images with `--network none --read-only` and check Python, the non-root user and that torch imports without a GPU; also build a minimal derived image (`tests/fixtures/derived-cpu`) from the CPU base and check it inherits the base layers; build the fake engine (`tests/fixtures/fake-engine`) and run it with `ocrbench run start` ([RUNNER.md](RUNNER.md)) |
 | `make docker-tesseract` | Build the Tesseract engine image from the CPU base ([engines/tesseract](../engines/tesseract/README.md)) |
 | `make tesseract-smoke` | Opt-in: build the Tesseract image and run it on synthetic samples through the runner, evaluation and reports |
@@ -55,6 +55,9 @@ Publishing bases to a registry and pinning them by digest would also work, but w
 | `make docker-lightonocr` | Build the LightOnOCR-2 GPU engine image from the torch base, without weights ([engines/lightonocr](../engines/lightonocr/README.md)) |
 | `make lightonocr-model` | Opt-in: download the pinned LightOnOCR-2 weights (2 GB) into the cache directory `OCRBENCH_CACHE` (default `~/.cache/ocrbench`), checked against `models.sha256` |
 | `make lightonocr-smoke` | Opt-in, GPU: build the LightOnOCR-2 image and run it with the cached weights on synthetic samples through the runner, evaluation and reports |
+| `make docker-fireredocr` | Build the FireRed-OCR GPU engine image from the torch base, without weights ([engines/fireredocr](../engines/fireredocr/README.md)) |
+| `make fireredocr-model` | Opt-in: download the pinned FireRed-OCR weights (4.3 GB) into `OCRBENCH_CACHE`, checked against `models.sha256` |
+| `make fireredocr-smoke` | Opt-in, GPU: build the FireRed-OCR image and run it with the cached weights on synthetic samples through the runner, evaluation and reports |
 | `make gpu-preflight` | Opt-in: host/Docker/toolkit GPU check described above |
 | `make gpu-smoke` | Opt-in: check that torch in the CUDA image sees the GPU and runs a matrix product, and that the runner passes `resources.gpus` to an engine container |
 
@@ -62,7 +65,7 @@ The default `make test` only checks the conventions of every `Dockerfile` in the
 
 ## Engine image conventions
 
-Engine adapters ([#11–#17](https://github.com/michal-hradis/ocr_benchmarking/issues/1)) live in `engines/<name>/` and follow these rules; [`engines/tesseract`](../engines/tesseract/README.md) (CPU), [`engines/paddleocr`](../engines/paddleocr/README.md) and [`engines/kraken`](../engines/kraken/README.md) (GPU, Python dependencies locked against a base) are examples, and [`engines/lightonocr`](../engines/lightonocr/README.md) of large weights in `/cache`:
+Engine adapters ([#11–#17](https://github.com/michal-hradis/ocr_benchmarking/issues/1)) live in `engines/<name>/` and follow these rules; [`engines/tesseract`](../engines/tesseract/README.md) (CPU), [`engines/paddleocr`](../engines/paddleocr/README.md) and [`engines/kraken`](../engines/kraken/README.md) (GPU, Python dependencies locked against a base) are examples, and [`engines/lightonocr`](../engines/lightonocr/README.md) and [`engines/fireredocr`](../engines/fireredocr/README.md) of large weights in `/cache`:
 
 - **Pin everything.** External `FROM` and `COPY --from` images by digest, shared bases by their versioned `ocrbench/base-*:...-vN` tag; Python packages by version with hashes (uv lock or `uv pip compile --generate-hashes`); engine source by commit or release; model weights by revision and checksum.
 - **Install as root, run as `ocr`.** Switch to `USER root` for system packages and back to `USER ocr` at the end.
