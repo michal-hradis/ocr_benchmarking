@@ -15,6 +15,7 @@ resized image:
 | 672 | raises a fake CUDA out-of-memory error |
 | 1216 | a sentence instead of JSON |
 | 1280 | one complete element and a cut-off one, then an end token (`MALFORMED`) |
+| 1344 | one complete element in an array without its closing `]`, then an end token (`UNCLOSED`) |
 | 1984 | numbered newspaper elements that never end (`newspaper_element` in `transformers/__init__.py`) |
 | other | `[]` and an end token |
 

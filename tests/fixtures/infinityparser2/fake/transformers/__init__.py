@@ -17,6 +17,8 @@ ASSISTANT = "<|im_start|>assistant\n<think>\n\n</think>\n\n"
 FACTOR = 32  # 16-pixel patches, one image token per 2 x 2 patches
 # A complete array followed by a cut-off element, although the model ended (width 1280).
 MALFORMED = '[{"bbox": [0, 0, 1000, 500], "category": "text", "text": "kept"}, {"bbox": [0, 5'
+# A complete element in an array that is never closed, although the model ended (width 1344).
+UNCLOSED = '[{"bbox": [0, 0, 1000, 500], "category": "text", "text": "kept"}'
 
 
 def newspaper_line(number):
@@ -112,6 +114,12 @@ class Qwen3_5ForConditionalGeneration:  # noqa: N801 (the transformers name)
         elif width == 960:
             tokens = [ord(c) for c in "[]"] + [TEXT_END, TEXT_END]
         else:
-            text = {896: PAGE, 288: "", 1216: "Sorry, I cannot read this.", 1280: MALFORMED}
+            text = {
+                896: PAGE,
+                288: "",
+                1216: "Sorry, I cannot read this.",
+                1280: MALFORMED,
+                1344: UNCLOSED,
+            }
             tokens = [ord(c) for c in text.get(width, "[]")] + [END, TEXT_END, TEXT_END]
         return Tensor([input_ids.data[0] + tokens[:max_new_tokens]])

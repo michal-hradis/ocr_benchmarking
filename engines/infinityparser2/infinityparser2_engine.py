@@ -50,7 +50,8 @@ DEFAULT_PARAMS: dict[str, Any] = {
     "max_new_tokens": 32768,
     "max_pixels": 16777216,
 }
-INT_PARAMS = {"max_new_tokens": 1, "max_pixels": MIN_PIXELS}  # minimum
+# The smallest max_pixels that leaves at least one 32-pixel unit on both sides at MAX_RATIO.
+INT_PARAMS = {"max_new_tokens": 1, "max_pixels": FACTOR * FACTOR * MAX_RATIO}  # minimum
 
 
 class AdapterError(Exception):
@@ -183,6 +184,10 @@ def smart_resize(height: int, width: int, max_pixels: int) -> tuple[int, int]:
         beta = math.sqrt(height * width / max_pixels)
         h_bar = math.floor(height / beta / FACTOR) * FACTOR
         w_bar = math.floor(width / beta / FACTOR) * FACTOR
+        if not (h_bar and w_bar):  # qwen_vl_utils would give a zero size here
+            raise AdapterError(
+                f"max_pixels of {max_pixels} is too small for {width} x {height} pixels"
+            )
     elif h_bar * w_bar < MIN_PIXELS:
         beta = math.sqrt(MIN_PIXELS / (height * width))
         h_bar = math.ceil(height * beta / FACTOR) * FACTOR
@@ -264,45 +269,48 @@ def generate(processor: Any, model: Any, params: dict[str, Any], image: Any) -> 
     return {"text": text, **details}
 
 
-def parse_layout(text: str) -> tuple[list[Any], str]:
-    """The complete elements of the model's JSON array, and the text after the last of them that
-    is not the end of the array ('' when the array is complete).
+def parse_layout(text: str) -> tuple[list[Any], str, bool]:
+    """The complete elements of the model's JSON array, the text after the last of them that is
+    not the end of the array ('' when nothing is left), and whether the array is complete: closed
+    by ``]``, with its elements separated by commas and nothing after it.
 
     As in infinity_parser2 (extract_json_content), a ```json fence is unwrapped, also an unclosed
-    one; an element cut off by truncation (or anything malformed) ends the array, keeping the
-    elements before it (truncate_last_incomplete_element), and is returned as the rest. Output
-    that is not a JSON array at all raises AdapterError; an empty output has no elements.
+    one; an element cut off by truncation (or anything malformed, such as a missing comma) ends the
+    array, keeping the elements before it (truncate_last_incomplete_element), and is returned as
+    the rest. A comma before the closing ``]`` loses no text and is accepted. Output that is not a
+    JSON array at all raises AdapterError; an empty output has no elements.
     """
     fenced = re.search(r"```json\n(.*?)\n```", text, re.DOTALL) or re.search(
         r"```json\n(.*)", text, re.DOTALL
     )
     body = (fenced.group(1) if fenced else text).strip()
     if not body:
-        return [], ""
+        return [], "", True
     if not body.startswith("["):
         raise AdapterError(f"the output is not a layout JSON array: {body[:200]!r}")
     decoder = json.JSONDecoder()
     elements: list[Any] = []
-    position = 1
+    position = _skip(body, 1)
     while True:
-        position = _skip(body, position, ",") if elements else _skip(body, position, "")
         if body.startswith("]", position):
-            return elements, body[position + 1 :].strip()
+            rest = body[position + 1 :].strip()
+            return elements, rest, not rest
         try:
             element, position = decoder.raw_decode(body, position)
         except json.JSONDecodeError:
-            return elements, body[position:]
+            return elements, body[position:], False
         elements.append(element)
+        position = _skip(body, position)
+        if body.startswith(",", position):
+            position = _skip(body, position + 1)
+        elif not body.startswith("]", position):
+            return elements, body[position:], False
 
 
-def _skip(text: str, position: int, separator: str) -> int:
-    """The position after whitespace and at most one ``separator``."""
+def _skip(text: str, position: int) -> int:
+    """The position after whitespace."""
     while position < len(text) and text[position].isspace():
         position += 1
-    if separator and text.startswith(separator, position):
-        position += len(separator)
-        while position < len(text) and text[position].isspace():
-            position += 1
     return position
 
 
@@ -341,7 +349,7 @@ def process(models: tuple, params: dict, sample: dict, source: Path, out: Path) 
     generation = generate(processor, model, params, image)
     text = generation.pop("text")
     (out / "output.txt").write_text(text, encoding="utf-8")
-    parsed, rest = parse_layout(text)
+    parsed, rest, complete = parse_layout(text)
     elements = layout_elements(parsed, image.width, image.height)
     layout = {"image": {"width": image.width, "height": image.height}, "elements": elements}
     (out / "layout.json").write_text(json.dumps(layout, ensure_ascii=False, indent=1), "utf-8")
@@ -355,10 +363,12 @@ def process(models: tuple, params: dict, sample: dict, source: Path, out: Path) 
         )
         result["status"] = "truncated"
         result["message"] = f"generation stopped at {limit} ({generation['max_new_tokens']} tokens)"
-    elif rest:
+    elif not complete:
         result["status"] = "partial"
         result["message"] = (
             f"malformed layout JSON after element {len(elements)}: {len(rest)} characters dropped"
+            if rest
+            else f"unclosed layout JSON array after element {len(elements)}"
         )
     return result | {"extra": generation}
 
