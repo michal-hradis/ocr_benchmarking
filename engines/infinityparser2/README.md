@@ -102,11 +102,12 @@ The model's context is 262,144 tokens for the prompt (mostly image tokens) and t
 - **Memory.** The bfloat16 weights take 4.4 GB of GPU memory.
   - Only the 6 full-attention layers keep a key/value cache, about 12 KB per token (2 key/value heads of 256 dimensions). That is about 0.6 GB for 16,384 image tokens and 32,768 generated ones. The 18 linear-attention layers keep a state of fixed size.
   - The vision encoder runs on all patches of the image at once, up to 65,536 at the default `max_pixels`.
-  - A single RTX 4090 (24 GB) is the target. The peak allocated GPU memory of every sample is recorded as `gpu_peak_memory_mb`. It has not been measured on real pages yet.
+  - A single RTX 4090 (24 GB) is the target. The peak allocated GPU memory of every sample is recorded as `gpu_peak_memory_mb`. On the RTX 4090 it was about 4.7–5.0 GB for 1600-pixel book pages (2,500–4,400 image tokens) and about 6.9 GB for newspaper pages at the default `max_pixels` (about 16,250 image tokens).
   - A CUDA out-of-memory error fails only that sample (`engine-error`) and the container continues. Lowering `max_pixels` reduces the memory needed. Host memory is limited to 16 GB by `[resources]`.
 - **Time.** Generation is token by token with batch size 1. A truncated sample generates all `max_new_tokens` and is the slowest.
-  - `timeouts.sample = 2400` seconds allows for that at about 15 tokens/s or more. The speed on the RTX 4090 has not been measured yet; OvisOCR2, a smaller model of the same architecture, generates 24–28 tokens/s there.
+  - On the RTX 4090, generation runs at about 27–28 tokens/s with the PyTorch linear-attention implementation, so 32,768 tokens take about 1,160 s; loading the model takes about 16 s. `timeouts.sample = 2400` seconds allows for that with a margin.
   - `preprocess_seconds`, `generate_seconds` and `tokens_per_second` are recorded per sample.
+- **Repetition.** On the dev-01 pages, one of seven outputs ran into a loop until `max_new_tokens`: the non-Latin manuscript page, which repeats two words inside its first element. That element never closes, so no complete element is kept: the sample is `truncated` with an empty prediction (`dropped_characters` 27,346). Both newspaper pages finished with an end token (33 and 55 elements).
 
 ## Outputs
 
