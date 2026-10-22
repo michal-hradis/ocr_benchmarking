@@ -4,7 +4,9 @@ It follows the engine protocol in docs/RUNNER.md: read $OCRBENCH_INPUT/job.json,
 PaddleOCR general OCR pipeline (text detection + recognition) once, run it on every sample image
 in job order and write $OCRBENCH_OUTPUT/<id>/ with the native result (paddleocr.json), the
 standardized prediction.json and, last, result.json. PP-OCR reports text lines without any
-layout grouping; all lines of a page go into one region in PaddleOCR's order.
+layout grouping; all lines of a page go into one region in PaddleOCR's order. The detector input
+size is a parameter (text_det_max_side_limit, set in the PaddleX pipeline configuration); the
+detected polygons are in pixels of the input image either way.
 """
 
 from __future__ import annotations
@@ -26,13 +28,19 @@ DEFAULT_PARAMS: dict[str, Any] = {
     "device": "gpu:0",
     "text_det_limit_side_len": None,
     "text_det_limit_type": None,
+    "text_det_max_side_limit": None,
     "text_det_thresh": None,
     "text_det_box_thresh": None,
     "text_det_unclip_ratio": None,
     "text_rec_score_thresh": None,
     "text_recognition_batch_size": None,
 }
-INT_PARAMS = {"text_det_limit_side_len": 1, "text_recognition_batch_size": 1}  # name: minimum
+# name: minimum; the detector input is rounded to multiples of 32 pixels.
+INT_PARAMS = {
+    "text_det_limit_side_len": 1,
+    "text_det_max_side_limit": 32,
+    "text_recognition_batch_size": 1,
+}
 # name: (check, description); scores are in [0, 1], detection parameters must be positive.
 FLOAT_PARAMS = {
     "text_det_thresh": (lambda v: 0 < v <= 1, "a number with 0 < value <= 1"),
@@ -75,7 +83,8 @@ def pipeline_arguments(params: dict[str, Any]) -> dict[str, Any]:
 
     Document orientation correction and unwarping are off because they change the image the
     positions refer to; the text line orientation classifier is off because its model is not
-    in the image.
+    in the image. ``text_det_max_side_limit`` is not a PaddleOCR() argument; it goes into the
+    PaddleX configuration (``paddlex_config``).
     """
     arguments = {
         "text_detection_model_name": DET_MODEL,
@@ -86,7 +95,22 @@ def pipeline_arguments(params: dict[str, Any]) -> dict[str, Any]:
         "use_doc_unwarping": False,
         "use_textline_orientation": False,
     }
-    return arguments | {key: value for key, value in params.items() if value is not None}
+    overrides = {
+        k: v for k, v in params.items() if v is not None and k != "text_det_max_side_limit"
+    }
+    return arguments | overrides
+
+
+def paddlex_config(config: dict[str, Any], params: dict[str, Any]) -> dict[str, Any]:
+    """The PaddleX OCR pipeline configuration with ``text_det_max_side_limit`` applied.
+
+    The detector scales the image by ``text_det_limit_side_len``/``text_det_limit_type`` and
+    then down so that its longer side is at most ``max_side_limit`` (4000 by default).
+    """
+    limit = params["text_det_max_side_limit"]
+    if limit is not None:
+        config["SubModules"]["TextDetection"]["max_side_limit"] = limit
+    return config
 
 
 def result_to_prediction(native: dict[str, Any], sample_id: str, size: tuple[int, int]) -> dict:
@@ -155,8 +179,19 @@ def environment(device: str) -> dict[str, Any]:
 
 def load_pipeline(params: dict[str, Any]) -> Any:
     from paddleocr import PaddleOCR
+    from paddlex.inference import load_pipeline_config
 
-    return PaddleOCR(**pipeline_arguments(params))
+    config = paddlex_config(load_pipeline_config("OCR"), params)
+    return PaddleOCR(paddlex_config=config, **pipeline_arguments(params))
+
+
+def error_message(error: Exception) -> str:
+    """``<type>: <message>``; of Paddle's long C++ errors only the summary at the end."""
+    message = str(error)
+    if "Error Message Summary:" in message:
+        summary = message.rsplit("Error Message Summary:", 1)[1]
+        message = " ".join(summary.lstrip("-\n").split())
+    return f"{type(error).__name__}: {message}"
 
 
 def read_image(path: Path) -> Any:
@@ -169,7 +204,9 @@ def read_image(path: Path) -> Any:
     return image
 
 
-def process(pipeline: Any, sample: dict[str, Any], source: Path, out: Path) -> dict[str, Any]:
+def process(
+    pipeline: Any, sample: dict[str, Any], source: Path, out: Path, params: dict[str, Any]
+) -> dict[str, Any]:
     """Run the pipeline on one sample, write its outputs and return the ``result.json`` content."""
     image = read_image(source / sample["image"])
     results = list(pipeline.predict(image))
@@ -177,6 +214,10 @@ def process(pipeline: Any, sample: dict[str, Any], source: Path, out: Path) -> d
         raise AdapterError(f"PaddleOCR returned {len(results)} results, expected 1")
     native = results[0].json
     (out / "paddleocr.json").write_text(json.dumps(native, ensure_ascii=False), encoding="utf-8")
+    limit = params["text_det_max_side_limit"]
+    used = native["res"].get("text_det_params", {}).get("max_side_limit")
+    if limit is not None and used != limit:
+        raise AdapterError(f"text_det_max_side_limit {limit} requested but PaddleOCR used {used}")
     height, width = image.shape[:2]
     prediction = result_to_prediction(native, sample["id"], (width, height))
     (out / "prediction.json").write_text(
@@ -216,11 +257,11 @@ def main() -> None:
         try:
             if init_error:
                 raise AdapterError(init_error)
-            result = process(pipeline, sample, source, out)
+            result = process(pipeline, sample, source, out, params)
         except AdapterError as error:
             result = {"status": "failed", "message": str(error)}
         except Exception as error:  # e.g. CUDA out of memory: fail the sample, keep going
-            result = {"status": "failed", "message": f"{type(error).__name__}: {error}"}
+            result = {"status": "failed", "message": error_message(error)}
         result["seconds"] = round(time.monotonic() - start, 3)
         result.setdefault("extra", {}).update(environment=info, models=models, params=params)
         write_result(out, result)

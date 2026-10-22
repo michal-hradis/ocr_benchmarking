@@ -1,11 +1,12 @@
-# PaddleOCR PP-OCRv6 GPU pipeline (README.md next to this file; format: docs/RUNNER.md).
+# PaddleOCR PP-OCRv6 GPU pipeline, preset det4000 (README.md next to this file; format: docs/RUNNER.md).
 name = "paddleocr"
-engine_version = "1"
-image = "ocrbench/engine-paddleocr:3.7.0-v1"
+engine_version = "2"
+image = "ocrbench/engine-paddleocr:3.7.0-v2"
 model = "PP-OCRv6_medium@det-8e0f56fb,rec-e5a92bcb"  # Hugging Face PaddlePaddle/* commits
 
 [params]
 device = "gpu:0"  # other parameters keep the pipeline defaults (README.md)
+text_det_max_side_limit = 4000  # the PaddleOCR default: longer pages are downscaled for detection
 
 [resources]
 cpus = 4

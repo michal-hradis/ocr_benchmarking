@@ -1,0 +1,21 @@
+# PaddleOCR preset det8000: differs from engine.toml (det4000) only in the detector input limit,
+# so pages up to 8000 pixels (for example ~6000-pixel newspaper scans) are detected at full resolution.
+# Needs ~7 GB of GPU memory for a 4194 x 6192 page (README.md next to engine.toml).
+name = "paddleocr-det8000"
+engine_version = "2"
+image = "ocrbench/engine-paddleocr:3.7.0-v2"
+model = "PP-OCRv6_medium@det-8e0f56fb,rec-e5a92bcb"  # Hugging Face PaddlePaddle/* commits
+
+[params]
+device = "gpu:0"
+text_det_max_side_limit = 8000
+
+[resources]
+cpus = 4
+memory = "16g"
+gpus = "all"
+shm_size = "2g"
+
+[timeouts]
+sample = 300
+startup = 300
