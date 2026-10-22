@@ -18,7 +18,7 @@ Second direct page-image model ([#15](https://github.com/michal-hradis/ocr_bench
   - It is FireRed-OCR-2B, the only released model: [Qwen3-VL-2B-Instruct](https://huggingface.co/Qwen/Qwen3-VL-2B-Instruct) fine-tuned for document parsing.
   - The weights are 4.3 GB of bfloat16 (`model.safetensors`).
   - The model card lists no languages. Its benchmarks (OmniDocBench, FireRedBench) are mostly English and Chinese documents.
-- **Inference:** [transformers](https://github.com/huggingface/transformers) **5.19.0** (`Qwen3VLForConditionalGeneration`, the architecture in the checkpoint's `config.json`), with torchvision 0.29.1 for the image processor. It runs on the base's torch **2.14.1** for CUDA 13.0 (NVIDIA driver ≥ 580).
+- **Inference:** [transformers](https://github.com/huggingface/transformers) **5.19.0** (`Qwen3VLForConditionalGeneration`, the architecture in the checkpoint's `config.json`), with torchvision 0.29.1 for the image processor. It runs on the base's torch **2.14.1** for CUDA 13.0 (NVIDIA driver ≥ 580). The adapter has been run with it on an RTX 4090.
   - The requirements are the same as LightOnOCR's. The image is separate, so either engine can change versions on its own.
   - The official repository has a transformers script and a vLLM script. vLLM is faster for large batches. It is not used here, because it would need a server inside the container and its own CUDA stack ([ADR 0007](../../docs/adr/0007-runner-and-engine-protocol.md)).
   - The model card recommends flash-attention 2. It is not installed: attention uses PyTorch's scaled-dot-product kernels, which give the same results up to floating-point differences.
@@ -97,9 +97,9 @@ The model's context is 262,144 tokens for the prompt (mostly image tokens) and t
 - **Memory.** The bfloat16 weights take 4.3 GB of GPU memory.
   - The key/value cache takes about 112 KB per token (28 layers, 8 key/value heads of 128 dimensions). That is about 2.7 GB for 16,384 image tokens and 8,192 generated ones.
   - The vision encoder (24 layers) runs on all patches of the image at once, up to 65,536 at the default `max_pixels`.
-  - A single RTX 4090 (24 GB) is the target. The peak allocated GPU memory of every sample is recorded as `gpu_peak_memory_mb`.
+  - A single RTX 4090 (24 GB) is the target. The peak allocated GPU memory of every sample is recorded as `gpu_peak_memory_mb`. On the RTX 4090 it was about 4.2 GB for small synthetic images, about 4.9 GB for 1600-pixel book pages and about 7.6 GB for newspaper pages at the full 16,384 image tokens.
   - A CUDA out-of-memory error fails only that sample (`engine-error`) and the container continues. Lowering `max_pixels` reduces the memory needed. Host memory is limited to 16 GB by `[resources]`.
-- **Time.** Generation is token by token with batch size 1. A truncated sample generates all `max_new_tokens` and is the slowest; `timeouts.sample = 900` seconds allows for that. `preprocess_seconds`, `generate_seconds` and `tokens_per_second` are recorded per sample.
+- **Time.** Generation is token by token with batch size 1. A truncated sample generates all `max_new_tokens` and is the slowest; `timeouts.sample = 900` seconds allows for that. On the RTX 4090, generation runs at about 32 tokens/s, so 8,192 tokens take about 260 s. `preprocess_seconds`, `generate_seconds` and `tokens_per_second` are recorded per sample.
 
 ## Outputs
 
@@ -124,7 +124,7 @@ The converted prediction has **no positions** and no physical lines: line breaks
 - the model directory is missing (`... does not exist; download the weights with make fireredocr-model and run with --cache`);
 - the model files do not match `models.sha256`.
 
-A page for which the model immediately generates an end token is a **genuine empty result**: `success` with empty text.
+A page for which the model immediately generates an end token is a **genuine empty result**: `success` with empty text. The model does not reliably do that for a blank image. On the synthetic blank page it generates `The 7 Habits of Highly Effective People`, which is kept and scored as a hallucination, like any other output.
 
 ## Tests
 
