@@ -48,11 +48,18 @@ The prompt is the model's chat template with the **image alone** and no text ins
 | Parameter | Default | Meaning |
 | --- | --- | --- |
 | `device` | `cuda:0` | `cuda:<n>`, or `cpu` |
-| `model_dir` | `models/lightonocr/LightOnOCR-2-1B/<revision>` | Model directory, relative to `/cache`. Only the default is checked against `models.sha256`; for another directory, the checksums are recorded only |
+| `model_dir` | `models/lightonocr/LightOnOCR-2-1B/<revision>` | Model directory, relative to `/cache`; another directory holds a custom checkpoint (below) |
 | `max_new_tokens` | 8192 | Generated tokens before the output counts as truncated, `1 <= value < 16384` |
 | `temperature`, `top_p` | 0.2, 0.9 | Sampling, as in the model's `generation_config.json` and the model card; `temperature = 0` is greedy decoding |
 | `seed` | 0 | Set before every sample, so a sample's sampling does not depend on the samples before it |
 | `longest_edge` | 1540 | The processor scales larger images down so that the longest side is at most this many pixels (the model's training resolution). It does not scale smaller images up |
+
+**Custom checkpoints.** Any directory under the cache that transformers can load as LightOnOCR (for example a fine-tuned model) can be given as `model_dir`. Only the files are checked against `models.sha256`, never the directory name. The default directory must match, or every sample fails. For another directory, the result is recorded:
+
+- If every file in `models.sha256` is present and matches, the official checkpoint is recorded: `extra.models.verified_official_checkpoint` is `true`, with `repository` and `revision`.
+- Otherwise `verified_official_checkpoint` is `false` and no official repository or revision is recorded.
+
+Either way, `model_dir` and the SHA-256 of every file in it are recorded. For a custom checkpoint, also set `model` in a copy of `engine.toml` to name what is used, for example `"my-org/LightOnOCR-2-1B-finetuned@<revision>"`. That name is what reports show as the model.
 
 **Image size.** The adapter decodes the image as stored with Pillow (EXIF orientation not applied, modes other than RGB converted to RGB) and passes it to the processor unchanged. The processor keeps the aspect ratio, scales the image down to `longest_edge` if needed and rounds it to whole patches; one image token covers 28 × 28 pixels, so a 1540 × 1100 page is 55 × 40 = 2,200 image tokens. The size the model saw is recorded as `model_image`. A paragraph crop is not enlarged.
 
@@ -72,7 +79,7 @@ The model's context is **16,384 tokens** for the prompt (mostly image tokens) an
 | File | Content |
 | --- | --- |
 | `page.md` | The generated text, decoded without special tokens and otherwise unchanged: the native output and the primary output |
-| `result.json` | Status, processing time and, in `extra`: `stop_reason`, `prompt_tokens`, `image_tokens`, `generated_tokens`, the effective `max_new_tokens`, `model_image`, the timings, `gpu_peak_memory_mb`, the transformers/torch/CUDA versions, the GPU name and memory, the model loading time, the model repository, revision, file checksums and prompt, and the parameters |
+| `result.json` | Status, processing time and, in `extra`: `stop_reason`, `prompt_tokens`, `image_tokens`, `generated_tokens`, the effective `max_new_tokens`, `model_image`, the timings, `gpu_peak_memory_mb`, the transformers/torch/CUDA versions, the GPU name and memory, the model loading time, the model (`verified_official_checkpoint`; `repository` and `revision` only when verified; `model_dir`, file checksums, the configured `model` and the prompt) and the parameters |
 
 **Plain text and the prediction.** `page.md` is converted to the standardized prediction on the host by the shared Markdown converter ([PREDICTIONS.md](../../docs/PREDICTIONS.md#host-side-conversion-of-native-output)), not in the container. Markdown delimiters are therefore never part of the recognized text: headings, paragraphs, list items, tables (one row per line, cells separated by tabs), `$$` formulas (TeX source) and HTML embedded in Markdown become typed regions with their text only, and emphasis, links and images keep only their text. The converter's limitations apply, for example `\[…\]` and `\(…\)` math delimiters are read as Markdown escapes. The converted prediction has **no positions** and no physical lines: line breaks inside a paragraph are kept as the model wrote them, and the regions are the Markdown blocks in the model's order. The model gives no geometry, so none is invented.
 

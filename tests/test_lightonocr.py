@@ -195,7 +195,9 @@ def test_adapter_follows_the_engine_protocol(tmp_path):
     assert extra["environment"]["gpu"] == "Fake GPU"
     models = extra["models"]
     assert models["job_model"] == CONFIG["model"]
-    assert models["pinned_revision"] == lo.REVISION
+    assert models["verified_official_checkpoint"] is True
+    assert (models["repository"], models["revision"]) == (lo.REPOSITORY, lo.REVISION)
+    assert models["model_dir"] == lo.PINNED_DIR
     assert set(models["files"]) == {"config.json", "model.safetensors"}
     assert models["prompt"] == [{"role": "user", "content": [{"type": "image"}]}]
     assert extra["params"] == lo.DEFAULT_PARAMS
@@ -236,6 +238,25 @@ def test_greedy_decoding_and_short_context(tmp_path):
     assert "model's context" in records["news"]["message"]
     assert "gpu" not in extra["environment"]
     assert "gpu_peak_memory_mb" not in extra
+
+
+@pytest.mark.parametrize(("content", "official"), [("other weights", False), (None, True)])
+def test_a_custom_model_dir_claims_the_official_checkpoint_only_when_verified(
+    tmp_path, content, official
+):
+    custom = tmp_path / "cache" / "models" / "custom"
+    custom.mkdir(parents=True)
+    for name in ("config.json", "model.safetensors"):  # None: a copy of the official files
+        (custom / name).write_text(content or f"fake {name}", encoding="utf-8")
+    params = CONFIG["params"] | {"model_dir": "models/custom"}
+    _, records = run_adapter(tmp_path, {"page": (900, 420)}, params)
+    assert records["page"]["status"] == "success"
+    models = records["page"]["engine_extra"]["models"]
+    assert models["verified_official_checkpoint"] is official
+    assert ("repository" in models, "revision" in models) == (official, official)
+    assert models["model_dir"] == "models/custom"
+    digest = hashlib.sha256((content or "fake model.safetensors").encode()).hexdigest()
+    assert models["files"]["model.safetensors"] == digest  # hashes are recorded either way
 
 
 @pytest.mark.parametrize(

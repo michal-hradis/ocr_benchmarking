@@ -94,8 +94,9 @@ def sha256(path: Path) -> str:
     return digest.hexdigest()
 
 
-def model_files(model_dir: str) -> dict[str, str]:
-    """SHA-256 of the model files; the pinned directory must match models.sha256."""
+def model_files(model_dir: str) -> tuple[dict[str, str], bool]:
+    """SHA-256 of the model files, and whether they are the official pinned checkpoint: every
+    file of models.sha256 present and matching. The pinned directory must match."""
     directory = CACHE / model_dir
     if not directory.is_dir():
         raise AdapterError(
@@ -103,14 +104,13 @@ def model_files(model_dir: str) -> dict[str, str]:
             "make lightonocr-model and run with --cache (README.md)"
         )
     files = {p.name: sha256(p) for p in sorted(directory.iterdir()) if p.is_file()}
-    if Path(model_dir) == Path(PINNED_DIR):
-        pinned = dict(
-            reversed(line.split()) for line in CHECKSUMS.read_text().splitlines() if line.strip()
-        )
-        bad = sorted(name for name, digest in pinned.items() if files.get(name) != digest)
-        if bad:
-            raise AdapterError(f"model files missing or not matching models.sha256: {bad}")
-    return files
+    pinned = dict(
+        reversed(line.split()) for line in CHECKSUMS.read_text().splitlines() if line.strip()
+    )
+    bad = sorted(name for name, digest in pinned.items() if files.get(name) != digest)
+    if bad and Path(model_dir) == Path(PINNED_DIR):
+        raise AdapterError(f"model files missing or not matching models.sha256: {bad}")
+    return files, not bad
 
 
 def environment(device: str) -> dict[str, Any]:
@@ -262,20 +262,24 @@ def main() -> None:
     target = Path(os.environ["OCRBENCH_OUTPUT"])
     job = json.loads((source / "job.json").read_text(encoding="utf-8"))
     start = time.monotonic()
-    models, params, info, files, init_error = None, None, {}, None, None
+    models, params, info, files, official, init_error = None, None, {}, None, False, None
     try:
         params = parse_params(job.get("params") or {})
         info = environment(params["device"])
-        files = model_files(params["model_dir"])
+        files, official = model_files(params["model_dir"])
         models = load_model(params)
     except AdapterError as error:
         init_error = str(error)
     except Exception as error:
         init_error = f"cannot load LightOnOCR: {type(error).__name__}: {error}"
     info["load_seconds"] = round(time.monotonic() - start, 3)
-    model_info = {
-        "repository": REPOSITORY,
-        "pinned_revision": REVISION,
+    # The official repository and revision are claimed only for verified files; a custom
+    # checkpoint is identified by its directory, its file hashes and the configured model name.
+    model_info: dict[str, Any] = {"verified_official_checkpoint": official}
+    if official:
+        model_info |= {"repository": REPOSITORY, "revision": REVISION}
+    model_info |= {
+        "model_dir": params and params["model_dir"],
         "files": files,
         "job_model": job.get("model"),
         "prompt": CONVERSATION,
