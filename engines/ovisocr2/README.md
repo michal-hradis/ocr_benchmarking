@@ -96,9 +96,10 @@ The model's context is 262,144 tokens for the prompt (mostly image tokens) and t
 - **Memory.** The bfloat16 weights take 1.7 GB of GPU memory.
   - Only the 6 full-attention layers keep a key/value cache, about 12 KB per token (2 key/value heads of 256 dimensions). That is about 0.3 GB for 8,100 image tokens and 16,384 generated ones. The 18 linear-attention layers keep a state of fixed size.
   - The vision encoder (12 layers) runs on all patches of the image at once, up to 32,400 at the default `max_pixels`.
-  - A single RTX 4090 (24 GB) is the target. The peak allocated GPU memory of every sample is recorded as `gpu_peak_memory_mb`.
+  - A single RTX 4090 (24 GB) is the target. The peak allocated GPU memory of every sample is recorded as `gpu_peak_memory_mb`. On the RTX 4090 it was about 2.2 GB for 1600-pixel book pages and about 2.9 GB for newspaper pages at about 8,000 image tokens.
   - A CUDA out-of-memory error fails only that sample (`engine-error`) and the container continues. Lowering `max_pixels` reduces the memory needed. Host memory is limited to 16 GB by `[resources]`.
-- **Time.** Generation is token by token with batch size 1. A truncated sample generates all `max_new_tokens` and is the slowest; `timeouts.sample = 900` seconds allows for that. `preprocess_seconds`, `generate_seconds` and `tokens_per_second` are recorded per sample.
+- **Time.** Generation is token by token with batch size 1. A truncated sample generates all `max_new_tokens` and is the slowest; `timeouts.sample = 900` seconds allows for that. On the RTX 4090, generation runs at about 24–28 tokens/s with the PyTorch linear-attention implementation, so 16,384 tokens take about 585 s; loading the model takes about 13 s. `preprocess_seconds`, `generate_seconds` and `tokens_per_second` are recorded per sample.
+- **Repetition.** On the dev-01 pages, two of seven outputs ran into a loop until `max_new_tokens`: a Czech newspaper page after about 85 correct paragraphs (a `1` repeated as its own paragraph) and a non-Latin manuscript page from the start. Both are reported as `truncated` and scored as produced.
 
 ## Outputs
 
