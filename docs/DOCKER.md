@@ -50,7 +50,7 @@ Publishing bases to a registry and pinning them by digest would also work, but w
 | `make tesseract-best` | Opt-in: download the pinned `tessdata_best` models (48 MB) for the Tesseract best presets into `$(OCRBENCH_CACHE)` |
 | `make tesseract-smoke` | Opt-in: build the Tesseract image and run all its presets on synthetic samples through the runner, evaluation and reports (the best presets need `make tesseract-best`) |
 | `make docker-paddleocr` | Build the PaddleOCR PP-OCRv6 GPU engine image from the Paddle base ([engines/paddleocr](../engines/paddleocr/README.md)) |
-| `make paddleocr-smoke` | Opt-in, GPU: build the PaddleOCR image and run it on synthetic samples through the runner, evaluation and reports |
+| `make paddleocr-smoke` | Opt-in, GPU: build the PaddleOCR image and run both presets (`det4000`, `det8000`) on synthetic samples, including a 5400-pixel page, through the runner, evaluation and reports |
 | `make docker-kraken` | Build the Kraken GPU engine image from the torch base ([engines/kraken](../engines/kraken/README.md)) |
 | `make kraken-smoke` | Opt-in, GPU: build the Kraken image and run it on synthetic samples through the runner, evaluation and reports |
 | `make docker-lightonocr` | Build the LightOnOCR-2 GPU engine image from the torch base, without weights ([engines/lightonocr](../engines/lightonocr/README.md)) |
