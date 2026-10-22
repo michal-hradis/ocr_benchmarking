@@ -134,4 +134,4 @@ A page for which the model immediately generates an end token is a **genuine emp
 - The fake model returns a hand-written Markdown page with an HTML table (`tests/fixtures/fireredocr/page.md`, not real model output), an empty page, an out-of-memory error and a newspaper page that never ends.
 - That run is then evaluated and reported, including the truncated page against a 2,000-line reference.
 
-`make fireredocr-smoke` (after `make fireredocr-model`) builds the image and runs the real model on the GPU. It goes through `ocrbench run start`, `evaluate` (twice, without rerunning OCR) and `report` on a synthetic full page, a paragraph crop and a blank page. It also runs without `--cache`, which must fail explicitly.
+`make fireredocr-smoke` (after `make fireredocr-model`) builds the image and runs the real model on the GPU. It goes through `ocrbench run start`, `evaluate` (twice, without rerunning OCR) and `report` on a synthetic full page, a paragraph crop and a blank page. A second run with `max_new_tokens = 16` must mark the page `truncated` and keep and score its partial Markdown. It also runs without `--cache`, which must fail explicitly.

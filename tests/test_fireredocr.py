@@ -393,6 +393,27 @@ def test_gpu_smoke_benchmark(tmp_path, fireredocr_image):
     assert main(["report", str(run.path), "-o", str(report), "--inspect"]) == 0
     assert (report / "index.html").is_file()
 
+    # A small max_new_tokens truncates the page; the partial Markdown is kept and scored.
+    limited = tmp_path / "engine.toml"
+    config = Path(engine).read_text(encoding="utf-8")
+    limited.write_text(config.replace("max_new_tokens = 8192", "max_new_tokens = 16"), "utf-8")
+    short = [*args[:2], "--engine", str(limited), *args[4:]]
+    assert main([*short, "--cache", cache, "--run-id", "truncated"]) == 0
+    short_run = load_run(tmp_path / "runs" / "truncated")
+    page = latest_record(short_run, "page-1")
+    assert page["status"] == "truncated"
+    assert page["message"] == "generation stopped at max_new_tokens (16 tokens)"
+    assert page["engine_extra"]["stop_reason"] == "max_new_tokens"
+    assert page["engine_extra"]["generated_tokens"] == 16
+    attempt = "samples/page-1/attempt-1/output/page.md"
+    partial = (short_run.path / attempt).read_text(encoding="utf-8")
+    assert partial
+    assert (run.path / attempt).read_text(encoding="utf-8").startswith(partial)
+    assert main(["evaluate", str(short_run.path)]) == 0
+    scores = json.loads((short_run.path / "evaluations" / "1" / "scores.json").read_text())
+    short_rates = {s["sample_id"]: s["chars"]["rate"] for s in scores["samples"]}
+    assert rates["page-1"] < short_rates["page-1"] < 1  # scored as produced, not as empty
+
     # Without the cache mount, every sample fails explicitly.
     assert main([*args, "--run-id", "no-cache"]) == 0
     run = load_run(tmp_path / "runs" / "no-cache")
