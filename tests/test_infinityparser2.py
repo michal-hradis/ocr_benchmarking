@@ -83,6 +83,7 @@ def test_prompt_is_the_official_doc2json_one():
         ({"max_new_tokens": 262144}, "less than the context"),
         ({"temperature": 0.7}, "unknown parameters: temperature"),  # greedy only
         ({"max_pixels": 2047}, "max_pixels"),
+        ({"max_pixels": 2048}, "max_pixels must be an integer of at least 204800"),
         ({"max_pixels": True}, "max_pixels"),
         ({"model_dir": "/cache/models/x"}, "model_dir"),
         ({"model_dir": "models/../../etc"}, "model_dir"),
@@ -123,6 +124,17 @@ def test_smart_resize_matches_qwen_vl_utils(size, max_pixels, expected):
     assert ip.MIN_PIXELS <= w * h <= max_pixels
 
 
+def test_max_pixels_too_small_for_the_aspect_ratio_is_an_adapter_error():
+    # qwen_vl_utils would round the short side down to zero units.
+    with pytest.raises(ip.AdapterError, match="max_pixels of 2048 is too small for 2000 x 300"):
+        ip.smart_resize(300, 2000, 2048)
+    # The smallest accepted max_pixels keeps a unit on both sides at the largest aspect ratio.
+    low = ip.parse_params({"max_pixels": 204800})["max_pixels"]
+    height, width = ip.smart_resize(100, 20000, low)
+    assert (height, width) == (32, 6400)
+    assert height * width <= low
+
+
 def test_extreme_aspect_ratio_is_an_adapter_error():
     with pytest.raises(ip.AdapterError, match="aspect ratio of 5000 x 20 pixels is above 200"):
         ip.smart_resize(20, 5000, ip.DEFAULT_PARAMS["max_pixels"])
@@ -141,25 +153,32 @@ E2 = {"bbox": [0, 100, 500, 200], "category": "text", "text": "b"}
 
 
 @pytest.mark.parametrize(
-    ("text", "elements", "rest"),
+    ("text", "elements", "rest", "complete"),
     [
-        ("", [], ""),
-        ("  \n", [], ""),
-        ("[]", [], ""),
-        (json.dumps([E1, E2]), [E1, E2], ""),
-        (f"```json\n{json.dumps([E1, E2])}\n```", [E1, E2], ""),  # fenced
-        (f"```json\n{json.dumps([E1, E2])}", [E1, E2], ""),  # unclosed fence
-        (f"[{json.dumps(E1)},\n {json.dumps(E2)},]", [E1, E2], ""),  # trailing comma
+        ("", [], "", True),
+        ("  \n", [], "", True),
+        ("[]", [], "", True),
+        (json.dumps([E1, E2]), [E1, E2], "", True),
+        (f"```json\n{json.dumps([E1, E2])}\n```", [E1, E2], "", True),  # fenced
+        (f"```json\n{json.dumps([E1, E2])}", [E1, E2], "", True),  # unclosed fence
+        (f"[{json.dumps(E1)},\n {json.dumps(E2)},]", [E1, E2], "", True),  # comma before ]
         # Truncated: the cut-off element is the rest, the complete ones are kept.
-        (f'[{json.dumps(E1)}, {{"bbox": [1, 2', [E1], '{"bbox": [1, 2'),
-        (f"[{json.dumps(E1)}, ", [E1], ""),
-        ('[{"bbox": [1, 2], "text": "cut', [], '{"bbox": [1, 2], "text": "cut'),
-        (f"[{json.dumps(E1)}] and more", [E1], "and more"),
-        (f"[{json.dumps(E1)} oops]", [E1], "oops]"),
+        (f'[{json.dumps(E1)}, {{"bbox": [1, 2', [E1], '{"bbox": [1, 2', False),
+        (f"[{json.dumps(E1)}, ", [E1], "", False),  # dangling comma at the end
+        (f"[{json.dumps(E1)}", [E1], "", False),  # no closing ]
+        (f"[{json.dumps(E1)}\n", [E1], "", False),
+        ("[", [], "", False),
+        ('[{"bbox": [1, 2], "text": "cut', [], '{"bbox": [1, 2], "text": "cut', False),
+        (f"[{json.dumps(E1)}] and more", [E1], "and more", False),
+        (f"[{json.dumps(E1)} oops]", [E1], "oops]", False),
+        # Adjacent elements without a comma: the array ends after the first one.
+        (f"[{json.dumps(E1)} {json.dumps(E2)}]", [E1], f"{json.dumps(E2)}]", False),
+        (f"[{json.dumps(E1)},, {json.dumps(E2)}]", [E1], f", {json.dumps(E2)}]", False),
+        ("[,]", [], ",]", False),
     ],
 )
-def test_parse_layout_keeps_complete_elements(text, elements, rest):
-    assert ip.parse_layout(text) == (elements, rest)
+def test_parse_layout_keeps_complete_elements(text, elements, rest, complete):
+    assert ip.parse_layout(text) == (elements, rest, complete)
 
 
 @pytest.mark.parametrize("text", ["Sorry.", '{"elements": []}', "```json\n{}\n```"])
@@ -258,6 +277,7 @@ def test_adapter_follows_the_engine_protocol(tmp_path):
         "boom": (666, 400),
         "prose": (1200, 400),
         "cut": (1280, 400),
+        "unclosed": (1344, 400),
         "news": (2000, 3000),
         "empty": (960, 420),
     }
@@ -269,6 +289,7 @@ def test_adapter_follows_the_engine_protocol(tmp_path):
         "boom": ("failure", "engine-error"),
         "prose": ("failure", "engine-error"),  # not layout JSON
         "cut": ("partial", None),  # ended inside an element: the complete ones are scored
+        "unclosed": ("partial", None),  # ended without closing the array
         "news": ("truncated", None),  # stopped at max_new_tokens, scored as produced
         "empty": ("success", None),  # the adapter keeps going after failed samples
     }
@@ -348,6 +369,11 @@ def test_adapter_follows_the_engine_protocol(tmp_path):
     assert cut["engine_extra"]["dropped_characters"] == len('{"bbox": [0, 5')
     cut_text = run.path / "samples" / "cut" / "attempt-1" / "prediction.txt"
     assert cut_text.read_text(encoding="utf-8") == "kept"
+    unclosed = records["unclosed"]
+    assert unclosed["message"] == "unclosed layout JSON array after element 1"
+    assert unclosed["engine_extra"]["dropped_characters"] == 0
+    unclosed_text = run.path / "samples" / "unclosed" / "attempt-1" / "prediction.txt"
+    assert unclosed_text.read_text(encoding="utf-8") == "kept"
 
     news = records["news"]
     assert news["message"] == "generation stopped at max_new_tokens (32768 tokens)"

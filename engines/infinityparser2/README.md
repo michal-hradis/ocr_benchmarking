@@ -65,7 +65,7 @@ The official pipeline has two page tasks. **`doc2json` is used**: it is the pipe
 | `device` | `cuda:0` | `cuda:<n>`, or `cpu` |
 | `model_dir` | `models/infinityparser2/Infinity-Parser2-Flash/<revision>` | Model directory, relative to `/cache`; another directory holds a custom checkpoint (below) |
 | `max_new_tokens` | 32768 | Generated tokens before the output counts as truncated, as in the official code |
-| `max_pixels` | 16,777,216 | The image is scaled down to at most this many pixels (4096 × 4096, as in the official code); at least 2048 |
+| `max_pixels` | 16,777,216 | The image is scaled down to at most this many pixels (4096 × 4096, as in the official code); at least 204,800 (32 × 32 × 200), so that both sides keep a 32-pixel unit at the largest aspect ratio of 200 |
 
 **Decoding.** Decoding is greedy, as in the official code (temperature 0); there are no sampling parameters. The checkpoint has no `generation_config.json`. The language model's end token in `config.json` is `<|endoftext|>`, while the chat turn ends with the tokenizer's end token `<|im_end|>`. Generation stops at either of them. No repetition penalty is applied.
 
@@ -121,10 +121,10 @@ The model's context is 262,144 tokens for the prompt (mostly image tokens) and t
 **Parsing the JSON.** The adapter parses the output as the official `postprocess_doc2json_result` does:
 
 - A ```` ```json ```` fence is removed, also an unclosed one.
-- The elements of the array are read one by one, and reading stops at the first incomplete or malformed element. All complete elements before it are kept, and the rest is counted in `dropped_characters`.
+- The elements of the array are read one by one, and reading stops at the first incomplete or malformed element, such as one without a comma before it. All complete elements before it are kept, and the rest is counted in `dropped_characters`. A comma before the closing `]` loses no text and is accepted.
 - Two things fail the sample (`engine-error`), with `output.txt` kept: output that is not a JSON array at all, such as a sentence, and an element that is not an object with a string text.
 - An empty output or `[]` is a genuine empty result: `success` with empty text.
-- If the model ends normally but the array is malformed, the sample is `partial`, and `message` says how much was dropped. The kept elements are scored.
+- If the model ends normally but the array is malformed or not closed by `]`, or text follows it, the sample is `partial`, and `message` says how much was dropped. The kept elements are scored.
 
 **Boxes.** The model gives each box as `[x1, y1, x2, y2]` scaled to [0, 1000] of the image width and height. `bbox_px` is the same box in float pixel-edge coordinates of the original stored image ([PREDICTIONS.md](../../docs/PREDICTIONS.md#positions)): x × width / 1000 and y × height / 1000, not clipped. The official code computes the same, rounded down to integers. The model's own `bbox` is kept next to it.
 
