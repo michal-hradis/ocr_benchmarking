@@ -3,7 +3,8 @@
         docker-smoke gpu-preflight gpu-smoke docker-tesseract tesseract-smoke \
         docker-cu130-paddle docker-paddleocr paddleocr-smoke docker-kraken kraken-smoke \
         docker-lightonocr lightonocr-model lightonocr-smoke docker-fireredocr fireredocr-model \
-        fireredocr-smoke docker-ovisocr2 ovisocr2-model ovisocr2-smoke
+        fireredocr-smoke docker-ovisocr2 ovisocr2-model ovisocr2-smoke docker-infinityparser2 \
+        infinityparser2-model infinityparser2-smoke
 
 UV ?= uv
 BASE_VERSION ?= 1
@@ -16,6 +17,7 @@ KRAKEN_IMAGE := ocrbench/engine-kraken:7.1.1-v1
 LIGHTONOCR_IMAGE := ocrbench/engine-lightonocr:2-1B-v1
 FIREREDOCR_IMAGE := ocrbench/engine-fireredocr:2B-v1
 OVISOCR2_IMAGE := ocrbench/engine-ovisocr2:0.8B-v1
+INFINITYPARSER2_IMAGE := ocrbench/engine-infinityparser2:flash-v1
 # Host directory mounted as /cache for engines whose weights are not in the image.
 OCRBENCH_CACHE ?= $(HOME)/.cache/ocrbench
 LOCK := $(UV) pip compile --python-version 3.12 --python-platform x86_64-manylinux_2_28 \
@@ -73,6 +75,9 @@ docker-lock:  ## Re-lock the hashed requirements of the CUDA bases and the GPU e
 	$(LOCK) engines/ovisocr2/requirements.in -c docker/base-cu130-torch/requirements.txt \
 		--index-url https://pypi.org/simple --extra-index-url https://download.pytorch.org/whl/cu130 \
 		--index-strategy unsafe-best-match -o engines/ovisocr2/requirements.txt
+	$(LOCK) engines/infinityparser2/requirements.in -c docker/base-cu130-torch/requirements.txt \
+		--index-url https://pypi.org/simple --extra-index-url https://download.pytorch.org/whl/cu130 \
+		--index-strategy unsafe-best-match -o engines/infinityparser2/requirements.txt
 
 docker-smoke:  ## Smoke-test built bases, a derived CPU image and the fake-engine runner (opt-in)
 	$(UV) run --locked pytest -m docker --run-docker tests/test_docker_images.py tests/test_runner.py
@@ -127,6 +132,16 @@ ovisocr2-model:  ## Download the pinned OvisOCR2 weights (1.7 GB) into $(OCRBENC
 
 ovisocr2-smoke:  ## Build the OvisOCR2 image and run, evaluate and report a synthetic dataset on the GPU (opt-in; needs ovisocr2-model)
 	$(UV) run --locked pytest -m gpu --run-docker --run-gpu tests/test_ovisocr2.py
+
+docker-infinityparser2:  ## Build the Infinity-Parser2-Flash engine image (needs the torch base) and print its image ID
+	docker build -t $(INFINITYPARSER2_IMAGE) engines/infinityparser2
+	@docker image inspect --format '$(INFINITYPARSER2_IMAGE) {{.Id}}' $(INFINITYPARSER2_IMAGE)
+
+infinityparser2-model:  ## Download the pinned Infinity-Parser2-Flash weights (4.4 GB) into $(OCRBENCH_CACHE) (opt-in)
+	python3 engines/infinityparser2/fetch_model.py $(OCRBENCH_CACHE)
+
+infinityparser2-smoke:  ## Build the Infinity-Parser2-Flash image and run, evaluate and report a synthetic dataset on the GPU (opt-in; needs infinityparser2-model)
+	$(UV) run --locked pytest -m gpu --run-docker --run-gpu tests/test_infinityparser2.py
 
 gpu-preflight:  ## Check host driver, Docker and NVIDIA Container Toolkit
 	scripts/gpu_preflight.sh
