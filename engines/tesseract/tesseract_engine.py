@@ -4,11 +4,14 @@ It follows the engine protocol in docs/RUNNER.md: read $OCRBENCH_INPUT/job.json,
 ``tesseract`` executable on every sample image in job order and write $OCRBENCH_OUTPUT/<id>/
 with the native outputs (page.txt, page.hocr, page.tsv), the standardized prediction.json built
 from the hOCR and, last, result.json. Tesseract paragraphs become regions and its text lines
-become lines, with their boxes and baselines in pixels of the input image.
+become lines, with their boxes and baselines in pixels of the input image. The ``tessdata``
+parameter selects the models: ``fast`` from the image or ``best`` from /cache, checked against
+tessdata_best.sha256 before the first sample.
 """
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import re
@@ -20,7 +23,16 @@ from pathlib import Path
 from typing import Any
 
 # Engine parameters (job.json "params") and their defaults.
-DEFAULT_PARAMS = {"lang": "eng", "psm": 3, "oem": 1, "dpi": None}
+DEFAULT_PARAMS = {"lang": "eng", "psm": 3, "oem": 1, "dpi": None, "tessdata": "fast"}
+TESSDATA = ("fast", "best")
+# tessdata_fast is in the image; tessdata_best is fetched into /cache (make tesseract-best).
+IMAGE_TESSDATA = Path("/usr/share/tesseract-ocr/5/tessdata")
+BEST_REVISION = "e12c65a915945e4c28e237a9b52bc4a8f39a0cec"  # tesseract-ocr/tessdata_best
+BEST_DIR = f"models/tesseract/tessdata_best/{BEST_REVISION}"
+CACHE = Path(os.environ.get("OCRBENCH_TESSERACT_CACHE", "/cache"))
+BEST_CHECKSUMS = Path(
+    os.environ.get("OCRBENCH_TESSDATA_BEST_CHECKSUMS", "/opt/ocrbench/tessdata_best.sha256")
+)
 LANG_RE = re.compile(r"^[A-Za-z0-9_]+(\+[A-Za-z0-9_]+)*$")
 LINE_CLASSES = {"ocr_line", "ocr_header", "ocr_caption", "ocr_textfloat"}
 NATIVE_FORMATS = ("txt", "hocr", "tsv")  # tesseract writes page.<format> for each
@@ -45,15 +57,56 @@ def parse_params(params: dict[str, Any]) -> dict[str, Any]:
     dpi = merged["dpi"]
     if dpi is not None and (type(dpi) is not int or not 1 <= dpi <= 2400):
         raise AdapterError(f"dpi must be an integer from 1 to 2400: {dpi!r}")
+    if merged["tessdata"] not in TESSDATA:
+        raise AdapterError(f"tessdata must be one of {', '.join(TESSDATA)}: {merged['tessdata']!r}")
     return merged
 
 
-def tesseract_command(image: Path, outbase: Path, params: dict[str, Any]) -> list[str]:
+def sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as stream:
+        for chunk in iter(lambda: stream.read(1 << 20), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def read_checksums(path: Path) -> dict[str, str]:
+    """``<sha256>  <file>`` lines as {file: sha256}."""
+    if not path.is_file():
+        raise AdapterError(f"{path} does not exist")
+    return dict(reversed(line.split()) for line in path.read_text().splitlines() if line.strip())
+
+
+def tessdata_dir(params: dict[str, Any]) -> Path | None:
+    """``--tessdata-dir`` for ``best``, after checking the models of ``lang``; None for ``fast``."""
+    if params["tessdata"] == "fast":
+        return None
+    checksums = read_checksums(BEST_CHECKSUMS)
+    directory = CACHE / BEST_DIR
+    for lang in params["lang"].split("+"):
+        name = f"{lang}.traineddata"
+        if name not in checksums:
+            raise AdapterError(f"{name} is not a registered tessdata_best model")
+        path = directory / name
+        if not path.is_file():
+            raise AdapterError(f"missing {path} (run make tesseract-best and use --cache)")
+        if sha256(path) != checksums[name]:
+            raise AdapterError(f"{path} differs from tessdata_best.sha256")
+    return directory
+
+
+def tesseract_command(
+    image: Path, outbase: Path, params: dict[str, Any], tessdata: Path | None = None
+) -> list[str]:
     command = ["tesseract", str(image), str(outbase), "-l", params["lang"]]
     command += ["--psm", str(params["psm"]), "--oem", str(params["oem"])]
     if params["dpi"] is not None:
         command += ["--dpi", str(params["dpi"])]
-    return command + list(NATIVE_FORMATS)
+    if tessdata is None:
+        return command + list(NATIVE_FORMATS)
+    # The output configs are only in the image's tessdata; Tesseract reads a config by its path.
+    command += ["--tessdata-dir", str(tessdata)]
+    return command + [str(IMAGE_TESSDATA / "configs" / name) for name in NATIVE_FORMATS]
 
 
 def _title(element: ET.Element) -> dict[str, list[str]]:
@@ -161,9 +214,11 @@ def tesseract_version() -> str:
     return (done.stdout or done.stderr).splitlines()[0] if done.returncode == 0 else "unknown"
 
 
-def process(sample: dict[str, Any], source: Path, out: Path, params: dict) -> dict[str, Any]:
+def process(
+    sample: dict[str, Any], source: Path, out: Path, params: dict, tessdata: Path | None = None
+) -> dict[str, Any]:
     """Run Tesseract on one sample, write its outputs and return the ``result.json`` content."""
-    command = tesseract_command(source / sample["image"], out / "page", params)
+    command = tesseract_command(source / sample["image"], out / "page", params, tessdata)
     try:
         done = subprocess.run(command, capture_output=True, text=True, errors="replace")
     except OSError as error:
@@ -196,10 +251,12 @@ def main() -> None:
     target = Path(os.environ["OCRBENCH_OUTPUT"])
     job = json.loads((source / "job.json").read_text(encoding="utf-8"))
     version = tesseract_version()
+    params = tessdata = None
     try:
         params, params_error = parse_params(job.get("params") or {}), None
+        tessdata = tessdata_dir(params)
     except AdapterError as error:
-        params, params_error = None, str(error)
+        params_error = str(error)
     for sample in job["samples"]:
         out = target / sample["id"]
         out.mkdir()
@@ -207,7 +264,7 @@ def main() -> None:
         try:
             if params_error:
                 raise AdapterError(params_error)
-            result = process(sample, source, out, params)
+            result = process(sample, source, out, params, tessdata)
         except AdapterError as error:
             result = {"status": "failed", "message": str(error)}
         result["seconds"] = round(time.monotonic() - start, 3)

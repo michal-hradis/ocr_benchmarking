@@ -1,0 +1,24 @@
+# Tesseract preset best-psm11: tessdata_best ces+deu+eng, full page; differs from best-psm3 only in the page segmentation.
+# Needs make tesseract-best and ocrbench run start --cache (README.md next to engine.toml).
+name = "tesseract-best-psm11"
+engine_version = "2"
+image = "ocrbench/engine-tesseract:5.3.0-v2"
+model = "tessdata_best@e12c65a"
+
+[params]
+lang = "ces+deu+eng"
+psm = 11
+oem = 1               # LSTM
+tessdata = "best"     # /cache/models/tesseract/tessdata_best/<revision>, checked against tessdata_best.sha256
+# psm 11: sparse text: as much text as possible, in no particular order
+
+[env]
+OMP_THREAD_LIMIT = "1"  # Tesseract's OpenMP threads; single-threaded, matching cpus
+
+[resources]
+cpus = 1
+memory = "2g"
+
+[timeouts]
+sample = 300
+startup = 60

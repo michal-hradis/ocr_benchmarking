@@ -14,6 +14,8 @@ RUN apt-get update \
     && rm -rf /var/lib/apt/lists/* \
     && cd /usr/share/tesseract-ocr/5/tessdata \
     && sha256sum --check --strict /opt/ocrbench/tessdata.sha256
+# Checksums of the opt-in tessdata_best models in /cache, checked by the adapter (README.md).
+COPY tessdata_best.sha256 /opt/ocrbench/tessdata_best.sha256
 COPY tesseract_engine.py /opt/ocrbench/tesseract_engine.py
 
 LABEL org.opencontainers.image.title="ocrbench-engine-tesseract" \
