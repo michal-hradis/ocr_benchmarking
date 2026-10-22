@@ -105,8 +105,9 @@ def test_undecodable_image_is_an_adapter_error(tmp_path):
     assert ov.read_image(tmp_path / "la.png").mode == "RGB"
 
 
-def model_cache(root, corrupt=False):
-    """A cache with fake model files at the pinned path, and checksums that match them."""
+def model_cache(root, corrupt=False, extra=None):
+    """A cache with fake model files at the pinned path, and checksums that match them; ``extra``
+    adds a file that is not in the checksums."""
     directory = root / "cache" / ov.PINNED_DIR
     directory.mkdir(parents=True)
     lines = []
@@ -115,6 +116,9 @@ def model_cache(root, corrupt=False):
         lines.append(f"{hashlib.sha256(f'fake {name}'.encode()).hexdigest()}  {name}")
     if corrupt:
         (directory / "model.safetensors").write_text("changed", encoding="utf-8")
+    if extra:
+        (directory / extra).parent.mkdir(parents=True, exist_ok=True)
+        (directory / extra).write_text("{}", encoding="utf-8")
     checksums = root / "models.sha256"
     checksums.write_text("\n".join(lines) + "\n", encoding="utf-8")
     return {
@@ -266,14 +270,26 @@ def test_max_pixels_and_context_limit(tmp_path):
     assert "model's context" in records["news"]["message"]
 
 
-@pytest.mark.parametrize(("content", "official"), [("other weights", False), (None, True)])
+@pytest.mark.parametrize(
+    ("content", "extra", "official"),
+    [
+        ("other weights", None, False),
+        (None, None, True),
+        # Extra files may change what transformers loads, for example the decoding defaults.
+        (None, "generation_config.json", False),
+        (None, "additional_chat_templates/other.jinja", False),
+    ],
+)
 def test_a_custom_model_dir_claims_the_official_checkpoint_only_when_verified(
-    tmp_path, content, official
+    tmp_path, content, extra, official
 ):
     custom = tmp_path / "cache" / "models" / "custom"
     custom.mkdir(parents=True)
     for name in ("config.json", "model.safetensors"):  # None: a copy of the official files
         (custom / name).write_text(content or f"fake {name}", encoding="utf-8")
+    if extra:
+        (custom / extra).parent.mkdir(parents=True, exist_ok=True)
+        (custom / extra).write_text("{}", encoding="utf-8")
     params = CONFIG["params"] | {"model_dir": "models/custom"}
     _, records = run_adapter(tmp_path, {"page": (900, 420)}, params)
     assert records["page"]["status"] == "success"
@@ -283,6 +299,8 @@ def test_a_custom_model_dir_claims_the_official_checkpoint_only_when_verified(
     assert models["model_dir"] == "models/custom"
     digest = hashlib.sha256((content or "fake model.safetensors").encode()).hexdigest()
     assert models["files"]["model.safetensors"] == digest  # hashes are recorded either way
+    if extra:
+        assert extra in models["files"]
 
 
 @pytest.mark.parametrize(
@@ -292,11 +310,15 @@ def test_a_custom_model_dir_claims_the_official_checkpoint_only_when_verified(
         ({}, {"FAKE_TORCH_GPUS": "0"}, "cuda:0 requested but 0 CUDA devices are visible"),
         ({"model_dir": "models/other"}, {}, "does not exist; download the weights"),
         ({}, "corrupt", "not matching models.sha256: ['model.safetensors']"),
+        ({}, "generation_config.json", "not in models.sha256: ['generation_config.json']"),
+        ({}, "sub/x.json", "not in models.sha256: ['sub/x.json']"),
     ],
 )
 def test_setup_errors_fail_every_sample_explicitly(tmp_path, params, env, message):
     if env == "corrupt":
         env = model_cache(tmp_path / "corrupt", corrupt=True)
+    elif isinstance(env, str):
+        env = model_cache(tmp_path / "extra", extra=env)
     _, records = run_adapter(tmp_path, {"a": (900, 420), "b": (300, 200)}, params, env)
     assert {(r["status"], r["reason"]) for r in records.values()} == {("failure", "engine-error")}
     assert all(message in r["message"] for r in records.values())

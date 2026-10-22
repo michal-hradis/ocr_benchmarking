@@ -87,22 +87,32 @@ def sha256(path: Path) -> str:
 
 
 def model_files(model_dir: str) -> tuple[dict[str, str], bool]:
-    """SHA-256 of the model files, and whether they are the official pinned checkpoint: every
-    file of models.sha256 present and matching. The pinned directory must match."""
+    """SHA-256 of the model files (subdirectories included), and whether they are the official
+    pinned checkpoint: exactly the files of models.sha256, all matching. Extra files count, since
+    transformers may load them (a generation_config.json changes the decoding). The pinned
+    directory must match."""
     directory = CACHE / model_dir
     if not directory.is_dir():
         raise AdapterError(
             f"model directory {directory} does not exist; download the weights with "
             "make ovisocr2-model and run with --cache (README.md)"
         )
-    files = {p.name: sha256(p) for p in sorted(directory.iterdir()) if p.is_file()}
+    files = {
+        p.relative_to(directory).as_posix(): sha256(p)
+        for p in sorted(directory.rglob("*"))
+        if p.is_file()
+    }
     pinned = dict(
         reversed(line.split()) for line in CHECKSUMS.read_text().splitlines() if line.strip()
     )
     bad = sorted(name for name, digest in pinned.items() if files.get(name) != digest)
-    if bad and Path(model_dir) == Path(PINNED_DIR):
-        raise AdapterError(f"model files missing or not matching models.sha256: {bad}")
-    return files, not bad
+    extra = sorted(set(files) - set(pinned))
+    if Path(model_dir) == Path(PINNED_DIR):
+        if bad:
+            raise AdapterError(f"model files missing or not matching models.sha256: {bad}")
+        if extra:
+            raise AdapterError(f"model files not in models.sha256: {extra}")
+    return files, not bad and not extra
 
 
 def environment(device: str) -> dict[str, Any]:
