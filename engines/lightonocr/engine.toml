@@ -1,0 +1,20 @@
+# LightOnOCR-2 end-to-end image-to-text model (README.md next to this file; format: docs/RUNNER.md).
+# Run with --cache <dir> holding the weights from make lightonocr-model.
+name = "lightonocr"
+engine_version = "1"
+image = "ocrbench/engine-lightonocr:2-1B-v1"
+model = "lightonai/LightOnOCR-2-1B@be7c41313c30e940fe5571de59e5fabc779e00c8"
+
+[params]
+device = "cuda:0"
+max_new_tokens = 8192  # other parameters: README.md
+
+[resources]
+cpus = 4
+memory = "16g"
+gpus = "all"
+shm_size = "2g"
+
+[timeouts]
+sample = 600
+startup = 300
