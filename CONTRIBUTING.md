@@ -55,6 +55,7 @@ make check   # ruff lint + format check, then offline unit tests
 | `make docker-lightonocr`, `make lightonocr-model`, `make lightonocr-smoke` | Build the LightOnOCR-2 engine image / opt-in: download its pinned 2 GB weights into `OCRBENCH_CACHE` (default `~/.cache/ocrbench`) / opt-in, GPU: run it through `run`, `evaluate` and `report` on synthetic samples, see [engines/lightonocr](engines/lightonocr/README.md) |
 | `make docker-fireredocr`, `make fireredocr-model`, `make fireredocr-smoke` | The same for FireRed-OCR (4.3 GB of weights), see [engines/fireredocr](engines/fireredocr/README.md) |
 | `make docker-ovisocr2`, `make ovisocr2-model`, `make ovisocr2-smoke` | The same for OvisOCR2 (1.7 GB of weights), see [engines/ovisocr2](engines/ovisocr2/README.md) |
+| `make docker-infinityparser2`, `make infinityparser2-model`, `make infinityparser2-smoke` | The same for Infinity-Parser2-Flash (4.4 GB of weights), see [engines/infinityparser2](engines/infinityparser2/README.md) |
 | `make docker-smoke`, `make gpu-preflight`, `make gpu-smoke` | Opt-in Docker and GPU checks (including the fake-engine runner tests), see [docs/DOCKER.md](docs/DOCKER.md) |
 
 `make help` lists all targets. Unit tests run with network sockets disabled (`pytest-socket`). Tests that need Docker or a GPU are marked `docker` / `gpu` and run only with `--run-docker` / `--run-gpu`. Add dependencies with `uv add` (or `uv add --dev`) so that `uv.lock` is updated in the same PR. Fixture rules are in [tests/fixtures/README.md](tests/fixtures/README.md).

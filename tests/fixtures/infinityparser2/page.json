@@ -1,0 +1,3 @@
+```json
+[{"bbox": [60, 20, 940, 45], "category": "header", "text": "Page 3 · Thursday"}, {"bbox": [100, 60, 900, 120], "category": "title", "text": "# The Daily Chronicle"}, {"bbox": [100, 140, 900, 260], "category": "text", "text": "The quick brown fox jumps over the lazy dog near the river."}, {"bbox": [120, 280, 880, 540], "category": "figure", "text": ""}, {"bbox": [100, 560, 900, 640], "category": "text", "text": "A second paragraph with **more** text and a formula $E = mc^2$."}, {"bbox": [100, 660, 900, 820], "category": "table", "text": "<table><tr><td>Year</td><td>Copies</td></tr><tr><td>1923</td><td>2026</td></tr></table>"}, {"bbox": [480, 960, 520, 985], "category": "footer", "text": "3"}]
+```
