@@ -2,8 +2,9 @@
 
 Offline tests import the adapter and run it as a host process with a fake ``tesseract``
 executable on PATH that copies a committed hOCR (tests/fixtures/tesseract/page.hocr, real
-Tesseract 5.3.0 output for a synthetic 900x400 page). The opt-in Docker test builds the engine
-image and runs real Tesseract through ``ocrbench run``, ``evaluate`` and ``report``.
+Tesseract 5.3.0 output for a synthetic 900x400 page); the ``best`` presets read fake models from a
+temporary cache. The opt-in Docker tests build the engine image and run real Tesseract through
+``ocrbench run``, ``evaluate`` and ``report``, the best presets with ``make tesseract-best`` models.
 """
 
 import importlib.util
@@ -29,10 +30,15 @@ ENGINE_DIR = ROOT / "engines" / "tesseract"
 HOCR = Path(__file__).parent / "fixtures" / "tesseract" / "page.hocr"
 ADAPTER_PATH = ENGINE_DIR / "tesseract_engine.py"
 ADAPTER = [sys.executable, str(ADAPTER_PATH)]
+PRESETS = sorted((ENGINE_DIR / "presets").glob("*.toml"))
 
 _spec = importlib.util.spec_from_file_location("tesseract_engine", ADAPTER_PATH)
 tess = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(tess)
+sys.modules["tesseract_engine"] = tess  # fetch_tessdata imports it by name
+_spec = importlib.util.spec_from_file_location("fetch_tessdata", ENGINE_DIR / "fetch_tessdata.py")
+fetch_tessdata = importlib.util.module_from_spec(_spec)
+_spec.loader.exec_module(fetch_tessdata)
 
 FIXTURE_TEXT = (
     "The Daily Chronicle\n\n"
@@ -102,6 +108,7 @@ def test_blank_words_lines_and_paragraphs_are_dropped_and_line_classes_kept():
         ({"oem": "1"}, "oem"),
         ({"psm": True}, "psm"),
         ({"dpi": 0}, "dpi"),
+        ({"tessdata": "legacy"}, "tessdata must be one of fast, best"),
         ({"prompt": "x"}, "unknown parameters: prompt"),
     ],
 )
@@ -119,6 +126,112 @@ def test_command_uses_configured_language_and_modes():
     ]  # fmt: skip
 
 
+def test_best_command_reads_models_from_the_cache_and_configs_from_the_image():
+    params = tess.parse_params({"lang": "deu_latf", "psm": 3, "tessdata": "best"})
+    best = Path("/cache") / tess.BEST_DIR
+    command = tess.tesseract_command(Path("/input/images/a.png"), Path("/o/page"), params, best)
+    configs = "/usr/share/tesseract-ocr/5/tessdata/configs"
+    assert command == [
+        "tesseract", "/input/images/a.png", "/o/page", "-l", "deu_latf", "--psm", "3",
+        "--oem", "1", "--tessdata-dir", str(best),
+        f"{configs}/txt", f"{configs}/hocr", f"{configs}/tsv",
+    ]  # fmt: skip
+
+
+# Presets and the tessdata_best models ------------------------------------------------------------
+
+
+def test_presets_are_valid_and_differ_only_in_models_or_segmentation():
+    default = tomllib.loads((ENGINE_DIR / "engine.toml").read_text(encoding="utf-8"))
+    configs = {p.stem: tomllib.loads(p.read_text(encoding="utf-8")) for p in PRESETS}
+    assert set(configs) == {"best-psm3", "best-psm11", "best-psm6", "best-deu-latf-psm3"}
+    assert len({c["name"] for c in [default, *configs.values()]}) == 5
+    for config in configs.values():
+        parse_engine_config(config)
+        params = tess.parse_params(config["params"])
+        assert params["tessdata"] == "best"
+        assert params["oem"] == 1
+        models = {f"{lang}.traineddata" for lang in params["lang"].split("+")}
+        assert models <= set(tess.read_checksums(BEST_SHA256))
+        same = ("image", "engine_version", "env", "resources", "timeouts")
+        assert {k: config[k] for k in same} == {k: default[k] for k in same}
+    # The checkpoint variant and the page segmentation mode each change alone.
+    best3 = configs["best-psm3"]["params"]
+    assert {**default["params"], "tessdata": "best"} == best3
+    assert {**best3, "psm": 11} == configs["best-psm11"]["params"]
+    assert {**best3, "psm": 6} == configs["best-psm6"]["params"]
+    assert {**best3, "lang": "deu_latf"} == configs["best-deu-latf-psm3"]["params"]
+
+
+BEST_SHA256 = ENGINE_DIR / "tessdata_best.sha256"
+FAKE_MODELS = {"eng": b"fake eng model", "deu_latf": b"fake deu_latf model"}
+
+
+def make_cache(root, models=FAKE_MODELS):
+    """Fake tessdata_best models in <root>/cache and their checksums; returns the adapter env."""
+    directory = root / "cache" / tess.BEST_DIR
+    directory.mkdir(parents=True)
+    lines = []
+    for lang, content in models.items():
+        (directory / f"{lang}.traineddata").write_bytes(content)
+        lines.append(f"{tess.hashlib.sha256(content).hexdigest()}  {lang}.traineddata")
+    checksums = root / "tessdata_best.sha256"
+    checksums.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    return {
+        "OCRBENCH_TESSERACT_CACHE": str(root / "cache"),
+        "OCRBENCH_TESSDATA_BEST_CHECKSUMS": str(checksums),
+    }
+
+
+def test_best_models_are_checked_before_use(tmp_path, monkeypatch):
+    env = make_cache(tmp_path)
+    monkeypatch.setattr(tess, "CACHE", Path(env["OCRBENCH_TESSERACT_CACHE"]))
+    monkeypatch.setattr(tess, "BEST_CHECKSUMS", Path(env["OCRBENCH_TESSDATA_BEST_CHECKSUMS"]))
+    directory = tmp_path / "cache" / tess.BEST_DIR
+    assert tess.tessdata_dir(tess.parse_params({"lang": "deu_latf+eng", "tessdata": "best"})) == (
+        directory
+    )
+    assert tess.tessdata_dir(tess.parse_params({"lang": "xxx"})) is None  # fast: from the image
+    with pytest.raises(tess.AdapterError, match="ces.traineddata is not a registered"):
+        tess.tessdata_dir(tess.parse_params({"lang": "eng+ces", "tessdata": "best"}))
+    (directory / "eng.traineddata").write_bytes(b"changed")
+    with pytest.raises(tess.AdapterError, match="eng.traineddata differs from tessdata_best"):
+        tess.tessdata_dir(tess.parse_params({"lang": "eng", "tessdata": "best"}))
+    (directory / "eng.traineddata").unlink()
+    with pytest.raises(tess.AdapterError, match="missing .*eng.traineddata .*make tesseract-best"):
+        tess.tessdata_dir(tess.parse_params({"lang": "eng", "tessdata": "best"}))
+
+
+def test_fetch_downloads_checks_and_keeps_models(tmp_path, monkeypatch):
+    source = make_cache(tmp_path / "source")
+    origin = Path(source["OCRBENCH_TESSERACT_CACHE"]) / tess.BEST_DIR
+    checksums = Path(source["OCRBENCH_TESSDATA_BEST_CHECKSUMS"])
+    monkeypatch.setattr(fetch_tessdata, "CHECKSUMS", checksums)
+    urls = []
+
+    def retrieve(url, path):
+        urls.append(url)
+        Path(path).write_bytes((origin / url.rsplit("/", 1)[1]).read_bytes())
+
+    monkeypatch.setattr(fetch_tessdata.urllib.request, "urlretrieve", retrieve)
+    cache = tmp_path / "cache"
+    fetch_tessdata.main(cache)
+    assert sorted(urls) == [
+        f"https://raw.githubusercontent.com/tesseract-ocr/tessdata_best/{tess.BEST_REVISION}/"
+        f"{lang}.traineddata"
+        for lang in ("deu_latf", "eng")
+    ]
+    target = cache / tess.BEST_DIR
+    assert (target / "eng.traineddata").read_bytes() == FAKE_MODELS["eng"]
+    fetch_tessdata.main(cache)  # present and correct: kept
+    assert len(urls) == 2
+    (target / "eng.traineddata").write_bytes(b"x")
+    (origin / "eng.traineddata").write_bytes(b"tampered")
+    with pytest.raises(SystemExit, match="eng.traineddata: SHA-256 differs"):
+        fetch_tessdata.main(cache)
+    assert not (target / "eng.traineddata.part").exists()
+
+
 # Engine protocol with a fake tesseract executable ----------------------------------------------
 
 FAKE_TESSERACT = """\
@@ -128,6 +241,7 @@ if sys.argv[1:] == ["--version"]:
     print("tesseract 5.3.0-fake")
     sys.exit(0)
 image, outbase = sys.argv[1], sys.argv[2]
+Path(f"{outbase}.args").write_text("\\n".join(sys.argv[3:]))
 if "bad" in image:
     print("Error in pixReadStream: Unknown format", file=sys.stderr)
     sys.exit(1)
@@ -152,8 +266,8 @@ def make_dataset(root, ids):
     return write_manifest(data, samples)
 
 
-def run_adapter(tmp_path, ids, params=None):
-    config = tomllib.loads((ENGINE_DIR / "engine.toml").read_text(encoding="utf-8"))
+def run_adapter(tmp_path, ids, params=None, env=None, config_path=ENGINE_DIR / "engine.toml"):
+    config = tomllib.loads(config_path.read_text(encoding="utf-8"))
     config["params"] = params if params is not None else config["params"]
     config["timeouts"] = {"sample": 20, "startup": 20}
     bin_dir = tmp_path / "bin"
@@ -165,6 +279,7 @@ def run_adapter(tmp_path, ids, params=None):
         "PATH": f"{bin_dir}{os.pathsep}{os.environ['PATH']}",
         "FAKE_HOCR": str(HOCR),
         "FAKE_EMPTY_HOCR": EMPTY_HOCR,
+        **(env or {}),
     }
     run = create_run(
         parse_engine_config(config),
@@ -194,7 +309,10 @@ def test_adapter_follows_the_engine_protocol(tmp_path):
     assert (page / "prediction.txt").read_text(encoding="utf-8") == FIXTURE_TEXT
     extra = records["page"]["engine_extra"]
     assert extra["tesseract"] == "tesseract 5.3.0-fake"
-    assert extra["params"] == {"lang": "ces+deu+eng", "psm": 3, "oem": 1, "dpi": None}
+    assert extra["params"] == {
+        "lang": "ces+deu+eng", "psm": 3, "oem": 1, "dpi": None, "tessdata": "fast"
+    }  # fmt: skip
+    assert "--tessdata-dir" not in extra["command"]
     assert records["page"]["engine_seconds"] >= 0
     blank = run.path / "samples" / "blank" / "attempt-1"
     assert (blank / "prediction.txt").read_text(encoding="utf-8") == ""
@@ -205,6 +323,36 @@ def test_invalid_params_fail_every_sample_explicitly(tmp_path):
     assert {r["status"] for r in records.values()} == {"failure"}
     assert {r["reason"] for r in records.values()} == {"engine-error"}
     assert all("psm" in r["message"] for r in records.values())
+
+
+def test_best_preset_runs_with_checked_models_from_the_cache(tmp_path):
+    env = make_cache(tmp_path / "own")
+    preset = ENGINE_DIR / "presets" / "best-deu-latf-psm3.toml"
+    run, records = run_adapter(tmp_path, ["page", "blank"], env=env, config_path=preset)
+    assert {r["status"] for r in records.values()} == {"success"}
+    command = records["page"]["engine_extra"]["command"]
+    directory = str(tmp_path / "own" / "cache" / tess.BEST_DIR)
+    assert command[command.index("--tessdata-dir") + 1] == directory
+    assert command[:2] == ["-l", "deu_latf"]
+
+
+@pytest.mark.parametrize(
+    ("models", "message"),
+    [
+        ({"eng": b"x"}, "deu_latf.traineddata is not a registered tessdata_best model"),
+        (None, "missing"),
+    ],
+)
+def test_missing_best_models_fail_every_sample_explicitly(tmp_path, models, message):
+    if models is None:
+        env = make_cache(tmp_path / "own")
+        env["OCRBENCH_TESSERACT_CACHE"] = str(tmp_path / "nonexistent")
+    else:
+        env = make_cache(tmp_path / "own", models)
+    preset = ENGINE_DIR / "presets" / "best-deu-latf-psm3.toml"
+    _, records = run_adapter(tmp_path, ["a", "b"], env=env, config_path=preset)
+    assert {(r["status"], r["reason"]) for r in records.values()} == {("failure", "engine-error")}
+    assert all(message in r["message"] for r in records.values())
 
 
 # Opt-in Docker smoke benchmark -------------------------------------------------------------------
@@ -273,3 +421,29 @@ def test_docker_smoke_benchmark(tmp_path, tesseract_image, capsys):
     records = [latest_record(run, s.id) for s in run.samples]
     assert {(r["status"], r["reason"]) for r in records} == {("failure", "engine-error")}
     assert all("xxx" in r["message"] for r in records)
+
+
+@pytest.mark.docker
+def test_docker_best_presets(tmp_path, tesseract_image):
+    cache = Path(os.environ.get("OCRBENCH_CACHE", Path.home() / ".cache" / "ocrbench"))
+    for name in tess.read_checksums(BEST_SHA256):
+        if not (cache / tess.BEST_DIR / name).is_file():
+            pytest.fail(f"no tessdata_best {name} in {cache}: run make tesseract-best first")
+    manifest = smoke_dataset(tmp_path / "data")
+    runs = str(tmp_path / "runs")
+    rates = {}
+    for preset in PRESETS:
+        args = ["run", "start", "--engine", str(preset), "--dataset", str(manifest)]
+        args += ["--runs-dir", runs, "--cache", str(cache), "--run-id", preset.stem]
+        assert main(args) == 0
+        run = load_run(tmp_path / "runs" / preset.stem)
+        records = {s.id: latest_record(run, s.id) for s in run.samples}
+        assert {r["status"] for r in records.values()} == {"success"}, preset.stem
+        assert "--tessdata-dir" in records["page-1"]["engine_extra"]["command"]
+        assert main(["evaluate", str(run.path)]) == 0
+        scores = json.loads((run.path / "evaluations" / "1" / "scores.json").read_text())
+        rates[preset.stem] = {s["sample_id"]: s["chars"]["rate"] for s in scores["samples"]}
+    assert rates["best-psm3"]["page-1"] < 0.1
+    assert rates["best-psm6"]["para-1"] < 0.1
+    assert main(["report", *(str(tmp_path / "runs" / p.stem) for p in PRESETS), "-o",
+                 str(tmp_path / "report")]) == 0  # fmt: skip

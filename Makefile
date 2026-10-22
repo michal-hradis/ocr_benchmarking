@@ -1,6 +1,6 @@
 # Local developer commands. There is no CI; run the targets relevant to your change.
 .PHONY: help setup lint format test check docker-cpu docker-cu130-torch docker-lock \
-        docker-smoke gpu-preflight gpu-smoke docker-tesseract tesseract-smoke \
+        docker-smoke gpu-preflight gpu-smoke docker-tesseract tesseract-best tesseract-smoke \
         docker-cu130-paddle docker-paddleocr paddleocr-smoke docker-kraken kraken-smoke \
         docker-lightonocr lightonocr-model lightonocr-smoke docker-fireredocr fireredocr-model \
         fireredocr-smoke docker-ovisocr2 ovisocr2-model ovisocr2-smoke docker-infinityparser2 \
@@ -11,7 +11,7 @@ BASE_VERSION ?= 1
 CPU_IMAGE ?= ocrbench/base-cpu:py3.12-v$(BASE_VERSION)
 CU130_TORCH_IMAGE ?= ocrbench/base-cu130-torch:torch2.14.1-py3.12-v$(BASE_VERSION)
 CU130_PADDLE_IMAGE ?= ocrbench/base-cu130-paddle:paddle3.4.0-py3.12-v$(BASE_VERSION)
-TESSERACT_IMAGE := ocrbench/engine-tesseract:5.3.0-v1
+TESSERACT_IMAGE := ocrbench/engine-tesseract:5.3.0-v2
 PADDLEOCR_IMAGE := ocrbench/engine-paddleocr:3.7.0-v1
 KRAKEN_IMAGE := ocrbench/engine-kraken:7.1.1-v1
 LIGHTONOCR_IMAGE := ocrbench/engine-lightonocr:2-1B-v1
@@ -91,7 +91,10 @@ docker-tesseract:  ## Build the Tesseract engine image (needs the CPU base) and 
 	docker build -t $(TESSERACT_IMAGE) engines/tesseract
 	@docker image inspect --format '$(TESSERACT_IMAGE) {{.Id}}' $(TESSERACT_IMAGE)
 
-tesseract-smoke:  ## Build the Tesseract image and run, evaluate and report a synthetic dataset (opt-in)
+tesseract-best:  ## Download the pinned tessdata_best models (48 MB) for the best presets into $(OCRBENCH_CACHE) (opt-in)
+	python3 engines/tesseract/fetch_tessdata.py $(OCRBENCH_CACHE)
+
+tesseract-smoke:  ## Build the Tesseract image and run, evaluate and report a synthetic dataset (opt-in; best presets need tesseract-best)
 	$(UV) run --locked pytest -m docker --run-docker tests/test_tesseract.py
 
 docker-paddleocr:  ## Build the PaddleOCR engine image (needs the Paddle base) and print its image ID

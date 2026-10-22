@@ -1,0 +1,24 @@
+# Tesseract preset best-deu-latf-psm3: tessdata_best deu_latf (German Fraktur), full page; for historical German prints.
+# Needs make tesseract-best and ocrbench run start --cache (README.md next to engine.toml).
+name = "tesseract-best-deu-latf-psm3"
+engine_version = "2"
+image = "ocrbench/engine-tesseract:5.3.0-v2"
+model = "tessdata_best@e12c65a"
+
+[params]
+lang = "deu_latf"
+psm = 3
+oem = 1               # LSTM
+tessdata = "best"     # /cache/models/tesseract/tessdata_best/<revision>, checked against tessdata_best.sha256
+# psm 3: fully automatic page segmentation
+
+[env]
+OMP_THREAD_LIMIT = "1"  # Tesseract's OpenMP threads; single-threaded, matching cpus
+
+[resources]
+cpus = 1
+memory = "2g"
+
+[timeouts]
+sample = 300
+startup = 60
