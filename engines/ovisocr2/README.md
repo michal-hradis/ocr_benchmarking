@@ -69,9 +69,9 @@ The prompt is the **official instruction** from the vLLM example in the model ca
 
 **Post-processing in the model card.** The example also removes the `<img>` figure tags and, for outputs of at least 8,000 characters, cuts a repeated tail down to one copy (`_clean_truncated_repeats`). The adapter does neither: `page.md` is the model's output unchanged. Figure tags carry no text and are dropped by the host conversion anyway (below). A repeated tail stays in the output and is scored, so runaway generation remains visible; how to handle it across engines is open in [#33](https://github.com/michal-hradis/ocr_benchmarking/issues/33).
 
-**Custom checkpoints.** Any directory under the cache that transformers can load as a Qwen3.5 model (for example a fine-tuned OvisOCR2) can be given as `model_dir`. Only the files are checked against `models.sha256`, never the directory name. The default directory must match, or every sample fails. For another directory, the result is recorded:
+**Custom checkpoints.** Any directory under the cache that transformers can load as a Qwen3.5 model (for example a fine-tuned OvisOCR2) can be given as `model_dir`. Only the files are checked against `models.sha256`, never the directory name. The directory must hold exactly the files of `models.sha256` (subdirectories included), because transformers may load other files, for example a `generation_config.json` that changes the decoding. The default directory must match, with no other files, or every sample fails. For another directory, the result is recorded:
 
-- If every file in `models.sha256` is present and matches, the official checkpoint is recorded: `extra.models.verified_official_checkpoint` is `true`, with `repository` and `revision`.
+- If it holds exactly the files in `models.sha256`, all matching, the official checkpoint is recorded: `extra.models.verified_official_checkpoint` is `true`, with `repository` and `revision`.
 - Otherwise `verified_official_checkpoint` is `false` and no official repository or revision is recorded.
 
 Either way, `model_dir` and the SHA-256 of every file in it are recorded. For a custom checkpoint, also set `model` in a copy of `engine.toml` to name what is used, for example `"my-org/OvisOCR2-finetuned@<revision>"`. That name is what reports show as the model.
@@ -123,7 +123,7 @@ The converted prediction has **no positions** and no physical lines: line breaks
 - the GPU is unusable;
 - the parameters are invalid;
 - the model directory is missing (`... does not exist; download the weights with make ovisocr2-model and run with --cache`);
-- the model files do not match `models.sha256`.
+- the model files do not match `models.sha256`, or the default model directory holds other files.
 
 A page for which the model immediately generates an end token is a **genuine empty result**: `success` with empty text.
 
