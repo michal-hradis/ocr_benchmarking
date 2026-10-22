@@ -1,0 +1,5 @@
+# transformers 5.19.0 has Qwen3VLForConditionalGeneration (FireRed-OCR's architecture); torchvision
+# and Pillow are its "vision" extra (the fast Qwen2-VL image processor).
+transformers==5.19.0
+torchvision==0.29.1+cu130
+pillow

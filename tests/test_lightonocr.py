@@ -277,6 +277,7 @@ def test_setup_errors_fail_every_sample_explicitly(tmp_path, params, env, messag
 
 
 def test_fetch_model_keeps_verified_files(tmp_path, monkeypatch, capsys):
+    monkeypatch.delitem(sys.modules, "fetch_model", raising=False)  # each engine has its own
     sys.path.insert(0, str(ENGINE_DIR))
     try:
         import fetch_model

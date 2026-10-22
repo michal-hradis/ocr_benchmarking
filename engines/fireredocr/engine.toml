@@ -1,0 +1,20 @@
+# FireRed-OCR end-to-end image-to-Markdown model (README.md next to this file; format: docs/RUNNER.md).
+# Run with --cache <dir> holding the weights from make fireredocr-model.
+name = "fireredocr"
+engine_version = "1"
+image = "ocrbench/engine-fireredocr:2B-v1"
+model = "FireRedTeam/FireRed-OCR@7bf5e9d91d3bb6bf91a3b6bc66d163096b696e50"
+
+[params]
+device = "cuda:0"
+max_new_tokens = 8192  # other parameters: README.md
+
+[resources]
+cpus = 4
+memory = "16g"
+gpus = "all"
+shm_size = "2g"
+
+[timeouts]
+sample = 900
+startup = 300
