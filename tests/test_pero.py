@@ -164,6 +164,43 @@ def test_reading_order_types_and_omissions():
     assert note["lines"][0]["confidence"] == 0.5
 
 
+def reading_order_text(order):
+    body = "".join(region(rid, [rid]) for rid in "abcd")
+    prediction = pe.page_xml_to_prediction(page_xml(body, order), "s1", (900, 420))
+    assert errors(prediction) == []
+    return prediction["text"].split("\n\n")
+
+
+def test_reading_order_follows_index_not_xml_order():
+    order = (
+        '<ReadingOrder><OrderedGroup id="ro">'
+        '<RegionRefIndexed index="1" regionRef="a"/><RegionRefIndexed index="0" regionRef="b"/>'
+        '<RegionRefIndexed index="3" regionRef="c"/><RegionRefIndexed index="2" regionRef="d"/>'
+        "</OrderedGroup></ReadingOrder>"
+    )
+    assert reading_order_text(order) == ["b", "a", "d", "c"]
+
+
+def test_nested_reading_order_groups():
+    order = (
+        '<ReadingOrder><OrderedGroup id="ro">'
+        '<OrderedGroupIndexed id="g2" index="1">'
+        '<RegionRefIndexed index="1" regionRef="a"/><RegionRefIndexed index="0" regionRef="d"/>'
+        "</OrderedGroupIndexed>"
+        '<UnorderedGroupIndexed id="g1" index="0" regionRef="c">'
+        '<RegionRef regionRef="b"/></UnorderedGroupIndexed>'
+        "</OrderedGroup></ReadingOrder>"
+    )
+    # g1 first by index (its own region c, then b), then g2 by index (d, a).
+    assert reading_order_text(order) == ["c", "b", "d", "a"]
+    # Without integer indexes an ordered group keeps document order; unreferenced regions follow.
+    order = (
+        '<ReadingOrder><OrderedGroup id="ro"><RegionRefIndexed regionRef="c"/>'
+        '<RegionRefIndexed index="0" regionRef="a"/></OrderedGroup></ReadingOrder>'
+    )
+    assert reading_order_text(order) == ["c", "a", "b", "d"]
+
+
 def test_empty_and_malformed_page_xml():
     empty = pe.page_xml_to_prediction(page_xml(""), "s1", (900, 420))
     assert empty["text"] == ""

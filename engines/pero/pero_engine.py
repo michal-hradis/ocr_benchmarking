@@ -19,6 +19,7 @@ import re
 import sys
 import time
 import xml.etree.ElementTree as ET
+from collections.abc import Iterator
 from importlib import metadata
 from pathlib import Path
 from typing import Any
@@ -39,7 +40,9 @@ STAGES = {
     "layout_bundle": ({"RUN_LAYOUT_PARSER"}, {"RUN_LINE_CROPPER", "RUN_OCR", "RUN_DECODER"}),
     "ocr_bundle": ({"RUN_LINE_CROPPER", "RUN_OCR"}, {"RUN_LAYOUT_PARSER", "RUN_DECODER"}),
 }
-PAGE_NS = "{http://schema.primaresearch.org/PAGE/gts/pagecontent/2019-07-15}"
+# PAGE ReadingOrder elements (groups may nest and may themselves reference a region).
+GROUPS = {"OrderedGroup", "UnorderedGroup", "OrderedGroupIndexed", "UnorderedGroupIndexed"}
+REFS = {"RegionRef", "RegionRefIndexed"}
 # PAGE TextRegion type -> standardized region type (docs/PREDICTIONS.md#region-types); PERO's
 # layout CNN gives no type, which is "text". Any other type becomes "other".
 REGION_TYPES = {
@@ -247,6 +250,28 @@ def _points(element: ET.Element | None, minimum: int) -> list[list[float]] | Non
     return None
 
 
+def _reading_order(element: ET.Element) -> Iterator[str]:
+    """Region references of a PAGE ReadingOrder (sub)tree in reading order.
+
+    The members of an ordered group follow their integer ``@index`` (document order when any is
+    missing), nested groups are read in place, and an unordered group keeps document order, as
+    in the benchmark's PAGE reader (src/ocrbench/pagexml.py).
+    """
+    local = element.tag.rsplit("}", 1)[-1]
+    if local in GROUPS and element.get("regionRef"):
+        yield element.get("regionRef")
+    members = [m for m in element if m.tag.rsplit("}", 1)[-1] in GROUPS | REFS]
+    if local.startswith("Ordered"):
+        keys = [m.get("index") for m in members]
+        if all(k is not None and k.isdigit() for k in keys):
+            members = [m for _, m in sorted(zip(map(int, keys), members, strict=True))]
+    for member in members:
+        if member.tag.rsplit("}", 1)[-1] in REFS:
+            yield member.get("regionRef", "")
+        else:
+            yield from _reading_order(member)
+
+
 def region_type(page_type: str | None) -> str:
     return "text" if page_type is None else REGION_TYPES.get(page_type, "other")
 
@@ -255,9 +280,9 @@ def page_xml_to_prediction(xml: str, sample_id: str, size: tuple[int, int]) -> d
     """Standardized prediction (docs/PREDICTIONS.md) from PERO's PAGE XML (``page.xml``).
 
     Regions and their lines keep PERO's order, which is its reading order: an explicit PAGE
-    ReadingOrder when one is written, otherwise the order of the regions in the file (PERO's
-    region sorter reorders them). Lines with non-blank text keep their polygon, baseline and
-    confidence; regions without such lines stay only in the native outputs.
+    ReadingOrder (by ``@index``) when one is written, otherwise the order of the regions in the
+    file (PERO's region sorter reorders them). Lines with non-blank text keep their polygon,
+    baseline and confidence; regions without such lines stay only in the native outputs.
     """
     root = ET.fromstring(xml)
     ns = root.tag[: root.tag.index("}") + 1] if root.tag.startswith("{") else ""
@@ -265,7 +290,8 @@ def page_xml_to_prediction(xml: str, sample_id: str, size: tuple[int, int]) -> d
     if page is None:
         raise AdapterError("PAGE XML without a Page element")
     native_regions = page.findall(f".//{ns}TextRegion")
-    order = [ref.get("regionRef") for ref in page.iterfind(f"{ns}ReadingOrder//*[@regionRef]")]
+    reading_order = page.find(f"{ns}ReadingOrder")
+    order = list(_reading_order(reading_order)) if reading_order is not None else []
     if order:
         rank = {ref: i for i, ref in enumerate(order)}
         native_regions.sort(key=lambda r: rank.get(r.get("id"), len(rank)))
