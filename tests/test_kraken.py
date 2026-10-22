@@ -130,24 +130,31 @@ def test_lines_are_grouped_by_region_in_reading_order():
         (r["id"], r["type"], r.get("native_type"), [line["text"] for line in r["lines"]])
         for r in prediction["regions"]
     ]
+    # Kraken's order alternates between regions: each run of lines is a region of its own.
     assert got == [
         ("r1", "text", None, ["orphan 1", "orphan 2"]),
-        ("r2", "heading", "Title", ["title", "title 2"]),  # interleaved lines join their region
-        ("r3", "text", "MainZone:column", ["body 1", "body 2"]),
-        ("r4", "text", None, ["orphan 3"]),
+        ("r2", "heading", "Title", ["title"]),
+        ("r3", "text", "MainZone:column", ["body 1"]),
+        ("r4", "heading", "Title", ["title 2"]),
+        ("r5", "text", "MainZone:column", ["body 2"]),
+        ("r6", "text", None, ["orphan 3"]),
     ]
-    assert prediction["reading_order"] == ["r1", "r2", "r3", "r4"]
-    assert (
-        prediction["text"] == "orphan 1\norphan 2\n\ntitle\ntitle 2\n\nbody 1\nbody 2\n\norphan 3"
+    assert prediction["reading_order"] == ["r1", "r2", "r3", "r4", "r5", "r6"]
+    assert prediction["text"] == (
+        "orphan 1\norphan 2\n\ntitle\n\nbody 1\n\ntitle 2\n\nbody 2\n\norphan 3"
     )
-    r1, r2, r3, _ = prediction["regions"]
+    r1, r2, r3, r4, r5, _ = prediction["regions"]
     assert r1["extra"] == {"grouping": "unassigned"}
     assert "polygon" not in r1
-    assert "polygon" in r2
+    assert r2["polygon"] == r4["polygon"]
+    assert r2["extra"] == r4["extra"] == {"kraken_id": "t"}
+    assert r3["extra"] == r5["extra"] == {"kraken_id": "m"}
     assert "polygon" not in r3
-    assert [line["id"] for line in r3["lines"]] == ["l5", "l6"]
+    lines = [line for region in prediction["regions"] for line in region["lines"]]
+    assert [line["id"] for line in lines] == [f"l{n}" for n in range(1, 8)]
+    assert [line["extra"]["kraken_id"] for line in lines] == list("abcefgh")
     assert r3["lines"][0]["type"] == "handwritten"
-    assert "polygon" not in r3["lines"][1]
+    assert "polygon" not in r5["lines"][0]
     assert r3["lines"][0]["confidence"] == 0.75
 
 

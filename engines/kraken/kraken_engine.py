@@ -251,10 +251,11 @@ def result_to_prediction(native: dict[str, Any], sample_id: str, size: tuple[int
 
     Lines with non-blank text keep their boundary polygon, baseline, mean character confidence
     and non-default line type. They are read in Kraken's reading order (the last of its
-    ``line_orders`` when a reading order model added one) and grouped into their Kraken region;
-    consecutive lines outside any region form a region of their own without a polygon. Regions
-    are in the order of their first line, which is the reading order. Regions without recognized
-    text (for example image regions) stay only in the native outputs.
+    ``line_orders`` when a reading order model added one), and each run of consecutive lines in
+    the same Kraken region becomes one region, so the page text keeps that order exactly. A
+    Kraken region whose lines are not consecutive therefore gives several regions with the same
+    ``extra.kraken_id``; consecutive lines outside any region form a region without a polygon.
+    Regions without recognized text (for example image regions) stay only in the native outputs.
     """
     segmentation, confidences = native["segmentation"], native["confidences"]
     lines = segmentation["lines"]
@@ -268,7 +269,6 @@ def result_to_prediction(native: dict[str, Any], sample_id: str, size: tuple[int
     orders = segmentation.get("line_orders") or []
     order = orders[-1] if orders else range(len(lines))
     regions: list[dict[str, Any]] = []
-    by_kraken_id: dict[str, dict[str, Any]] = {}
     previous = None
     for index in order:
         line, chars = lines[index], confidences[index]
@@ -276,14 +276,11 @@ def result_to_prediction(native: dict[str, Any], sample_id: str, size: tuple[int
         if not text.strip():
             continue
         parent = next((r for r in line.get("regions") or [] if r in kraken_regions), None)
-        if parent is None:
-            if previous is not None or not regions:
-                regions.append(
-                    {"id": "", "type": "text", "lines": [], "extra": {"grouping": "unassigned"}}
-                )
+        if regions and parent == previous:
             region = regions[-1]
-        elif parent in by_kraken_id:
-            region = by_kraken_id[parent]
+        elif parent is None:
+            region = {"id": "", "type": "text", "lines": [], "extra": {"grouping": "unassigned"}}
+            regions.append(region)
         else:
             kind, native_region = kraken_regions[parent]
             region = {"id": "", "type": region_type(kind), "native_type": kind}
@@ -291,7 +288,6 @@ def result_to_prediction(native: dict[str, Any], sample_id: str, size: tuple[int
                 region["polygon"] = polygon
             region |= {"lines": [], "extra": {"kraken_id": parent}}
             regions.append(region)
-            by_kraken_id[parent] = region
         previous = parent
         entry: dict[str, Any] = {"id": "", "text": text}
         if polygon := _polygon(line.get("boundary"), 3):
