@@ -192,6 +192,8 @@ def generate(processor: Any, model: Any, params: dict[str, Any], image: Any) -> 
         size={"shortest_edge": MIN_PIXELS, "longest_edge": params["max_pixels"]},
         return_tensors="pt",
     )
+    if device.startswith("cuda:"):  # the peak includes moving the inputs to the GPU
+        torch.cuda.reset_peak_memory_stats(device)
     dtype = model.dtype
     inputs = {
         key: value.to(device=device, dtype=dtype) if value.is_floating_point() else value.to(device)
@@ -209,8 +211,6 @@ def generate(processor: Any, model: Any, params: dict[str, Any], image: Any) -> 
             "top_p": params["top_p"],
             "top_k": params["top_k"],
         }
-    if device.startswith("cuda:"):
-        torch.cuda.reset_peak_memory_stats(device)
     torch.manual_seed(params["seed"])
     prepared = time.monotonic()
     with torch.inference_mode():
