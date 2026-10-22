@@ -1,0 +1,20 @@
+# OvisOCR2 end-to-end image-to-Markdown model (README.md next to this file; format: docs/RUNNER.md).
+# Run with --cache <dir> holding the weights from make ovisocr2-model.
+name = "ovisocr2"
+engine_version = "1"
+image = "ocrbench/engine-ovisocr2:0.8B-v1"
+model = "ATH-MaaS/OvisOCR2@1fc9221b7823a371d6e97f92d527cc847e24e107"
+
+[params]
+device = "cuda:0"
+max_new_tokens = 16384  # other parameters: README.md
+
+[resources]
+cpus = 4
+memory = "16g"
+gpus = "all"
+shm_size = "2g"
+
+[timeouts]
+sample = 900
+startup = 300
