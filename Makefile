@@ -4,7 +4,7 @@
         docker-cu130-paddle docker-paddleocr paddleocr-smoke docker-kraken kraken-smoke \
         docker-lightonocr lightonocr-model lightonocr-smoke docker-fireredocr fireredocr-model \
         fireredocr-smoke docker-ovisocr2 ovisocr2-model ovisocr2-smoke docker-infinityparser2 \
-        infinityparser2-model infinityparser2-smoke
+        infinityparser2-model infinityparser2-smoke docker-pero pero-bundles pero-smoke
 
 UV ?= uv
 BASE_VERSION ?= 1
@@ -18,6 +18,9 @@ LIGHTONOCR_IMAGE := ocrbench/engine-lightonocr:2-1B-v1
 FIREREDOCR_IMAGE := ocrbench/engine-fireredocr:2B-v1
 OVISOCR2_IMAGE := ocrbench/engine-ovisocr2:0.8B-v1
 INFINITYPARSER2_IMAGE := ocrbench/engine-infinityparser2:flash-v1
+PERO_IMAGE := ocrbench/engine-pero:0.7.0-81b496e-v1
+# Host directory with the user-supplied PERO OCR model bundles (engines/pero/README.md).
+PERO_BUNDLES ?= dev_data/pero_ocr_models
 # Host directory mounted as /cache for engines whose weights are not in the image.
 OCRBENCH_CACHE ?= $(HOME)/.cache/ocrbench
 LOCK := $(UV) pip compile --python-version 3.12 --python-platform x86_64-manylinux_2_28 \
@@ -78,6 +81,8 @@ docker-lock:  ## Re-lock the hashed requirements of the CUDA bases and the GPU e
 	$(LOCK) engines/infinityparser2/requirements.in -c docker/base-cu130-torch/requirements.txt \
 		--index-url https://pypi.org/simple --extra-index-url https://download.pytorch.org/whl/cu130 \
 		--index-strategy unsafe-best-match -o engines/infinityparser2/requirements.txt
+	$(LOCK) engines/pero/requirements.in -c docker/base-cu130-torch/requirements.txt \
+		--index-url https://pypi.org/simple -o engines/pero/requirements.txt
 
 docker-smoke:  ## Smoke-test built bases, a derived CPU image and the fake-engine runner (opt-in)
 	$(UV) run --locked pytest -m docker --run-docker tests/test_docker_images.py tests/test_runner.py
@@ -142,6 +147,16 @@ infinityparser2-model:  ## Download the pinned Infinity-Parser2-Flash weights (4
 
 infinityparser2-smoke:  ## Build the Infinity-Parser2-Flash image and run, evaluate and report a synthetic dataset on the GPU (opt-in; needs infinityparser2-model)
 	$(UV) run --locked pytest -m gpu --run-docker --run-gpu tests/test_infinityparser2.py
+
+docker-pero:  ## Build the PERO OCR engine image (needs the torch base) and print its image ID
+	docker build -t $(PERO_IMAGE) engines/pero
+	@docker image inspect --format '$(PERO_IMAGE) {{.Id}}' $(PERO_IMAGE)
+
+pero-bundles:  ## Copy the user-supplied PERO OCR bundles from $(PERO_BUNDLES) into $(OCRBENCH_CACHE), checked against bundles.sha256 (opt-in)
+	python3 engines/pero/install_bundles.py $(PERO_BUNDLES) $(OCRBENCH_CACHE)
+
+pero-smoke:  ## Build the PERO OCR image and run, evaluate and report a synthetic dataset on the GPU (opt-in; needs pero-bundles)
+	$(UV) run --locked pytest -m gpu --run-docker --run-gpu tests/test_pero.py
 
 gpu-preflight:  ## Check host driver, Docker and NVIDIA Container Toolkit
 	scripts/gpu_preflight.sh

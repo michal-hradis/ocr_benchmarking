@@ -1,0 +1,22 @@
+# PERO OCR universal preset: the supplied layout and universal transformer OCR bundles
+# (README.md next to this file; format: docs/RUNNER.md). Run with --cache <dir> holding the
+# bundles copied by make pero-bundles.
+name = "pero-universal-2025-03-19"
+engine_version = "1"
+image = "ocrbench/engine-pero:0.7.0-81b496e-v1"
+model = "layout_model@ParseNet_069500+universal.transformer.2025-03-19@checkpoint_1420000"
+
+[params]
+device = "cuda:0"
+layout_bundle = "layout_model"
+ocr_bundle = "universal.transformer.2025-03-19"
+
+[resources]
+cpus = 4
+memory = "16g"
+gpus = "all"
+shm_size = "2g"
+
+[timeouts]
+sample = 900
+startup = 300

@@ -1,0 +1,54 @@
+<?xml version='1.0' encoding='utf-8'?>
+<PcGts xmlns="http://schema.primaresearch.org/PAGE/gts/pagecontent/2019-07-15" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://schema.primaresearch.org/PAGE/gts/pagecontent/2019-07-15/pagecontent.xsd">
+  <Metadata>
+    <Creator>Pero OCR</Creator>
+    <Created>2026-10-22T20:56:04.374928+00:00</Created>
+    <LastChange>2026-10-22T20:56:04.374928+00:00</LastChange>
+  </Metadata>
+  <Page imageFilename="page-1.png" imageWidth="900" imageHeight="420">
+    <TextRegion id="r002" custom="{&quot;category&quot;: &quot;text&quot;}">
+      <Coords points="292,32 35,32 35,62 292,62 292,32"/>
+      <TextLine id="r002-l001" index="0" custom="{&quot;heights&quot;: [23.0, 7.0], &quot;category&quot;: &quot;text&quot;}">
+        <Coords points="259,32 232,32 205,32 177,32 148,32 119,34 93,34 67,32 35,32 35,62 65,62 66,62 148,62 177,62 205,62 232,62 259,62 292,62 292,32 259,32"/>
+        <Baseline points="35,55 66,55 93,57 121,57 148,55 177,55 205,55 232,55 259,55 292,55"/>
+        <TextEquiv conf="1.000">
+          <Unicode>The Daily Chronicle</Unicode>
+        </TextEquiv>
+      </TextLine>
+    </TextRegion>
+    <TextRegion id="r001" custom="{&quot;category&quot;: &quot;text&quot;}">
+      <Coords points="35,113 29,182 384,184 449,142 449,111 35,113"/>
+      <TextLine id="r001-l002" index="0" custom="{&quot;heights&quot;: [24.3, 6.9], &quot;category&quot;: &quot;text&quot;}">
+        <Coords points="449,111 342,111 308,113 263,113 219,113 174,113 128,113 82,113 35,113 35,144 82,144 128,144 174,144 219,144 263,144 309,144 354,142 400,142 449,142 449,111"/>
+        <Baseline points="35,137 82,137 128,137 174,137 219,137 263,137 309,137 354,135 400,135 449,135"/>
+        <TextEquiv conf="1.000">
+          <Unicode>The quick brown fox jumps over</Unicode>
+        </TextEquiv>
+      </TextLine>
+      <TextLine id="r001-l003" index="1" custom="{&quot;heights&quot;: [22.8, 6.7], &quot;category&quot;: &quot;text&quot;}">
+        <Coords points="29,182 71,182 110,182 148,182 186,182 206,183 240,183 263,182 301,182 334,184 384,184 384,154 340,154 302,153 263,153 224,154 187,153 148,153 110,153 71,153 32,153 29,182"/>
+        <Baseline points="30,175 71,175 110,175 148,175 186,175 225,177 263,175 301,175 340,177 384,177"/>
+        <TextEquiv conf="1.000">
+          <Unicode>the lazy dog near the river.</Unicode>
+        </TextEquiv>
+      </TextLine>
+    </TextRegion>
+    <TextRegion id="r000" custom="{&quot;category&quot;: &quot;text&quot;}">
+      <Coords points="31,233 29,301 424,303 482,262 482,233 31,233"/>
+      <TextLine id="r000-l004" index="0" custom="{&quot;heights&quot;: [23.0, 6.7], &quot;category&quot;: &quot;text&quot;}">
+        <Coords points="482,233 429,233 380,233 331,233 281,233 232,233 183,233 133,233 84,233 31,233 31,262 84,262 133,262 183,262 232,262 281,262 331,262 380,262 429,262 482,262 482,233"/>
+        <Baseline points="31,256 84,256 133,256 183,256 232,256 281,256 331,256 380,256 429,256 482,256"/>
+        <TextEquiv conf="1.000">
+          <Unicode>A second paragraph and more text</Unicode>
+        </TextEquiv>
+      </TextLine>
+      <TextLine id="r000-l005" index="1" custom="{&quot;heights&quot;: [23.2, 6.8], &quot;category&quot;: &quot;text&quot;}">
+        <Coords points="424,303 424,273 376,273 332,273 290,273 247,273 205,273 161,273 119,273 75,273 30,271 29,301 424,303"/>
+        <Baseline points="29,294 75,296 119,296 161,296 205,296 247,296 290,296 332,296 376,296 424,296"/>
+        <TextEquiv conf="1.000">
+          <Unicode>with numbers 1923 and 2026.</Unicode>
+        </TextEquiv>
+      </TextLine>
+    </TextRegion>
+  </Page>
+</PcGts>
