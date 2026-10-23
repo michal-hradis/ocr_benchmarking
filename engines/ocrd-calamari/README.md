@@ -110,10 +110,38 @@ Lines keep their file order, their polygon (a box, since Tesseract gives no base
 
 ## Observed behaviour and restrictions
 
-- **Runtime.** The ensembles are loaded once per container, which takes about 15 s. Within a page, binarization and segmentation take well under a second on the synthetic pages; recognition dominates. ocrd_calamari predicts in a background process with fixed batches of 12 lines and pads the last partial batch of each page by waiting 1.1 s for every missing line. This adds up to about 11 s per page, whatever its size: 10 s for a two-line paragraph and 14 s for the 19-line newspaper page.
+- **Runtime.** The ensembles are loaded once per container, which takes about 15 s. Within a page, binarization and segmentation take well under a second on the synthetic pages; recognition dominates, at about 1 s per line on real pages ([dev-01](#measured-on-dev-01)). ocrd_calamari predicts in a background process with fixed batches of 12 lines and pads the last partial batch of each page by waiting 1.1 s for every missing line. This adds up to about 11 s per page, whatever its size: 10 s for a two-line paragraph and 14 s for the 19-line newspaper page.
 - **Not bit-reproducible.** Lines are batched as they arrive and padded to the widest line of their batch, so the batch composition depends on timing. Two runs of the same image gave different readings of a few characters on the synthetic newspaper page.
 - **Segmentation.** Tesseract finds the three columns of the synthetic newspaper page and orders them correctly. On the two-column page, whose gutter is narrow, it makes one block per row band and reads each line across both columns.
-- **Image input.** Calamari reads the latest derived image, which is the binarized and clipped page from the first two steps. The `gt4histocr` ensemble was trained on grayscale images, the other two on binarized ones. EXIF orientation is not applied (OCR-D reads the stored pixels).
+- **Image input.** Calamari reads the latest derived image, which is the binarized and clipped page from the first two steps. The `gt4histocr` ensemble was trained on grayscale images, the other two on binarized ones. EXIF orientation is not applied (OCR-D reads the stored pixels). The binarization takes the resolution from the image metadata; a wrong declared DPI degrades it ([dev-01](#measured-on-dev-01)).
+
+## Measured on dev-01
+
+The three presets on the seven pages of dev-01 (runs `ocrd-calamari-dev01`, `ocrd-calamari-fraktur19-dev01` and `ocrd-calamari-antiqua-dev01`, not in Git; image `sha256:31d96174…` built from the committed files; AMD Ryzen 5 2600X, the runs one after another with 4 CPUs each). The Tesseract preset `best-deu-latf-psm3` (run `tesseract-best-deu-latf-psm3-dev01`) is shown for comparison. All 21 samples were `success`. Rates are micro averages over the pages; fCER and fWER are the flexible, order-independent rates ([EVALUATION.md](../../docs/EVALUATION.md)). Engine time is the sum of the adapter's per-sample times.
+
+| Engine, preset | CER | WER | fCER | fWER | BoW F1 | Engine time (7 pages) |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| `ocrd-calamari` (`gt4histocr`) | 55.2 % | 85.1 % | 46.8 % | 82.5 % | 30.4 | 922 s |
+| `ocrd-calamari-fraktur19` | 57.2 % | 84.9 % | 46.7 % | 80.3 % | 28.2 | 916 s |
+| `ocrd-calamari-antiqua` | 62.0 % | 93.0 % | 57.4 % | 92.4 % | 15.9 | 914 s |
+| `tesseract-best-deu-latf-psm3` | 54.6 % | 84.0 % | 35.9 % | 74.7 % | 39.6 | 141 s |
+
+CER per page in % (fCER in parentheses where it differs). Lines are those of the `gt4histocr` run.
+
+| Page | Content | Lines | `gt4histocr` | `fraktur19` | `antiqua` | Tesseract `deu_latf` |
+| --- | --- | ---: | ---: | ---: | ---: | ---: |
+| `3e6309d0…` | Czech newspaper, 4194 × 6192 | 343 | 74.7 (58.9) | 74.6 (55.9) | 75.6 (67.7) | 85.1 (67.3) |
+| `bd497a62…` | Czech newspaper, 3509 × 5239 | 403 | 49.5 (43.9) | 50.3 (42.4) | 57.1 (53.5) | 44.9 (20.1) |
+| `CkXII61-0017` | Glagolitic print | 18 | 76.6 | 78.7 | 76.8 | 85.2 |
+| `dta-346672…` | Latin, Antiqua and italic | 31 | 52.0 | 75.2 | 61.3 | 23.1 (17.3) |
+| `dta-laube…` | German Fraktur, 1833 | 25 | 7.4 | 4.4 | 34.9 | 7.2 |
+| `dta-martzi…` | German Fraktur, 1692 | 24 | 47.9 | 72.2 | 83.9 | 23.6 |
+| `dta-steinen…` | German Antiqua, 1894 | 43 | 12.1 | 19.8 | 27.3 | 2.1 |
+
+- **Czech newspapers.** None of the models can write most Czech letters ([Czech](#versions-and-licences)), and the large pages are read in many small Tesseract blocks (64 and 43 regions), so both the ordered and the flexible rates stay high.
+- **Fraktur.** `fraktur19` is the best preset on the 1833 Fraktur page (4.4 %), `gt4histocr` is close behind (7.4 %), and `antiqua` fails on it, as expected.
+- **Declared resolution.** The four DTA images declare 72 DPI, which is much lower than their real resolution. ocropy-binarize takes the DPI from the image and scales its background estimate by 300/DPI. At 72 DPI the background window is about four times too small for the strokes, so thick strokes are hollowed out to their outlines and Calamari drops letters. Binarization also takes 24–34 s per page instead of 1–3 s. This hurts most on the bold 1692 Fraktur page. The newspapers declare no DPI and are binarized at zoom 1. Rerunning `dta-martzi…` and `dta-346672…` outside the benchmark with the binarization parameter `dpi=300` gave 10.8 % instead of 47.9 % and 41.1 % instead of 52.0 % CER (`gt4histocr`). The remaining errors on `dta-346672…` are mostly in its italic lines and small text fragments. The committed configuration keeps the OCR-D default (DPI from the image).
+- **Runtime.** Recognition takes about 1 s per line with the five-model ensemble on 4 CPUs: 356 s for the 343-line newspaper page. At this rate, a page with more than about 800 lines would exceed the 900 s sample timeout.
 
 ## Tests
 
