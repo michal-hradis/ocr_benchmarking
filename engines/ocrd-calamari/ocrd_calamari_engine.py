@@ -37,6 +37,10 @@ DEFAULT_PARAMS: dict[str, Any] = {"model": "gt4histocr"}
 GROUPS = ("OCR-D-IMG", "OCR-D-BIN", "OCR-D-SEG", "OCR-D-OCR")
 STEPS = ("binarize", "segment", "recognize")
 PAGE_ID = "PHYS_0001"
+# Resolution assumed by the binarization for every image, instead of the image's DPI metadata: a
+# declared DPI below the real one shrinks ocropy's background window and hollows out thick strokes
+# (72 DPI JPEGs). 300 is ocropy's reference, also used for images without metadata.
+BINARIZE_DPI = 300
 # Distributions whose versions are recorded with every sample.
 PACKAGES = (
     "ocrd",
@@ -146,7 +150,7 @@ def environment() -> dict[str, Any]:
 
 
 def load_pipeline(params: dict[str, Any]) -> list[tuple[type, dict[str, Any]]]:
-    """The OCR-D processor classes of STEPS with their parameters (other parameters: defaults).
+    """The OCR-D processor classes of STEPS with their parameters (others: OCR-D defaults).
 
     OCR-D's own logging is set up first: its processors depend on it.
     """
@@ -161,7 +165,7 @@ def load_pipeline(params: dict[str, Any]) -> list[tuple[type, dict[str, Any]]]:
         raise AdapterError(f"cannot import OCR-D: {type(error).__name__}: {error}") from error
     checkpoints = str(MODELS_DIR / params["model"])
     return [
-        (OcropyBinarize, {}),
+        (OcropyBinarize, {"dpi": BINARIZE_DPI}),
         (TesserocrSegment, {}),
         (CalamariRecognize, {"checkpoint_dir": checkpoints, "device": -1}),
     ]
