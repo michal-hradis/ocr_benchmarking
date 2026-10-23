@@ -1,0 +1,5 @@
+# transformers 5.19.0 has GlmOcrForConditionalGeneration (GLM-OCR's architecture, added in 5.x);
+# torchvision and Pillow are its "vision" extra (the fast Glm46V image processor).
+transformers==5.19.0
+torchvision==0.29.1+cu130
+pillow
