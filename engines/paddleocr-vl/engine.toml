@@ -1,0 +1,21 @@
+# PaddleOCR-VL-1.6 document parsing pipeline on the GPU: PP-DocLayoutV3 layout and reading order,
+# then the VL model on every block (README.md next to this file; format: docs/RUNNER.md).
+# Run with --cache <dir> holding the models from make paddleocr-vl-model.
+name = "paddleocr-vl"
+engine_version = "1"
+image = "ocrbench/engine-paddleocr-vl:1.6-v1"
+model = "PaddleOCR-VL-1.6@c5630aba,layout-PP-DocLayoutV3@241f8bdf"  # Hugging Face PaddlePaddle/* commits
+
+[params]
+device = "gpu:0"
+max_new_tokens = 4096  # per block; other parameters keep the pipeline defaults (README.md)
+
+[resources]
+cpus = 4
+memory = "16g"
+gpus = "all"
+shm_size = "2g"
+
+[timeouts]
+sample = 900
+startup = 300
