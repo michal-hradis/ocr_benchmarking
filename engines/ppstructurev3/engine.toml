@@ -1,0 +1,20 @@
+# PaddleOCR PP-StructureV3 layout pipeline on the GPU, preset latin: the upstream OCR models for
+# Latin-script languages (README.md next to this file; format: docs/RUNNER.md).
+name = "ppstructurev3"
+engine_version = "1"
+image = "ocrbench/engine-ppstructurev3:3.7.0-v1"
+model = "PP-StructureV3@layout-aa52b852,region-f270657d,ori-cd237a44,det-ca867c89,rec-ab2cd5cc"  # Hugging Face PaddlePaddle/* commits
+
+[params]
+device = "gpu:0"  # other parameters keep the PP-StructureV3 defaults (README.md)
+ocr_models = "PP-OCRv5-latin"  # PP-OCRv5_server_det + latin_PP-OCRv5_mobile_rec
+
+[resources]
+cpus = 4
+memory = "16g"
+gpus = "all"
+shm_size = "2g"
+
+[timeouts]
+sample = 600
+startup = 300

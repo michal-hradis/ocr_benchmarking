@@ -4,7 +4,8 @@
         docker-cu130-paddle docker-paddleocr paddleocr-smoke docker-kraken kraken-smoke \
         docker-lightonocr lightonocr-model lightonocr-smoke docker-fireredocr fireredocr-model \
         fireredocr-smoke docker-ovisocr2 ovisocr2-model ovisocr2-smoke docker-infinityparser2 \
-        infinityparser2-model infinityparser2-smoke docker-pero pero-bundles pero-smoke
+        infinityparser2-model infinityparser2-smoke docker-pero pero-bundles pero-smoke \
+        docker-ppstructurev3 ppstructurev3-smoke
 
 UV ?= uv
 BASE_VERSION ?= 1
@@ -13,6 +14,7 @@ CU130_TORCH_IMAGE ?= ocrbench/base-cu130-torch:torch2.14.1-py3.12-v$(BASE_VERSIO
 CU130_PADDLE_IMAGE ?= ocrbench/base-cu130-paddle:paddle3.4.0-py3.12-v$(BASE_VERSION)
 TESSERACT_IMAGE := ocrbench/engine-tesseract:5.3.0-v2
 PADDLEOCR_IMAGE := ocrbench/engine-paddleocr:3.7.0-v2
+PPSTRUCTUREV3_IMAGE := ocrbench/engine-ppstructurev3:3.7.0-v1
 KRAKEN_IMAGE := ocrbench/engine-kraken:7.1.1-v1
 LIGHTONOCR_IMAGE := ocrbench/engine-lightonocr:2-1B-v1
 FIREREDOCR_IMAGE := ocrbench/engine-fireredocr:2B-v1
@@ -65,6 +67,8 @@ docker-lock:  ## Re-lock the hashed requirements of the CUDA bases and the GPU e
 	$(LOCK) docker/base-cu130-paddle/requirements.in -o docker/base-cu130-paddle/requirements.txt
 	$(LOCK) engines/paddleocr/requirements.in -c docker/base-cu130-paddle/requirements.txt \
 		-o engines/paddleocr/requirements.txt
+	$(LOCK) engines/ppstructurev3/requirements.in -c docker/base-cu130-paddle/requirements.txt \
+		-o engines/ppstructurev3/requirements.txt
 	$(LOCK) engines/kraken/requirements.in -c docker/base-cu130-torch/requirements.txt \
 		--override engines/kraken/overrides.txt --index-url https://pypi.org/simple \
 		--extra-index-url https://download.pytorch.org/whl/cu130 --index-strategy unsafe-best-match \
@@ -103,6 +107,13 @@ docker-paddleocr:  ## Build the PaddleOCR engine image (needs the Paddle base) a
 
 paddleocr-smoke:  ## Build the PaddleOCR image and run, evaluate and report a synthetic dataset on the GPU (opt-in)
 	$(UV) run --locked pytest -m gpu --run-docker --run-gpu tests/test_paddleocr.py
+
+docker-ppstructurev3:  ## Build the PP-StructureV3 engine image (needs the Paddle base) and print its image ID
+	docker build -t $(PPSTRUCTUREV3_IMAGE) engines/ppstructurev3
+	@docker image inspect --format '$(PPSTRUCTUREV3_IMAGE) {{.Id}}' $(PPSTRUCTUREV3_IMAGE)
+
+ppstructurev3-smoke:  ## Build the PP-StructureV3 image and run, evaluate and report a synthetic dataset on the GPU (opt-in)
+	$(UV) run --locked pytest -m gpu --run-docker --run-gpu tests/test_ppstructurev3.py
 
 docker-kraken:  ## Build the Kraken engine image (needs the torch base) and print its image ID
 	docker build -t $(KRAKEN_IMAGE) engines/kraken
