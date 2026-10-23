@@ -70,8 +70,11 @@ def errors(prediction, size):
     return [i for i in issues if i.severity is not Severity.INFO]
 
 
-def native(blocks, lines, size=(900, 420)):
-    """A minimal PP-StructureV3 result: blocks ``(label, bbox)``, lines ``(text, box)``."""
+def native(blocks, lines, size=(900, 420), orders=None):
+    """A minimal PP-StructureV3 result: blocks ``(label, bbox)``, lines ``(text, box)``.
+
+    ``orders`` are the blocks' ``block_order`` values, 1, 2, … by default.
+    """
     poly = [[[x1, y1], [x2, y1], [x2, y2], [x1, y2]] for _, (x1, y1, x2, y2) in lines]
     ocr = {
         "rec_texts": [text for text, _ in lines],
@@ -81,7 +84,7 @@ def native(blocks, lines, size=(900, 420)):
     }
     parsing = [
         {"block_label": label, "block_content": "", "block_bbox": list(bbox), "block_id": i}
-        | {"block_order": i + 1}
+        | {"block_order": i + 1 if orders is None else orders[i]}
         for i, (label, bbox) in enumerate(blocks)
     ]
     res = {"width": size[0], "height": size[1], "model_settings": {"use_doc_preprocessor": False}}
@@ -191,6 +194,29 @@ def test_lines_of_a_block_are_ordered_by_visual_line_then_left_to_right():
     assert texts == ["first-a", "first-b", "second", "third"]
 
 
+def test_blocks_without_block_order_keep_their_place_in_the_reading_order():
+    """PaddleX numbers only some labels; a figure title (null) still sits where it was sorted."""
+    blocks = [
+        ("text", (0, 0, 400, 50)),
+        ("image", (0, 60, 400, 200)),
+        ("figure_title", (0, 210, 400, 240)),
+        ("text", (0, 250, 400, 300)),
+    ]
+    lines = [
+        ("Before the figure.", (10, 10, 300, 40)),
+        ("Fig. 1: A harbour.", (10, 212, 300, 238)),
+        ("After the figure.", (10, 260, 300, 290)),
+    ]
+    raw = native(blocks, lines, orders=[1, None, None, 2])
+    prediction, counts = pps.result_to_prediction(raw, "s1", (900, 420))
+    assert prediction["reading_order"] == ["b1", "b2", "b3", "b4"]
+    assert prediction["text"] == "Before the figure.\n\nFig. 1: A harbour.\n\nAfter the figure."
+    assert [r["extra"]["block_order"] for r in prediction["regions"]] == [1, None, None, 2]
+    assert [r["type"] for r in prediction["regions"]] == ["text", "figure", "caption", "text"]
+    assert counts["outside_blocks"] == 0
+    assert errors(prediction, (900, 420)) == []
+
+
 def test_a_blank_page_is_an_empty_prediction():
     prediction, counts = pps.result_to_prediction(NATIVE["blank"], "s1", SIZES["blank"])
     assert prediction["text"] == ""
@@ -222,6 +248,9 @@ def test_inconsistent_results_are_rejected():
         pps.result_to_prediction(broken, "s1", (900, 420))
     with pytest.raises(pps.AdapterError, match="900x420 image"):
         pps.result_to_prediction(native([], []), "s1", (901, 420))
+    blocks = [("text", (0, 0, 10, 10)), ("image", (0, 20, 10, 30)), ("text", (0, 40, 10, 50))]
+    with pytest.raises(pps.AdapterError, match="block_order does not increase"):
+        pps.result_to_prediction(native(blocks, [], orders=[2, None, 1]), "s1", (900, 420))
 
 
 @pytest.mark.parametrize(
