@@ -1,0 +1,20 @@
+# PP-StructureV3 preset ocrv6: differs from engine.toml (latin) only in the text detection and
+# recognition models, the PP-OCRv6 medium models of the paddleocr engine (README.md next to engine.toml).
+name = "ppstructurev3-ocrv6"
+engine_version = "1"
+image = "ocrbench/engine-ppstructurev3:3.7.0-v1"
+model = "PP-StructureV3@layout-aa52b852,region-f270657d,ori-cd237a44,det-8e0f56fb,rec-e5a92bcb"  # Hugging Face PaddlePaddle/* commits
+
+[params]
+device = "gpu:0"
+ocr_models = "PP-OCRv6-medium"  # PP-OCRv6_medium_det + PP-OCRv6_medium_rec
+
+[resources]
+cpus = 4
+memory = "16g"
+gpus = "all"
+shm_size = "2g"
+
+[timeouts]
+sample = 600
+startup = 300
