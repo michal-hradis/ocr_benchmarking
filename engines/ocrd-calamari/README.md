@@ -15,6 +15,7 @@ It runs in a **standalone CPU Docker image** and follows the engine protocol in 
 | `Dockerfile` | Engine image `ocrbench/engine-ocrd-calamari:2.1.0-v1` |
 | `requirements.in`, `requirements.txt` | OCR-D core, ocrd_cis, ocrd_tesserocr, tesserocr, Calamari and TensorFlow, hash-locked for Python 3.11 (`make docker-lock`) |
 | `models.sha256` | Checksums of the three model archives; the build fails if they differ |
+| `models.files.sha256` | Checksums of every file unpacked from the archives; checked by the build and by the adapter before it loads a model |
 | `ocrd_calamari_engine.py` | The adapter |
 | `engine.toml` | Engine configuration for `ocrbench run start`, preset `gt4histocr` |
 | `presets/fraktur19.toml`, `presets/antiqua.toml` | Presets with the other two model ensembles ([Presets](#presets)) |
@@ -35,7 +36,9 @@ It runs in a **standalone CPU Docker image** and follows the engine protocol in 
 
 ocrd_calamari 2.1.0 is not on PyPI, so it is installed from its GitHub source archive with `--no-deps`. Its declared dependencies are in `requirements.txt`. The Debian packages (`libmagic1` for OCR-D, `tesseract-ocr-eng`) are pinned by version, not by an archive snapshot. If Debian removes a version, the build fails rather than silently changing it; then bump the pin, the image tag (`-v2`) and `engine_version`.
 
-**Models.** Each archive holds a 5-fold voting ensemble that Calamari combines (`confidence_voter_default_ctc`). The three archives are downloaded **when the image is built** (about 90 MB together) and checked against `models.sha256`, so inference needs no `--cache` and no network.
+**Models.** Each archive holds a 5-fold voting ensemble that Calamari combines (`confidence_voter_default_ctc`). The three archives are downloaded **when the image is built** (about 90 MB together) and checked against `models.sha256`, so inference needs no `--cache` and no network. Every unpacked file is checked against `models.files.sha256` at build time.
+
+Before loading a model, the adapter checks that its directory holds exactly the files in `models.files.sha256`, with those SHA-256 digests. Otherwise every sample fails with `engine-error` and a message naming the missing, unexpected or modified files. This also applies when `OCRBENCH_OCRD_CALAMARI_MODELS` points the adapter at another model directory. A recorded archive SHA-256 therefore always describes the checkpoints that were loaded. The two checksum files sit next to the adapter and cannot be overridden.
 
 | Model | Archive SHA-256 | Training data (calamari_models README) |
 | --- | --- | --- |
@@ -92,7 +95,7 @@ Each sample directory contains:
 | --- | --- |
 | `page.xml` | The PAGE XML written by `ocrd-calamari-recognize`, unchanged. It holds the regions, lines and reading order from Tesseract, Calamari's line text with confidences, and OCR-D's processing metadata. Its `AlternativeImage` entries name derived images from the temporary workspace, which are not kept. |
 | `prediction.json` | Standardized prediction built from `page.xml` ([PREDICTIONS.md](../../docs/PREDICTIONS.md)) |
-| `result.json` | Status and `extra`: region and line counts, the seconds per step (`step_seconds`), the package versions and Tesseract version (`environment`), the Calamari model with its checkpoints and archive SHA-256 (`models`), and `params` |
+| `result.json` | Status and `extra`: region and line counts, the seconds per step (`step_seconds`), the package versions and Tesseract version (`environment`), the Calamari model with its checkpoints, archive SHA-256 and the number of verified files (`models`), and `params` |
 
 **Mapping.** Every TextRegion with at least one non-blank line becomes a region `r1`, `r2`, … in the order of the PAGE `ReadingOrder`. Indexed groups are read by `@index`, and nested groups are read in place, as in the benchmark's PAGE reader. Tesseract writes a table as a group that references the TableRegion and its cells, so the cells, which are TextRegions inside the TableRegion, keep the table's position and order. Their `extra.parent` names the table. Regions that the reading order does not reference follow in file order.
 
@@ -114,6 +117,6 @@ Lines keep their file order, their polygon (a box, since Tesseract gives no base
 
 ## Tests
 
-`tests/test_ocrd_calamari.py` checks the mapping on committed pipeline output. The files in `tests/fixtures/ocrd-calamari/` (`page.xml`, `newspaper.xml` and `blank.xml`) are real output of this image with preset `gt4histocr` for synthetic pages rendered by `tests/synthetic.py`. Hand-written PAGE files cover tables, types, reading order and omissions. The protocol test runs the adapter as a host process with fake OCR-D modules (`tests/fixtures/ocrd-calamari/fake`) through the runner and covers success, an empty page, failing processors and missing output, and setup errors. The parameters and presets are also checked.
+`tests/test_ocrd_calamari.py` checks the mapping on committed pipeline output. The files in `tests/fixtures/ocrd-calamari/` (`page.xml`, `newspaper.xml` and `blank.xml`) are real output of this image with preset `gt4histocr` for synthetic pages rendered by `tests/synthetic.py`. Hand-written PAGE files cover tables, types, reading order and omissions. The protocol test runs the adapter as a host process with fake OCR-D modules (`tests/fixtures/ocrd-calamari/fake`) through the runner and covers success, an empty page, failing processors and missing output, and setup errors. The tests use placeholder model files with their own checksums, and check that a missing, extra or modified file, or a model directory with other weights, is rejected. The parameters and presets are also checked.
 
 The opt-in `make ocrd-calamari-smoke` builds the image and runs the real pipeline on the synthetic pages, including the two-column and newspaper pages, through `run`, `evaluate` and `report`. It checks the recorded versions, the geometry and that the native PAGE is readable by the benchmark. It requires a character error rate below 15 % on the single-column and newspaper pages, and runs every preset.
