@@ -473,6 +473,8 @@ def test_docker_smoke_benchmark(tmp_path, ocrd_calamari_image):
         prediction = json.loads((sample / "prediction.json").read_text())
         assert prediction["reading_order"]
         assert all("polygon" in region for region in prediction["regions"])
+        native = (sample / "output" / "page.xml").read_text(encoding="utf-8")
+        assert re.search(r'<pc:Label value="300(\.0)?" type="dpi"/>', native)  # binarization
         page, _ = read_page_xml(sample / "output" / "page.xml")
         lines = [line["text"] for region in prediction["regions"] for line in region["lines"]]
         assert [line.text for line in page.reference_lines] == lines
