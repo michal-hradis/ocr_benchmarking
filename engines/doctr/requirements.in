@@ -1,0 +1,5 @@
+# docTR 1.1.0 (PyTorch, the only backend since 1.0) with torchvision for the base's torch. OpenCV is
+# the headless build: the base has no libGL, and docTR's opencv-python is dropped (overrides.txt).
+python-doctr==1.1.0
+torchvision==0.29.1+cu130
+opencv-python-headless<6

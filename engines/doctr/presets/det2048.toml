@@ -1,0 +1,20 @@
+# docTR text detection + recognition, preset det2048 (../README.md; format: docs/RUNNER.md).
+# Run with --cache <dir> holding the checkpoints from make doctr-model.
+name = "doctr-det2048"
+engine_version = "1"
+image = "ocrbench/engine-doctr:1.1.0-v1"
+model = "doctr-1.1.0:fast_base-688a8b34+crnn_vgg16_bn-0417f351"
+
+[params]
+device = "cuda:0"
+detection_size = 2048  # the page is detected at twice docTR's 1024-pixel input (README.md)
+
+[resources]
+cpus = 4
+memory = "16g"
+gpus = "all"
+shm_size = "2g"
+
+[timeouts]
+sample = 600
+startup = 300
