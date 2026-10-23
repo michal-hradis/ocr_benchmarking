@@ -8,9 +8,11 @@ opt-in Docker test builds the engine image and runs the real pipeline on the CPU
 ``ocrbench run``, ``evaluate`` and ``report``.
 """
 
+import hashlib
 import importlib.util
 import json
 import re
+import shutil
 import subprocess
 import sys
 import tomllib
@@ -226,31 +228,89 @@ def test_image_downloads_exactly_the_checksummed_models():
     assert re.findall(r'"([^"]+)"', downloads) == list(oc.MODELS)
 
 
+FOLD_FILES = ("{}.ckpt.json", "{}.ckpt/saved_model.pb", "{}.ckpt/variables/variables.index")
+
+
 def make_models(root, models=oc.MODELS):
-    """Placeholder checkpoints for every model; returns the adapter environment."""
+    """Placeholder ensembles with their file checksums; returns the adapter environment.
+
+    The adapter reads the checksums next to itself, so a copy of it is placed in ``root/adapter``
+    with the committed models.sha256 and a models.files.sha256 for the placeholders.
+    """
+    lines = []
     for model in models:
-        directory = root / "models" / model
-        directory.mkdir(parents=True)
         for fold in range(5):
-            (directory / f"{fold}.ckpt.json").write_text("{}", encoding="utf-8")
+            for name in FOLD_FILES:
+                path = root / "models" / model / name.format(fold)
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text(f"{model} {path.name} {fold}", encoding="utf-8")
+                digest = hashlib.sha256(path.read_bytes()).hexdigest()
+                lines.append(f"{digest}  {path.relative_to(root / 'models').as_posix()}\n")
+    adapter = root / "adapter"
+    adapter.mkdir()
+    shutil.copy(ADAPTER_PATH, adapter)
+    shutil.copy(ENGINE_DIR / "models.sha256", adapter)
+    (adapter / "models.files.sha256").write_text("".join(lines), encoding="utf-8")
     return {
         "OCRBENCH_OCRD_CALAMARI_MODELS": str(root / "models"),
-        "OCRBENCH_OCRD_CALAMARI_CHECKSUMS": str(ENGINE_DIR / "models.sha256"),
         "OCRBENCH_OCRD_CALAMARI_WORK": str(root / "work"),
     }
 
 
-def test_model_info_records_checkpoints_and_archive(tmp_path, monkeypatch):
+def test_committed_file_checksums_cover_every_fold():
+    files = (ENGINE_DIR / "models.files.sha256").read_text(encoding="utf-8").splitlines()
+    names = [line.split(maxsplit=1)[1] for line in files]
+    weights = ("variables/variables.data-00000-of-00001",)
+    assert names == sorted(
+        f"{model}/{name.format(fold)}"
+        for model in oc.MODELS
+        for fold in range(5)
+        for name in (*FOLD_FILES, *(f"{{}}.ckpt/{w}" for w in weights))
+    )
+    assert oc.FILE_CHECKSUMS == ENGINE_DIR / "models.files.sha256"  # beside the adapter
+    assert oc.CHECKSUMS == ENGINE_DIR / "models.sha256"
+
+
+@pytest.fixture
+def models(tmp_path, monkeypatch):
+    """Placeholder gt4histocr ensemble with matching checksums, for ``oc.model_info``."""
     env = make_models(tmp_path, ["gt4histocr"])
     monkeypatch.setattr(oc, "MODELS_DIR", Path(env["OCRBENCH_OCRD_CALAMARI_MODELS"]))
-    monkeypatch.setattr(oc, "CHECKSUMS", Path(env["OCRBENCH_OCRD_CALAMARI_CHECKSUMS"]))
+    monkeypatch.setattr(oc, "FILE_CHECKSUMS", tmp_path / "adapter" / "models.files.sha256")
+    return oc.MODELS_DIR / "gt4histocr"
+
+
+def test_model_info_records_verified_checkpoints_and_archive(models):
     info = oc.model_info("gt4histocr")
     assert info["checkpoints"] == [f"{fold}.ckpt.json" for fold in range(5)]
     assert info["archive_sha256"] == (
         "d0b063fbaa1ca579a2873f1221bfe16c06f2e7c72ddf1d5997fdad3cd4bc5047"
     )
-    with pytest.raises(oc.AdapterError, match=r"no Calamari checkpoints .*antiqua_historical"):
+    assert info["files_verified"] == 15
+    with pytest.raises(oc.AdapterError, match="no checksums for Calamari model antiqua"):
         oc.model_info("antiqua_historical")
+
+
+@pytest.mark.parametrize(
+    ("change", "problem"),
+    [
+        (lambda d: (d / "4.ckpt.json").unlink(), "missing gt4histocr/4.ckpt.json"),
+        (
+            lambda d: shutil.rmtree(d / "2.ckpt"),
+            "missing gt4histocr/2.ckpt/saved_model.pb, missing gt4histocr/2.ckpt/variables/",
+        ),
+        (lambda d: (d / "5.ckpt.json").write_text("{}"), "unexpected gt4histocr/5.ckpt.json"),
+        (
+            lambda d: (d / "0.ckpt" / "saved_model.pb").write_bytes(b"other weights"),
+            "modified gt4histocr/0.ckpt/saved_model.pb",
+        ),
+    ],
+)
+def test_model_info_rejects_an_incomplete_or_modified_ensemble(models, change, problem):
+    change(models)
+    with pytest.raises(oc.AdapterError, match="differs from models.files.sha256") as error:
+        oc.model_info("gt4histocr")
+    assert problem in str(error.value)
 
 
 # Image width -> size: the fake pipeline returns the committed output of that synthetic page.
@@ -276,13 +336,14 @@ def run_adapter(tmp_path, widths, params=None, env=None):
     config["timeouts"] = {"sample": 20, "startup": 20}
     del config["resources"]
     env = {"PYTHONPATH": str(FIXTURES / "fake"), **make_models(tmp_path), **(env or {})}
+    adapter = tmp_path / "adapter" / ADAPTER_PATH.name
     run = create_run(
         parse_engine_config(config),
         make_dataset(tmp_path, widths),
         tmp_path / "runs",
         runtime="process",
     )
-    execute(run, ProcessLauncher([sys.executable, str(ADAPTER_PATH)], env), poll_interval=0.02)
+    execute(run, ProcessLauncher([sys.executable, str(adapter)], env), poll_interval=0.02)
     return run, {sid: latest_record(run, sid) for sid in widths}
 
 
@@ -325,6 +386,7 @@ def test_adapter_follows_the_engine_protocol(tmp_path):
     assert calamari["path"].endswith("/models/gt4histocr")
     assert len(calamari["checkpoints"]) == 5
     assert len(calamari["archive_sha256"]) == 64
+    assert calamari["files_verified"] == 15
     assert extra["models"]["job_model"] == CONFIG["model"]
     assert extra["params"] == CONFIG["params"]
     assert records["news"]["engine_extra"]["regions"] == 7
@@ -338,7 +400,7 @@ def test_adapter_follows_the_engine_protocol(tmp_path):
     [
         ({"psm": 3}, {}, "unknown parameters: psm"),
         ({"model": "fraktur"}, {}, "model must be one of"),
-        ({}, {"OCRBENCH_OCRD_CALAMARI_MODELS": "/nonexistent"}, "no Calamari checkpoints"),
+        ({}, {"OCRBENCH_OCRD_CALAMARI_MODELS": "/nonexistent"}, "no Calamari model directory"),
     ],
 )
 def test_setup_errors_fail_every_sample_explicitly(tmp_path, params, env, message):
@@ -346,6 +408,18 @@ def test_setup_errors_fail_every_sample_explicitly(tmp_path, params, env, messag
     _, records = run_adapter(tmp_path, {"a": 900, "b": 300}, params=params, env=env)
     assert {(r["status"], r["reason"]) for r in records.values()} == {("failure", "engine-error")}
     assert all(message in r["message"] for r in records.values())
+
+
+def test_overridden_model_directory_with_other_weights_fails_every_sample(tmp_path):
+    custom = tmp_path / "custom" / "gt4histocr"
+    custom.mkdir(parents=True)
+    (custom / "0.ckpt.json").write_text("{}", encoding="utf-8")
+    env = {"OCRBENCH_OCRD_CALAMARI_MODELS": str(custom.parent)}
+    _, records = run_adapter(tmp_path, {"a": 900}, env=env)
+    record = records["a"]
+    assert (record["status"], record["reason"]) == ("failure", "engine-error")
+    assert "differs from models.files.sha256: missing gt4histocr/0.ckpt/" in record["message"]
+    assert record["engine_extra"]["models"]["calamari"] is None  # nothing attributed
 
 
 # Opt-in Docker smoke benchmark (CPU) -----------------------------------------------------------
@@ -393,6 +467,7 @@ def test_docker_smoke_benchmark(tmp_path, ocrd_calamari_image):
         "device": "cpu",
     }
     assert extra["models"]["calamari"]["checkpoints"] == [f"{n}.ckpt.json" for n in range(5)]
+    assert extra["models"]["calamari"]["files_verified"] == 20
     for sid in ("page-1", "news-1"):
         sample = run.path / "samples" / sid / "attempt-1"
         prediction = json.loads((sample / "prediction.json").read_text())

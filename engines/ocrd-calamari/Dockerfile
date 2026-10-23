@@ -39,14 +39,16 @@ RUN python -c "import urllib.request as u; u.urlretrieve('https://github.com/OCR
     && rm /tmp/ocrd_calamari.tar.gz
 
 # The three Calamari model ensembles of the presets (calamari_models release 2.2, MIT, about 30 MB
-# each); the build fails unless every archive matches models.sha256.
-COPY models.sha256 /opt/ocrbench/models.sha256
+# each); the build fails unless every archive matches models.sha256 and every unpacked file
+# models.files.sha256. The adapter checks the files again before it loads a model.
+COPY models.sha256 models.files.sha256 /opt/ocrbench/
 RUN mkdir -p /opt/ocrbench/models && cd /opt/ocrbench/models \
     && python -c 'import urllib.request as u; \
 [u.urlretrieve(f"https://github.com/Calamari-OCR/calamari_models/releases/download/2.2/{m}.tar.gz", f"{m}.tar.gz") \
  for m in ("gt4histocr", "fraktur_19th_century", "antiqua_historical")]' \
     && sha256sum --check --strict /opt/ocrbench/models.sha256 \
     && for archive in *.tar.gz; do tar -xzf "$archive" --no-same-owner && rm "$archive"; done \
+    && sha256sum --check --strict --quiet /opt/ocrbench/models.files.sha256 \
     && chmod -R a+rX /opt/ocrbench/models
 COPY ocrd_calamari_engine.py /opt/ocrbench/ocrd_calamari_engine.py
 

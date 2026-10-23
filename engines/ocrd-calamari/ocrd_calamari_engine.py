@@ -12,6 +12,7 @@ pipeline's, in original-image pixels.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import shutil
@@ -24,7 +25,10 @@ from pathlib import Path
 from typing import Any
 
 MODELS_DIR = Path(os.environ.get("OCRBENCH_OCRD_CALAMARI_MODELS", "/opt/ocrbench/models"))
-CHECKSUMS = Path(os.environ.get("OCRBENCH_OCRD_CALAMARI_CHECKSUMS", "/opt/ocrbench/models.sha256"))
+# SHA-256 of the model archives and of every file unpacked from them (relative to MODELS_DIR). They
+# sit next to the adapter and cannot be overridden: they define the official ensembles.
+CHECKSUMS = Path(__file__).with_name("models.sha256")
+FILE_CHECKSUMS = Path(__file__).with_name("models.files.sha256")
 WORK_DIR = Path(os.environ.get("OCRBENCH_OCRD_CALAMARI_WORK", "/tmp/ocrd-calamari"))
 # Parameter model: a calamari_models 2.2 ensemble, the directory of its *.ckpt.json files.
 MODELS = ("gt4histocr", "fraktur_19th_century", "antiqua_historical")
@@ -68,25 +72,57 @@ def parse_params(params: dict[str, Any]) -> dict[str, Any]:
     return merged
 
 
+def _checksums(path: Path) -> dict[str, str]:
+    """``sha256sum`` output: file name -> SHA-256."""
+    lines = path.read_text(encoding="utf-8").splitlines() if path.is_file() else []
+    return {name: digest for digest, name in (line.split(maxsplit=1) for line in lines)}
+
+
+def _sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as file:
+        for chunk in iter(lambda: file.read(1 << 20), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
 def model_info(name: str) -> dict[str, Any]:
     """The model directory, its checkpoints and the SHA-256 of the archive it came from.
 
-    The image build checks every archive against models.sha256 before unpacking it.
+    The directory must hold exactly the files unpacked from that archive, each with the SHA-256 in
+    models.files.sha256, so the recorded archive describes the checkpoints actually loaded, also
+    from a directory set by OCRBENCH_OCRD_CALAMARI_MODELS.
     """
     directory = MODELS_DIR / name
-    checkpoints = sorted(p.name for p in directory.glob("*.ckpt.json"))
-    if not checkpoints:
-        raise AdapterError(f"no Calamari checkpoints (*.ckpt.json) in {directory}")
-    archive = None
-    if CHECKSUMS.is_file():
-        for line in CHECKSUMS.read_text(encoding="utf-8").splitlines():
-            if line.split()[1:] == [f"{name}.tar.gz"]:
-                archive = line.split()[0]
+    archive = _checksums(CHECKSUMS).get(f"{name}.tar.gz")
+    expected = {
+        path: digest
+        for path, digest in _checksums(FILE_CHECKSUMS).items()
+        if path.startswith(f"{name}/")
+    }
+    if archive is None or not expected:
+        raise AdapterError(f"no checksums for Calamari model {name}")
+    if not directory.is_dir():
+        raise AdapterError(f"no Calamari model directory {directory}")
+    found = {p.relative_to(MODELS_DIR).as_posix() for p in directory.rglob("*") if not p.is_dir()}
+    problems = [f"missing {path}" for path in sorted(expected.keys() - found)]
+    problems += [f"unexpected {path}" for path in sorted(found - expected.keys())]
+    problems += [
+        f"modified {path}"
+        for path in sorted(expected.keys() & found)
+        if _sha256(MODELS_DIR / path) != expected[path]
+    ]
+    if problems:
+        raise AdapterError(
+            f"Calamari model {name} in {directory} differs from {FILE_CHECKSUMS.name}: "
+            + ", ".join(problems)
+        )
     return {
         "name": name,
         "path": str(directory),
-        "checkpoints": checkpoints,
+        "checkpoints": sorted(p.name for p in directory.glob("*.ckpt.json")),
         "archive_sha256": archive,
+        "files_verified": len(expected),
     }
 
 
