@@ -1,0 +1,5 @@
+# The PaddleOCR-VL pipeline (PaddleOCRVL, pipeline_version "v1.6") with its native Paddle VL
+# backend needs only the PaddleX "ocr" extra, as PP-StructureV3 does; the "doc-parser" extra
+# adds the client for an external vLLM/SGLang server, which is not used.
+paddleocr==3.7.0
+paddlex[ocr]==3.7.2
