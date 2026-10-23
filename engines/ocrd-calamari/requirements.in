@@ -1,0 +1,18 @@
+# OCR-D processors of the pipeline (README.md), locked for Python 3.11: ocrd_calamari 2.1.0 needs
+# TensorFlow < 2.16, which has no Python 3.12 wheels. ocrd_calamari itself is not on PyPI in this
+# version; it is installed from its pinned source archive with --no-deps (Dockerfile), and its
+# declared dependencies (its requirements.txt) are listed here.
+ocrd==3.13.3
+ocrd-cis==0.2.0
+ocrd-tesserocr==0.21.2
+# The tesserocr wheel bundles Tesseract; its English model for the segmentation is a Debian
+# package (Dockerfile).
+tesserocr==2.12.0
+calamari-ocr==2.3.1
+tensorflow==2.15.1
+numpy
+click
+# Build requirements of the ocrd_calamari source archive (installed without build isolation).
+setuptools
+setuptools-ocrd
+wheel

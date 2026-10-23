@@ -140,3 +140,14 @@ def smoke_dataset(root):
         page_xml(root / f"{sid}.xml", regions, size)
         samples.append({"id": sid, "image": f"{sid}.png", "gt": f"{sid}.xml", "unit": unit})
     return write_manifest(root, samples)
+
+
+def smoke_dataset_with_columns(root):
+    """The synthetic smoke dataset plus the two-column and newspaper pages."""
+    manifest = smoke_dataset(root)
+    samples = json.loads(manifest.read_text(encoding="utf-8"))["samples"]
+    for sid, (heading, columns, size, font_size) in (("columns-1", COLUMNS), ("news-1", NEWSPAPER)):
+        regions = render_columns(root / f"{sid}.png", heading, columns, size, font_size)
+        page_xml(root / f"{sid}.xml", regions, size)
+        samples.append({"id": sid, "image": f"{sid}.png", "gt": f"{sid}.xml", "unit": "page"})
+    return write_manifest(root, samples)

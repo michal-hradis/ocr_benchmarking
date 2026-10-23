@@ -5,7 +5,7 @@
         docker-lightonocr lightonocr-model lightonocr-smoke docker-fireredocr fireredocr-model \
         fireredocr-smoke docker-ovisocr2 ovisocr2-model ovisocr2-smoke docker-infinityparser2 \
         infinityparser2-model infinityparser2-smoke docker-pero pero-bundles pero-smoke \
-        docker-ppstructurev3 ppstructurev3-smoke
+        docker-ppstructurev3 ppstructurev3-smoke docker-ocrd-calamari ocrd-calamari-smoke
 
 UV ?= uv
 BASE_VERSION ?= 1
@@ -21,12 +21,16 @@ FIREREDOCR_IMAGE := ocrbench/engine-fireredocr:2B-v1
 OVISOCR2_IMAGE := ocrbench/engine-ovisocr2:0.8B-v1
 INFINITYPARSER2_IMAGE := ocrbench/engine-infinityparser2:flash-v1
 PERO_IMAGE := ocrbench/engine-pero:0.7.0-81b496e-v1
+OCRD_CALAMARI_IMAGE := ocrbench/engine-ocrd-calamari:2.1.0-v1
 # Host directory with the user-supplied PERO OCR model bundles (engines/pero/README.md).
 PERO_BUNDLES ?= dev_data/pero_ocr_models
 # Host directory mounted as /cache for engines whose weights are not in the image.
 OCRBENCH_CACHE ?= $(HOME)/.cache/ocrbench
-LOCK := $(UV) pip compile --python-version 3.12 --python-platform x86_64-manylinux_2_28 \
-	--generate-hashes --no-header --custom-compile-command "make docker-lock"
+LOCK_FLAGS := --python-platform x86_64-manylinux_2_28 --generate-hashes --no-header \
+	--custom-compile-command "make docker-lock"
+LOCK := $(UV) pip compile --python-version 3.12 $(LOCK_FLAGS)
+# The standalone OCR-D/Calamari image runs Python 3.11 (engines/ocrd-calamari/README.md).
+LOCK_PY311 := $(UV) pip compile --python-version 3.11 $(LOCK_FLAGS)
 export CPU_IMAGE CU130_TORCH_IMAGE CU130_PADDLE_IMAGE OCRBENCH_CACHE
 
 help:  ## List targets
@@ -87,6 +91,7 @@ docker-lock:  ## Re-lock the hashed requirements of the CUDA bases and the GPU e
 		--index-strategy unsafe-best-match -o engines/infinityparser2/requirements.txt
 	$(LOCK) engines/pero/requirements.in -c docker/base-cu130-torch/requirements.txt \
 		--index-url https://pypi.org/simple -o engines/pero/requirements.txt
+	$(LOCK_PY311) engines/ocrd-calamari/requirements.in -o engines/ocrd-calamari/requirements.txt
 
 docker-smoke:  ## Smoke-test built bases, a derived CPU image and the fake-engine runner (opt-in)
 	$(UV) run --locked pytest -m docker --run-docker tests/test_docker_images.py tests/test_runner.py
@@ -114,6 +119,13 @@ docker-ppstructurev3:  ## Build the PP-StructureV3 engine image (needs the Paddl
 
 ppstructurev3-smoke:  ## Build the PP-StructureV3 image and run, evaluate and report a synthetic dataset on the GPU (opt-in)
 	$(UV) run --locked pytest -m gpu --run-docker --run-gpu tests/test_ppstructurev3.py
+
+docker-ocrd-calamari:  ## Build the standalone OCR-D/Calamari CPU engine image, with its models, and print its image ID
+	docker build -t $(OCRD_CALAMARI_IMAGE) engines/ocrd-calamari
+	@docker image inspect --format '$(OCRD_CALAMARI_IMAGE) {{.Id}}' $(OCRD_CALAMARI_IMAGE)
+
+ocrd-calamari-smoke:  ## Build the OCR-D/Calamari image and run, evaluate and report a synthetic dataset on the CPU (opt-in)
+	$(UV) run --locked pytest -m docker --run-docker tests/test_ocrd_calamari.py
 
 docker-kraken:  ## Build the Kraken engine image (needs the torch base) and print its image ID
 	docker build -t $(KRAKEN_IMAGE) engines/kraken

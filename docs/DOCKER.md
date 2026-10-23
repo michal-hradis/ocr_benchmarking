@@ -26,7 +26,7 @@ Both images provide:
 - a writable model cache at `/cache` (`XDG_CACHE_HOME`, `HF_HOME`, `TORCH_HOME` point inside it);
 - no model weights.
 
-**Sharing rule.** An engine image starts `FROM` a base only if its dependencies are compatible with what the base pins (Python, CUDA major/minor and torch version). An engine needing different versions gets a **new family directory** (for example `base-cu126-torch` or a Paddle family) rather than an upgrade of the existing one; existing families are never changed in place. A changed family gets a new `-vN` tag so that recorded runs keep pointing at the image they used.
+**Sharing rule.** An engine image starts `FROM` a base only if its dependencies are compatible with what the base pins (Python, CUDA major/minor and torch version). An engine needing different versions gets a **new family directory** (for example `base-cu126-torch` or a Paddle family) rather than an upgrade of the existing one; existing families are never changed in place. A changed family gets a new `-vN` tag so that recorded runs keep pointing at the image they used. An engine whose dependencies fit no family and would gain nothing from a new shared one may build a **standalone image** from a digest-pinned upstream image with the same conventions ([ADR 0004](adr/0004-docker-base-image-families.md)); [`engines/ocrd-calamari`](../engines/ocrd-calamari/README.md) (Python 3.11 for TensorFlow 2.15) is one.
 
 **Referencing shared bases (local-first).** The bases are built locally and are not published to a registry. A locally built image has an image ID but no `repository@sha256` registry digest, so engine images cannot pin bases by digest. The rule therefore is:
 
@@ -44,7 +44,7 @@ Publishing bases to a registry and pinning them by digest would also work, but w
 | `make docker-cpu` | Build the CPU base (small pull) |
 | `make docker-cu130-torch` | Build the CUDA/torch base (several GB pulled; cached afterwards) |
 | `make docker-cu130-paddle` | Build the CUDA/Paddle base (several GB pulled) |
-| `make docker-lock` | Re-lock the hashed `requirements.txt` of both CUDA bases and of the PaddleOCR and PP-StructureV3 (against the Paddle base) and Kraken, LightOnOCR, FireRed-OCR, OvisOCR2, Infinity-Parser2-Flash and PERO OCR (against the torch base) engines after editing a `requirements.in` |
+| `make docker-lock` | Re-lock the hashed `requirements.txt` of both CUDA bases and of the PaddleOCR and PP-StructureV3 (against the Paddle base) and Kraken, LightOnOCR, FireRed-OCR, OvisOCR2, Infinity-Parser2-Flash and PERO OCR (against the torch base) engines, and of the standalone OCR-D/Calamari image (Python 3.11), after editing a `requirements.in` |
 | `make docker-smoke` | Opt-in: run the built images with `--network none --read-only` and check Python, the non-root user and that torch imports without a GPU; also build a minimal derived image (`tests/fixtures/derived-cpu`) from the CPU base and check it inherits the base layers; build the fake engine (`tests/fixtures/fake-engine`) and run it with `ocrbench run start` ([RUNNER.md](RUNNER.md)) |
 | `make docker-tesseract` | Build the Tesseract engine image from the CPU base ([engines/tesseract](../engines/tesseract/README.md)) |
 | `make tesseract-best` | Opt-in: download the pinned `tessdata_best` models (48 MB) for the Tesseract best presets into `$(OCRBENCH_CACHE)` |
@@ -53,6 +53,8 @@ Publishing bases to a registry and pinning them by digest would also work, but w
 | `make paddleocr-smoke` | Opt-in, GPU: build the PaddleOCR image and run both presets (`det4000`, `det8000`) on synthetic samples, including a 5400-pixel page, through the runner, evaluation and reports |
 | `make docker-ppstructurev3` | Build the PP-StructureV3 GPU engine image from the Paddle base, with its models ([engines/ppstructurev3](../engines/ppstructurev3/README.md)) |
 | `make ppstructurev3-smoke` | Opt-in, GPU: build the PP-StructureV3 image and run it on synthetic samples, including two-column and newspaper pages, through the runner, evaluation and reports |
+| `make docker-ocrd-calamari` | Build the standalone OCR-D/Calamari CPU engine image (Python 3.11, no shared base), with its models ([engines/ocrd-calamari](../engines/ocrd-calamari/README.md)) |
+| `make ocrd-calamari-smoke` | Opt-in: build the OCR-D/Calamari image and run its presets on synthetic samples, including two-column and newspaper pages, through the runner, evaluation and reports |
 | `make docker-kraken` | Build the Kraken GPU engine image from the torch base ([engines/kraken](../engines/kraken/README.md)) |
 | `make kraken-smoke` | Opt-in, GPU: build the Kraken image and run it on synthetic samples through the runner, evaluation and reports |
 | `make docker-lightonocr` | Build the LightOnOCR-2 GPU engine image from the torch base, without weights ([engines/lightonocr](../engines/lightonocr/README.md)) |

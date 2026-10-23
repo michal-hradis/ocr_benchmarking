@@ -28,10 +28,9 @@ from synthetic import (
     COLUMNS,
     NEWSPAPER,
     PAGE,
-    page_xml,
     render,
     render_columns,
-    smoke_dataset,
+    smoke_dataset_with_columns,
     write_manifest,
 )
 
@@ -425,18 +424,6 @@ def ppstructurev3_image():
         check=True,
     )
     return CONFIG["image"]
-
-
-def smoke_dataset_with_columns(root):
-    """The synthetic smoke dataset plus the two-column and newspaper pages."""
-    manifest = smoke_dataset(root)
-    data = json.loads(manifest.read_text(encoding="utf-8"))
-    samples = data["samples"]
-    for sid, (heading, columns, size, font_size) in (("columns-1", COLUMNS), ("news-1", NEWSPAPER)):
-        regions = render_columns(root / f"{sid}.png", heading, columns, size, font_size)
-        page_xml(root / f"{sid}.xml", regions, size)
-        samples.append({"id": sid, "image": f"{sid}.png", "gt": f"{sid}.xml", "unit": "page"})
-    return write_manifest(root, samples)
 
 
 @pytest.mark.docker
