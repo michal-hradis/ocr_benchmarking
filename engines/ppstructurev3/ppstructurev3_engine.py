@@ -210,8 +210,12 @@ def result_to_prediction(
 ) -> tuple[dict[str, Any], dict[str, int]]:
     """Standardized prediction (docs/PREDICTIONS.md) from one PP-StructureV3 result.
 
-    Every block of ``parsing_res_list`` becomes a region in that order (PP-StructureV3's reading
-    order) with its box as polygon and its label as native type. Every recognized line of
+    Every block of ``parsing_res_list`` becomes a region in that order with its box as polygon
+    and its label as native type. PP-StructureV3 sorts every block into that list for reading
+    (``xycut_enhanced``, which also places figure titles and unordered labels such as
+    ``aside_text``) and writes its Markdown in it; ``block_order`` only numbers some labels on
+    the layout image (null for, e.g., ``image``, ``figure_title`` or ``header``) and must agree
+    with the list. Every recognized line of
     ``overall_ocr_res`` with non-blank text, its polygon and score, goes into the block it
     overlaps most (``assign_lines``), ordered as ``line_order``; lines outside every block are
     left out, as PP-StructureV3 leaves them out of its blocks. Also returns line counts.
@@ -234,6 +238,9 @@ def result_to_prediction(
     if not len(texts) == len(polys) == len(scores) == len(boxes):
         raise AdapterError("rec_texts, rec_polys, rec_scores and rec_boxes differ in length")
     blocks = res["parsing_res_list"]
+    orders = [b["block_order"] for b in blocks if b.get("block_order") is not None]
+    if orders != sorted(set(orders)):
+        raise AdapterError("block_order does not increase along parsing_res_list")
     kept = [i for i, text in enumerate(texts) if text.strip()]
     owners = assign_lines([boxes[i] for i in kept], [b["block_bbox"] for b in blocks])
     members: dict[int, list[int]] = {}
