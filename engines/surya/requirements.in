@@ -1,0 +1,7 @@
+# Surya 0.17.1 is the last release with the separate line detector, line recognizer and layout
+# model (README.md). It declares transformers>=4.56.1; 4.57.6 is the last 4.x release, kept so a
+# transformers 5 API change cannot reach the pinned code. torchvision is for transformers' image
+# processors.
+surya-ocr==0.17.1
+transformers==4.57.6
+torchvision==0.29.1+cu130
