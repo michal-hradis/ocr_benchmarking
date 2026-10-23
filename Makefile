@@ -7,7 +7,8 @@
         infinityparser2-model infinityparser2-smoke docker-pero pero-bundles pero-smoke \
         docker-ppstructurev3 ppstructurev3-smoke docker-paddleocr-vl paddleocr-vl-model \
         paddleocr-vl-smoke docker-ocrd-calamari ocrd-calamari-smoke \
-        docker-surya surya-model surya-smoke docker-doctr doctr-model doctr-smoke
+        docker-surya surya-model surya-smoke docker-doctr doctr-model doctr-smoke \
+        docker-glm-ocr glm-ocr-model glm-ocr-smoke
 
 UV ?= uv
 BASE_VERSION ?= 1
@@ -27,6 +28,7 @@ PERO_IMAGE := ocrbench/engine-pero:0.7.0-81b496e-v1
 OCRD_CALAMARI_IMAGE := ocrbench/engine-ocrd-calamari:2.1.0-v1
 SURYA_IMAGE := ocrbench/engine-surya:0.17.1-v1
 DOCTR_IMAGE := ocrbench/engine-doctr:1.1.0-v1
+GLM_OCR_IMAGE := ocrbench/engine-glm-ocr:0.9B-v1
 # Host directory with the user-supplied PERO OCR model bundles (engines/pero/README.md).
 PERO_BUNDLES ?= dev_data/pero_ocr_models
 # Host directory mounted as /cache for engines whose weights are not in the image.
@@ -93,6 +95,9 @@ docker-lock:  ## Re-lock the hashed requirements of the CUDA bases and the GPU e
 	$(LOCK) engines/ovisocr2/requirements.in -c docker/base-cu130-torch/requirements.txt \
 		--index-url https://pypi.org/simple --extra-index-url https://download.pytorch.org/whl/cu130 \
 		--index-strategy unsafe-best-match -o engines/ovisocr2/requirements.txt
+	$(LOCK) engines/glm-ocr/requirements.in -c docker/base-cu130-torch/requirements.txt \
+		--index-url https://pypi.org/simple --extra-index-url https://download.pytorch.org/whl/cu130 \
+		--index-strategy unsafe-best-match -o engines/glm-ocr/requirements.txt
 	$(LOCK) engines/infinityparser2/requirements.in -c docker/base-cu130-torch/requirements.txt \
 		--index-url https://pypi.org/simple --extra-index-url https://download.pytorch.org/whl/cu130 \
 		--index-strategy unsafe-best-match -o engines/infinityparser2/requirements.txt
@@ -187,6 +192,16 @@ ovisocr2-model:  ## Download the pinned OvisOCR2 weights (1.7 GB) into $(OCRBENC
 
 ovisocr2-smoke:  ## Build the OvisOCR2 image and run, evaluate and report a synthetic dataset on the GPU (opt-in; needs ovisocr2-model)
 	$(UV) run --locked pytest -m gpu --run-docker --run-gpu tests/test_ovisocr2.py
+
+docker-glm-ocr:  ## Build the GLM-OCR engine image (needs the torch base) and print its image ID
+	docker build -t $(GLM_OCR_IMAGE) engines/glm-ocr
+	@docker image inspect --format '$(GLM_OCR_IMAGE) {{.Id}}' $(GLM_OCR_IMAGE)
+
+glm-ocr-model:  ## Download the pinned GLM-OCR weights (2.7 GB) into $(OCRBENCH_CACHE) (opt-in)
+	python3 engines/glm-ocr/fetch_model.py $(OCRBENCH_CACHE)
+
+glm-ocr-smoke:  ## Build the GLM-OCR image and run, evaluate and report a synthetic dataset on the GPU (opt-in; needs glm-ocr-model)
+	$(UV) run --locked pytest -m gpu --run-docker --run-gpu tests/test_glm_ocr.py
 
 docker-infinityparser2:  ## Build the Infinity-Parser2-Flash engine image (needs the torch base) and print its image ID
 	docker build -t $(INFINITYPARSER2_IMAGE) engines/infinityparser2
