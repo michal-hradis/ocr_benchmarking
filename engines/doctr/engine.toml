@@ -1,0 +1,20 @@
+# docTR text detection + recognition, preset det1024 (README.md next to this file; format:
+# docs/RUNNER.md). Run with --cache <dir> holding the checkpoints from make doctr-model.
+name = "doctr"
+engine_version = "1"
+image = "ocrbench/engine-doctr:1.1.0-v1"
+model = "doctr-1.1.0:fast_base-688a8b34+crnn_vgg16_bn-0417f351"
+
+[params]
+device = "cuda:0"
+detection_size = 1024  # docTR's default: the page is resized into 1024 x 1024 for detection
+
+[resources]
+cpus = 4
+memory = "16g"
+gpus = "all"
+shm_size = "2g"
+
+[timeouts]
+sample = 600
+startup = 300

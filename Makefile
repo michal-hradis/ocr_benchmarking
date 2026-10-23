@@ -6,7 +6,7 @@
         fireredocr-smoke docker-ovisocr2 ovisocr2-model ovisocr2-smoke docker-infinityparser2 \
         infinityparser2-model infinityparser2-smoke docker-pero pero-bundles pero-smoke \
         docker-ppstructurev3 ppstructurev3-smoke docker-ocrd-calamari ocrd-calamari-smoke \
-        docker-surya surya-model surya-smoke
+        docker-surya surya-model surya-smoke docker-doctr doctr-model doctr-smoke
 
 UV ?= uv
 BASE_VERSION ?= 1
@@ -24,6 +24,7 @@ INFINITYPARSER2_IMAGE := ocrbench/engine-infinityparser2:flash-v1
 PERO_IMAGE := ocrbench/engine-pero:0.7.0-81b496e-v1
 OCRD_CALAMARI_IMAGE := ocrbench/engine-ocrd-calamari:2.1.0-v1
 SURYA_IMAGE := ocrbench/engine-surya:0.17.1-v1
+DOCTR_IMAGE := ocrbench/engine-doctr:1.1.0-v1
 # Host directory with the user-supplied PERO OCR model bundles (engines/pero/README.md).
 PERO_BUNDLES ?= dev_data/pero_ocr_models
 # Host directory mounted as /cache for engines whose weights are not in the image.
@@ -96,6 +97,10 @@ docker-lock:  ## Re-lock the hashed requirements of the CUDA bases and the GPU e
 	$(LOCK) engines/surya/requirements.in -c docker/base-cu130-torch/requirements.txt \
 		--index-url https://pypi.org/simple --extra-index-url https://download.pytorch.org/whl/cu130 \
 		--index-strategy unsafe-best-match -o engines/surya/requirements.txt
+	$(LOCK) engines/doctr/requirements.in -c docker/base-cu130-torch/requirements.txt \
+		--override engines/doctr/overrides.txt --index-url https://pypi.org/simple \
+		--extra-index-url https://download.pytorch.org/whl/cu130 --index-strategy unsafe-best-match \
+		-o engines/doctr/requirements.txt
 	$(LOCK_PY311) engines/ocrd-calamari/requirements.in -o engines/ocrd-calamari/requirements.txt
 
 docker-smoke:  ## Smoke-test built bases, a derived CPU image and the fake-engine runner (opt-in)
@@ -198,6 +203,16 @@ surya-model:  ## Download the pinned Surya checkpoints (3 GB) into $(OCRBENCH_CA
 
 surya-smoke:  ## Build the Surya image and run, evaluate and report a synthetic dataset on the GPU (opt-in; needs surya-model)
 	$(UV) run --locked pytest -m gpu --run-docker --run-gpu tests/test_surya.py
+
+docker-doctr:  ## Build the docTR engine image (needs the torch base) and print its image ID
+	docker build -t $(DOCTR_IMAGE) engines/doctr
+	@docker image inspect --format '$(DOCTR_IMAGE) {{.Id}}' $(DOCTR_IMAGE)
+
+doctr-model:  ## Download the pinned docTR checkpoints (129 MB) into $(OCRBENCH_CACHE) (opt-in)
+	python3 engines/doctr/fetch_model.py $(OCRBENCH_CACHE)
+
+doctr-smoke:  ## Build the docTR image and run, evaluate and report a synthetic dataset on the GPU (opt-in; needs doctr-model)
+	$(UV) run --locked pytest -m gpu --run-docker --run-gpu tests/test_doctr.py
 
 gpu-preflight:  ## Check host driver, Docker and NVIDIA Container Toolkit
 	scripts/gpu_preflight.sh

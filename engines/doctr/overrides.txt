@@ -1,0 +1,3 @@
+# docTR 1.1.0 declares opencv-python, which loads libGL; the never-true marker removes it, and
+# opencv-python-headless (requirements.in) provides the same cv2 module (README.md).
+opencv-python ; sys_platform == 'never'
