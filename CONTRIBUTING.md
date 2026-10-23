@@ -30,6 +30,37 @@ Add regression tests for changed behavior. Normal developer tests should use syn
 
 Do not add CI workflows or a universal full-suite PR gate as part of unrelated changes.
 
+
+### Development-set results for new engines and configurations
+
+Every PR that **adds a new OCR/HTR engine or predefined model/configuration/preset**, or **changes an existing configuration in a way that affects inference**, must evaluate **each new or affected configuration on all seven development pages** in [`datasets/dev-01.json`](datasets/dev-01.json). Synthetic fixtures and smoke tests remain necessary but do not replace this evaluation. If a PR adds two presets, run and report both; unchanged configurations do not need to be rerun.
+
+Use the frozen engine configuration and the normal `ocrbench run start` → `ocrbench evaluate` workflow (see [runner](docs/RUNNER.md) and [evaluation](docs/EVALUATION.md)). Use the default evaluation configuration for comparability, or state and justify any changes. The seven page images and PAGE XML GT remain in the separately held `dev_data/` directory: do not commit them, their predictions, or generated run/report artifacts. Real inference still requires authorized access to the data, models and hardware.
+
+**Post the results in the PR description as two Markdown tables**, following [PR #69's dev-01 results](https://github.com/michal-hradis/ocr_benchmarking/pull/69): an overall table with **one row per configuration** and a per-page table with **all seven distinct pages for every configuration**. Do not select only the best pages or report one preset in place of another.
+
+**1. Overall results (micro-averaged unless identified otherwise).** Include strict CER/WER, flexible CER/WER (fCER/fWER), bag-of-words F1, ROUGE-2 F1 and engine time. For example, replace the placeholders:
+
+| Preset / configuration | CER | WER | fCER | fWER | BoW F1 | ROUGE-2 F1 | Engine time |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| `<preset>` | … | … | … | … | … | … | … |
+
+**2. Per-page results.** Include the per-page CER for each configuration and fCER in parentheses when different; line counts are useful for diagnosing layout/detection failures. For multiple presets, add one score column per preset as in PR #69; for one preset, keep just its column. Replace every placeholder, including for failures (mark failures explicitly, rather than silently dropping a page):
+
+| Page | Content | Lines (preset A / B) | Preset A CER (fCER) | Preset B CER (fCER) |
+| --- | --- | ---: | ---: | ---: |
+| `3e6309d0…` | Czech newspaper | … | … | … |
+| `bd497a62…` | Czech newspaper | … | … | … |
+| `CkXII61-0017` | Glagolitic print | … | … | … |
+| `dta-346672…` | Latin, Antiqua and italic | … | … | … |
+| `dta-laube…` | German Fraktur (1833) | … | … | … |
+| `dta-martzi…` | German Fraktur (1692) | … | … | … |
+| `dta-steinen…` | German Antiqua (1894) | … | … | … |
+
+Alongside the tables, identify the run IDs, engine/preset and model versions, relevant inference parameters, image digest (if available), hardware, evaluation configuration, and whether engine time includes model loading. Give the success/failure count **per configuration**, describe failed pages and major accuracy or reading-order limitations, and distinguish measured facts from speculation. The development set is small and not representative; do not present these numbers as general model rankings.
+
+If the seven-page data, model access or hardware are unavailable, state exactly what is blocked, keep the PR **draft/not ready to merge** until the results are supplied, and never invent results or silently substitute synthetic fixtures. This is a required handoff for new/changed engine configurations, not permission to access private data or run costly inference without authorization.
+
 ## Development setup and commands
 
 Requirements: Linux, `make`, and [uv](https://docs.astral.sh/uv/) ≥ 0.13 (for example `pip install --user uv`). uv downloads Python 3.12 if the host lacks it; the host Python is not modified.

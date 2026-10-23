@@ -15,6 +15,7 @@ Follow [CONTRIBUTING.md](CONTRIBUTING.md) for development, targeted local verifi
 - Make a reviewable PR targeting `main`, link the issue, document changes and request human review. Do not push to `main`, merge or deploy without authorization.
 - Update affected active documentation alongside code and avoid misleading claims about tests or supported commands.
 - Hand off actual checks/results, unrun checks, risks, and unresolved follow-ups. Never mark unsupported checks as passed.
+- For a new engine or a new/inference-affecting changed engine configuration, evaluate each affected preset on all seven `datasets/dev-01.json` pages and include **overall and per-page results tables** in the PR as required by [CONTRIBUTING.md](CONTRIBUTING.md#development-set-results-for-new-engines-and-configurations). Do not fabricate missing results; leave the PR draft until authorized development-set evaluation is complete.
 
 ## OCR-specific safety
 
