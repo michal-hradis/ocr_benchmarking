@@ -1,0 +1,21 @@
+# OCR-D/Calamari preset fraktur19: differs from engine.toml (gt4histocr) only in the Calamari
+# ensemble, the one for 19th-century Fraktur (README.md next to engine.toml).
+name = "ocrd-calamari-fraktur19"
+engine_version = "1"
+image = "ocrbench/engine-ocrd-calamari:2.1.0-v1"
+model = "calamari_models@2.2/fraktur_19th_century"  # archive SHA-256 in models.sha256
+
+[params]
+model = "fraktur_19th_century"  # 19th-century Fraktur, 5-fold ensemble
+
+[env]
+OMP_THREAD_LIMIT = "1"  # Tesseract's OpenMP threads during segmentation
+
+[resources]
+cpus = 4
+memory = "8g"
+shm_size = "1g"
+
+[timeouts]
+sample = 900
+startup = 300

@@ -1,0 +1,21 @@
+# OCR-D/Calamari preset antiqua: differs from engine.toml (gt4histocr) only in the Calamari
+# ensemble, the one for historical Antiqua (README.md next to engine.toml).
+name = "ocrd-calamari-antiqua"
+engine_version = "1"
+image = "ocrbench/engine-ocrd-calamari:2.1.0-v1"
+model = "calamari_models@2.2/antiqua_historical"  # archive SHA-256 in models.sha256
+
+[params]
+model = "antiqua_historical"  # historical Antiqua, 5-fold ensemble
+
+[env]
+OMP_THREAD_LIMIT = "1"  # Tesseract's OpenMP threads during segmentation
+
+[resources]
+cpus = 4
+memory = "8g"
+shm_size = "1g"
+
+[timeouts]
+sample = 900
+startup = 300

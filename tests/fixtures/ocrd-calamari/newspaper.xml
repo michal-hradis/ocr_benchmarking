@@ -1,0 +1,234 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<pc:PcGts xmlns:pc="http://schema.primaresearch.org/PAGE/gts/pagecontent/2019-07-15" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://schema.primaresearch.org/PAGE/gts/pagecontent/2019-07-15 http://schema.primaresearch.org/PAGE/gts/pagecontent/2019-07-15/pagecontent.xsd" pcGtsId="OCR-D-OCR_PHYS_0001">
+    <pc:Metadata>
+        <pc:Creator>OCR-D/core 3.13.3</pc:Creator>
+        <pc:Created>2026-10-23T09:55:57.704930</pc:Created>
+        <pc:LastChange>2026-10-23T09:55:57.704930</pc:LastChange>
+        <pc:MetadataItem type="processingStep" name="preprocessing/optimization/binarization" value="ocrd-cis-ocropy-binarize">
+            <pc:Labels externalModel="ocrd-tool" externalId="parameters">
+                <pc:Label value="ocropy" type="method"/>
+                <pc:Label value="0.5" type="threshold"/>
+                <pc:Label value="False" type="grayscale"/>
+                <pc:Label value="0.0" type="maxskew"/>
+                <pc:Label value="0" type="noise_maxsize"/>
+                <pc:Label value="0" type="dpi"/>
+                <pc:Label value="page" type="level-of-operation"/>
+            </pc:Labels>
+            <pc:Labels externalModel="ocrd-tool" externalId="version">
+                <pc:Label value="0.2.0" type="ocrd-cis-ocropy-binarize"/>
+                <pc:Label value="3.13.3" type="ocrd/core"/>
+            </pc:Labels>
+        </pc:MetadataItem>
+        <pc:MetadataItem type="processingStep" name="layout/segmentation/region" value="ocrd-tesserocr-segment">
+            <pc:Labels externalModel="ocrd-tool" externalId="parameters">
+                <pc:Label value="0" type="dpi"/>
+                <pc:Label value="4" type="padding"/>
+                <pc:Label value="False" type="shrink_polygons"/>
+                <pc:Label value="False" type="block_polygons"/>
+                <pc:Label value="True" type="find_tables"/>
+                <pc:Label value="False" type="find_staves"/>
+                <pc:Label value="False" type="sparse_text"/>
+            </pc:Labels>
+            <pc:Labels externalModel="ocrd-tool" externalId="version">
+                <pc:Label value="0.21.2" type="ocrd-tesserocr-segment"/>
+                <pc:Label value="3.13.3" type="ocrd/core"/>
+            </pc:Labels>
+        </pc:MetadataItem>
+        <pc:MetadataItem type="processingStep" name="recognition/text-recognition" value="ocrd-calamari-recognize">
+            <pc:Labels externalModel="ocrd-tool" externalId="parameters">
+                <pc:Label value="/opt/ocrbench/models/gt4histocr" type="checkpoint_dir"/>
+                <pc:Label value="-1" type="device"/>
+                <pc:Label value="confidence_voter_default_ctc" type="voter"/>
+                <pc:Label value="line" type="textequiv_level"/>
+                <pc:Label value="0.001" type="glyph_conf_cutoff"/>
+            </pc:Labels>
+            <pc:Labels externalModel="ocrd-tool" externalId="version">
+                <pc:Label value="2.1.0" type="ocrd-calamari-recognize"/>
+                <pc:Label value="3.13.3" type="ocrd/core"/>
+            </pc:Labels>
+        </pc:MetadataItem>
+    </pc:Metadata>
+    <pc:Page imageFilename="news-1.png" imageWidth="1500" imageHeight="620" orientation="0.0">
+        <pc:AlternativeImage filename="OCR-D-BIN/OCR-D-BIN_PHYS_0001_.IMG-BIN.png" comments=",binarized"/>
+        <pc:AlternativeImage filename="OCR-D-SEG/OCR-D-SEG_PHYS_0001_.IMG-BIN.png" comments=",binarized,binarized,clipped"/>
+        <pc:ReadingOrder>
+            <pc:OrderedGroup id="reading-order">
+                <pc:RegionRefIndexed index="0" regionRef="region0000"/>
+                <pc:RegionRefIndexed index="1" regionRef="region0001"/>
+                <pc:RegionRefIndexed index="2" regionRef="region0002"/>
+                <pc:RegionRefIndexed index="3" regionRef="region0003"/>
+                <pc:RegionRefIndexed index="4" regionRef="region0004"/>
+                <pc:RegionRefIndexed index="5" regionRef="region0005"/>
+                <pc:RegionRefIndexed index="6" regionRef="region0006"/>
+            </pc:OrderedGroup>
+        </pc:ReadingOrder>
+        <pc:TextRegion id="region0000" orientation="-0.190008792396753" readingDirection="left-to-right" textLineOrder="top-to-bottom">
+            <pc:Coords points="40,38 366,38 366,87 40,87"/>
+            <pc:TextLine id="region0000_line0000">
+                <pc:Coords points="40,38 366,38 366,87 40,87"/>
+                <pc:TextEquiv conf="0.911434424633071">
+                    <pc:Unicode>Evening Gaette</pc:Unicode>
+                </pc:TextEquiv>
+            </pc:TextLine>
+            <pc:TextEquiv>
+                <pc:Unicode>Evening Gaette</pc:Unicode>
+            </pc:TextEquiv>
+        </pc:TextRegion>
+        <pc:TextRegion id="region0001" orientation="-0.190008792396753" readingDirection="left-to-right" textLineOrder="top-to-bottom">
+            <pc:Coords points="37,119 268,119 268,210 37,210"/>
+            <pc:TextLine id="region0001_line0000">
+                <pc:Coords points="38,119 256,119 256,148 38,148"/>
+                <pc:TextEquiv conf="0.948486596605052">
+                    <pc:Unicode>Rain fell over the city</pc:Unicode>
+                </pc:TextEquiv>
+            </pc:TextLine>
+            <pc:TextLine id="region0001_line0001">
+                <pc:Coords points="37,150 268,150 268,179 37,179"/>
+                <pc:TextEquiv conf="0.965961909158663">
+                    <pc:Unicode>for the third day hile</pc:Unicode>
+                </pc:TextEquiv>
+            </pc:TextLine>
+            <pc:TextLine id="region0001_line0002">
+                <pc:Coords points="37,182 243,182 243,210 37,210"/>
+                <pc:TextEquiv conf="0.949564128783014">
+                    <pc:Unicode>the river ept rising.</pc:Unicode>
+                </pc:TextEquiv>
+            </pc:TextLine>
+            <pc:TextEquiv>
+                <pc:Unicode>Rain fell over the city
+for the third day hile
+the river ept rising.</pc:Unicode>
+            </pc:TextEquiv>
+        </pc:TextRegion>
+        <pc:TextRegion id="region0002" orientation="-0.190008792396753" readingDirection="left-to-right" textLineOrder="top-to-bottom">
+            <pc:Coords points="37,244 285,244 285,334 37,334"/>
+            <pc:TextLine id="region0002_line0000">
+                <pc:Coords points="37,244 271,244 271,272 37,272"/>
+                <pc:TextEquiv conf="0.952925495767877">
+                    <pc:Unicode>Shops near the bridge</pc:Unicode>
+                </pc:TextEquiv>
+            </pc:TextLine>
+            <pc:TextLine id="region0002_line0001">
+                <pc:Coords points="37,275 285,275 285,303 37,303"/>
+                <pc:TextEquiv conf="0.871292334301249">
+                    <pc:Unicode>Closed earhy and move</pc:Unicode>
+                </pc:TextEquiv>
+            </pc:TextLine>
+            <pc:TextLine id="region0002_line0002">
+                <pc:Coords points="37,306 251,306 251,334 37,334"/>
+                <pc:TextEquiv conf="0.945439638839647">
+                    <pc:Unicode>thei goods upstairs.</pc:Unicode>
+                </pc:TextEquiv>
+            </pc:TextLine>
+            <pc:TextEquiv>
+                <pc:Unicode>Shops near the bridge
+Closed earhy and move
+thei goods upstairs.</pc:Unicode>
+            </pc:TextEquiv>
+        </pc:TextRegion>
+        <pc:TextRegion id="region0003" orientation="-0.190008792396753" readingDirection="left-to-right" textLineOrder="top-to-bottom">
+            <pc:Coords points="523,120 818,120 818,210 523,210"/>
+            <pc:TextLine id="region0003_line0000">
+                <pc:Coords points="523,120 818,120 818,148 523,148"/>
+                <pc:TextEquiv conf="0.966521942257881">
+                    <pc:Unicode>The council met on Monday</pc:Unicode>
+                </pc:TextEquiv>
+            </pc:TextLine>
+            <pc:TextLine id="region0003_line0001">
+                <pc:Coords points="523,151 747,151 747,175 523,175"/>
+                <pc:TextEquiv conf="0.914926350712776">
+                    <pc:Unicode>to discuss a e roacd</pc:Unicode>
+                </pc:TextEquiv>
+            </pc:TextLine>
+            <pc:TextLine id="region0003_line0002">
+                <pc:Coords points="523,182 766,182 766,210 523,210"/>
+                <pc:TextEquiv conf="0.970891259672741">
+                    <pc:Unicode>along the northern hill.</pc:Unicode>
+                </pc:TextEquiv>
+            </pc:TextLine>
+            <pc:TextEquiv>
+                <pc:Unicode>The council met on Monday
+to discuss a e roacd
+along the northern hill.</pc:Unicode>
+            </pc:TextEquiv>
+        </pc:TextRegion>
+        <pc:TextRegion id="region0004" orientation="-0.190008792396753" readingDirection="left-to-right" textLineOrder="top-to-bottom">
+            <pc:Coords points="523,243 768,243 768,334 523,334"/>
+            <pc:TextLine id="region0004_line0000">
+                <pc:Coords points="524,243 768,243 768,268 524,268"/>
+                <pc:TextEquiv conf="0.95842520011855">
+                    <pc:Unicode>Members voted to fund</pc:Unicode>
+                </pc:TextEquiv>
+            </pc:TextLine>
+            <pc:TextLine id="region0004_line0001">
+                <pc:Coords points="523,275 738,275 738,303 523,303"/>
+                <pc:TextEquiv conf="0.956085516291636">
+                    <pc:Unicode>the or next spring</pc:Unicode>
+                </pc:TextEquiv>
+            </pc:TextLine>
+            <pc:TextLine id="region0004_line0002">
+                <pc:Coords points="523,305 729,305 729,334 523,334"/>
+                <pc:TextEquiv conf="0.960232735946774">
+                    <pc:Unicode>after a long debate.</pc:Unicode>
+                </pc:TextEquiv>
+            </pc:TextLine>
+            <pc:TextEquiv>
+                <pc:Unicode>Members voted to fund
+the or next spring
+after a long debate.</pc:Unicode>
+            </pc:TextEquiv>
+        </pc:TextRegion>
+        <pc:TextRegion id="region0005" orientation="-0.190008792396753" readingDirection="left-to-right" textLineOrder="top-to-bottom">
+            <pc:Coords points="1009,120 1242,120 1242,210 1009,210"/>
+            <pc:TextLine id="region0005_line0000">
+                <pc:Coords points="1009,120 1195,120 1195,148 1009,148"/>
+                <pc:TextEquiv conf="0.93370837763344">
+                    <pc:Unicode>A travelling circus</pc:Unicode>
+                </pc:TextEquiv>
+            </pc:TextLine>
+            <pc:TextLine id="region0005_line0001">
+                <pc:Coords points="1009,151 1226,151 1226,175 1009,175"/>
+                <pc:TextEquiv conf="0.910763358015878">
+                    <pc:Unicode>arived at the market</pc:Unicode>
+                </pc:TextEquiv>
+            </pc:TextLine>
+            <pc:TextLine id="region0005_line0002">
+                <pc:Coords points="1009,182 1242,182 1242,210 1009,210"/>
+                <pc:TextEquiv conf="0.878759569978821">
+                    <pc:Unicode>Square vith sx horses.</pc:Unicode>
+                </pc:TextEquiv>
+            </pc:TextLine>
+            <pc:TextEquiv>
+                <pc:Unicode>A travelling circus
+arived at the market
+Square vith sx horses.</pc:Unicode>
+            </pc:TextEquiv>
+        </pc:TextRegion>
+        <pc:TextRegion id="region0006" orientation="-0.190008792396753" readingDirection="left-to-right" textLineOrder="top-to-bottom">
+            <pc:Coords points="1009,244 1265,244 1265,334 1009,334"/>
+            <pc:TextLine id="region0006_line0000">
+                <pc:Coords points="1009,244 1199,244 1199,268 1009,268"/>
+                <pc:TextEquiv conf="0.899394370039533">
+                    <pc:Unicode>Ticlets are sold at</pc:Unicode>
+                </pc:TextEquiv>
+            </pc:TextLine>
+            <pc:TextLine id="region0006_line0001">
+                <pc:Coords points="1009,274 1265,274 1265,299 1009,299"/>
+                <pc:TextEquiv conf="0.945326522358677">
+                    <pc:Unicode>the ton hall from n</pc:Unicode>
+                </pc:TextEquiv>
+            </pc:TextLine>
+            <pc:TextLine id="region0006_line0002">
+                <pc:Coords points="1009,306 1196,306 1196,334 1009,334"/>
+                <pc:TextEquiv conf="0.971559715689274">
+                    <pc:Unicode>until late evening.</pc:Unicode>
+                </pc:TextEquiv>
+            </pc:TextLine>
+            <pc:TextEquiv>
+                <pc:Unicode>Ticlets are sold at
+the ton hall from n
+until late evening.</pc:Unicode>
+            </pc:TextEquiv>
+        </pc:TextRegion>
+    </pc:Page>
+</pc:PcGts>

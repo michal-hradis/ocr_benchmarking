@@ -1,0 +1,22 @@
+# OCR-D pipeline (ocropy binarization, Tesseract segmentation, Calamari recognition) on the CPU,
+# preset gt4histocr: the Calamari ensemble for mixed historical Fraktur and Antiqua (README.md next
+# to this file; format: docs/RUNNER.md).
+name = "ocrd-calamari"
+engine_version = "1"
+image = "ocrbench/engine-ocrd-calamari:2.1.0-v1"
+model = "calamari_models@2.2/gt4histocr"  # archive SHA-256 in models.sha256
+
+[params]
+model = "gt4histocr"  # GT4HistOCR, 5-fold ensemble
+
+[env]
+OMP_THREAD_LIMIT = "1"  # Tesseract's OpenMP threads during segmentation
+
+[resources]
+cpus = 4
+memory = "8g"
+shm_size = "1g"
+
+[timeouts]
+sample = 900
+startup = 300
