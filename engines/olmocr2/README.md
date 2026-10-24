@@ -106,17 +106,18 @@ The original size and the size the model saw are recorded as `source_image` and 
 
 - Without an end token the sample is `truncated` (runner status `truncated`), with `message` naming the limit and `extra.stop_reason` set to `max_new_tokens` or `context` (`end-token` otherwise).
 - The text produced so far is kept and scored as produced, including omissions ([EVALUATION.md](../../docs/EVALUATION.md#failed-partial-and-truncated-samples)). A model that repeats a line until the limit is also reported this way.
+- **Repetition on dev-01.** Both Czech newspaper pages were `truncated`. On each, the model transcribed the start of the page and then repeated one sentence until `max_new_tokens`: 242 repeats on `3e6309d0…` and 389 on `bd497a62…`. Neither page reached its later columns. The toolkit would have retried these pages at higher temperatures, which the adapter does not do (above).
 - A page with 2,000+ lines can need more than 8,000 tokens and is then truncated. `max_new_tokens` can be raised, together with `timeouts.sample`.
 - The column order is the model's. The flexible metrics score the text independently of that order.
 
-**Memory.** These are estimates from the model's size; they have not been measured yet.
+**Memory.** Measured on an RTX 4090 (24 GB) for the dev-01 pages:
 
 - The bfloat16 weights take 16.6 GB of GPU memory. accelerate loads them directly onto the GPU, so host memory (limited to 24 GB by `[resources]`) does not hold a full copy.
 - The key/value cache takes about 56 KB per token (28 layers, 4 key/value heads of 128 dimensions), so about 0.6 GB for 2,200 image tokens and 8,000 generated ones.
 - The vision encoder (32 layers, mostly windowed attention) runs on up to about 8,500 patches.
-- A single RTX 4090 (24 GB) is the target. The peak allocated GPU memory of every sample is recorded as `gpu_peak_memory_mb`. A CUDA out-of-memory error fails only that sample (`engine-error`) and the container continues.
+- A single RTX 4090 (24 GB) is the target. The peak allocated GPU memory of every sample is recorded as `gpu_peak_memory_mb`. On the RTX 4090 it was 16.1–16.2 GB for book pages and 16.4 GB for the newspaper pages that generated 8,000 tokens. A CUDA out-of-memory error fails only that sample (`engine-error`) and the container continues.
 
-**Time.** Generation is token by token with batch size 1, for a 7-billion-parameter model. A truncated sample generates all 8,000 tokens and is the slowest. `timeouts.sample = 1200` assumes at least about 7 tokens/s, and `timeouts.startup = 600` allows for checking and loading 16.6 GB of weights. `preprocess_seconds`, `generate_seconds` and `tokens_per_second` are recorded per sample.
+**Time.** Generation is token by token with batch size 1, for a 7-billion-parameter model. A truncated sample generates all 8,000 tokens and is the slowest. On the RTX 4090, generation ran at about 42–44 tokens/s, so 8,000 tokens took about 185 s and a book page 7–22 s. Checking and loading the weights took 28 s. `timeouts.sample = 1200` and `timeouts.startup = 600` leave a margin for slower GPUs and disks. `preprocess_seconds`, `generate_seconds` and `tokens_per_second` are recorded per sample.
 
 ## Outputs
 
@@ -166,4 +167,4 @@ The engine runs with fake `torch` and `transformers` modules (`tests/fixtures/ol
 
 `make olmocr2-smoke` (after `make olmocr2-model`) builds the image and runs the real model on the GPU. It goes through `ocrbench run start`, `evaluate` (twice, without rerunning OCR) and `report` on a synthetic full page, a paragraph crop and a blank page. A second run with `max_new_tokens = 64` must mark the page `truncated` and score what was generated. A third run without `--cache` must fail explicitly.
 
-**Not yet run:** the GPU smoke test and the development-set evaluation with the real weights. GPU memory, speed and accuracy are therefore not reported here yet.
+The GPU smoke test passed on an RTX 4090. The dev-01 results are in [PR #85](https://github.com/michal-hradis/ocr_benchmarking/pull/85).
