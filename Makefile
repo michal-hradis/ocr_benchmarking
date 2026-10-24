@@ -9,7 +9,8 @@
         paddleocr-vl-smoke docker-ocrd-calamari ocrd-calamari-smoke \
         docker-surya surya-model surya-smoke docker-doctr doctr-model doctr-smoke \
         docker-glm-ocr glm-ocr-model glm-ocr-smoke docker-mineru25-pro mineru25-pro-model \
-        mineru25-pro-smoke docker-chandra-ocr2 chandra-ocr2-model chandra-ocr2-smoke
+        mineru25-pro-smoke docker-chandra-ocr2 chandra-ocr2-model chandra-ocr2-smoke \
+        docker-olmocr2 olmocr2-model olmocr2-smoke
 
 UV ?= uv
 BASE_VERSION ?= 1
@@ -32,6 +33,7 @@ DOCTR_IMAGE := ocrbench/engine-doctr:1.1.0-v1
 GLM_OCR_IMAGE := ocrbench/engine-glm-ocr:0.9B-v1
 MINERU25_PRO_IMAGE := ocrbench/engine-mineru25-pro:2605-1.2B-v1
 CHANDRA_OCR2_IMAGE := ocrbench/engine-chandra-ocr2:2-v1
+OLMOCR2_IMAGE := ocrbench/engine-olmocr2:7B-1025-v1
 # Host directory with the user-supplied PERO OCR model bundles (engines/pero/README.md).
 PERO_BUNDLES ?= dev_data/pero_ocr_models
 # Host directory mounted as /cache for engines whose weights are not in the image.
@@ -107,6 +109,9 @@ docker-lock:  ## Re-lock the hashed requirements of the CUDA bases and the GPU e
 	$(LOCK) engines/chandra-ocr2/requirements.in -c docker/base-cu130-torch/requirements.txt \
 		--index-url https://pypi.org/simple --extra-index-url https://download.pytorch.org/whl/cu130 \
 		--index-strategy unsafe-best-match -o engines/chandra-ocr2/requirements.txt
+	$(LOCK) engines/olmocr2/requirements.in -c docker/base-cu130-torch/requirements.txt \
+		--index-url https://pypi.org/simple --extra-index-url https://download.pytorch.org/whl/cu130 \
+		--index-strategy unsafe-best-match -o engines/olmocr2/requirements.txt
 	$(LOCK) engines/infinityparser2/requirements.in -c docker/base-cu130-torch/requirements.txt \
 		--index-url https://pypi.org/simple --extra-index-url https://download.pytorch.org/whl/cu130 \
 		--index-strategy unsafe-best-match -o engines/infinityparser2/requirements.txt
@@ -231,6 +236,16 @@ chandra-ocr2-model:  ## Download the pinned Chandra OCR 2 weights (10.6 GB, modi
 
 chandra-ocr2-smoke:  ## Build the Chandra OCR 2 image and run, evaluate and report a synthetic dataset on the GPU (opt-in; needs chandra-ocr2-model)
 	$(UV) run --locked pytest -m gpu --run-docker --run-gpu tests/test_chandra_ocr2.py
+
+docker-olmocr2:  ## Build the olmOCR-2 engine image (needs the torch base) and print its image ID
+	docker build -t $(OLMOCR2_IMAGE) engines/olmocr2
+	@docker image inspect --format '$(OLMOCR2_IMAGE) {{.Id}}' $(OLMOCR2_IMAGE)
+
+olmocr2-model:  ## Download the pinned olmOCR-2 weights (16.6 GB) into $(OCRBENCH_CACHE) (opt-in)
+	python3 engines/olmocr2/fetch_model.py $(OCRBENCH_CACHE)
+
+olmocr2-smoke:  ## Build the olmOCR-2 image and run, evaluate and report a synthetic dataset on the GPU (opt-in; needs olmocr2-model)
+	$(UV) run --locked pytest -m gpu --run-docker --run-gpu tests/test_olmocr2.py
 
 docker-infinityparser2:  ## Build the Infinity-Parser2-Flash engine image (needs the torch base) and print its image ID
 	docker build -t $(INFINITYPARSER2_IMAGE) engines/infinityparser2

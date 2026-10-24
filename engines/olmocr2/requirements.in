@@ -1,0 +1,8 @@
+# transformers 5.19.0 has Qwen2_5_VLForConditionalGeneration (olmOCR-2's architecture); torchvision
+# and Pillow are its "vision" extra (the fast Qwen2-VL image processor). accelerate lets
+# transformers load the 16.6 GB of weights directly onto the GPU (device_map). PyYAML (a
+# transformers dependency) parses the model's front matter.
+transformers==5.19.0
+torchvision==0.29.1+cu130
+pillow
+accelerate==1.15.0

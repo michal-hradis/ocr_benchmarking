@@ -1,0 +1,20 @@
+# olmOCR-2 page-image to Markdown model (README.md next to this file; format: docs/RUNNER.md).
+# Run with --cache <dir> holding the weights from make olmocr2-model.
+name = "olmocr2"
+engine_version = "1"
+image = "ocrbench/engine-olmocr2:7B-1025-v1"
+model = "allenai/olmOCR-2-7B-1025@e52d6f090b7a9007afffbbd6ce510876222fea93"
+
+[params]
+device = "cuda:0"
+max_new_tokens = 8000  # other parameters: README.md
+
+[resources]
+cpus = 4
+memory = "24g"
+gpus = "all"
+shm_size = "2g"
+
+[timeouts]
+sample = 1200
+startup = 600
