@@ -10,7 +10,8 @@
         docker-surya surya-model surya-smoke docker-doctr doctr-model doctr-smoke \
         docker-glm-ocr glm-ocr-model glm-ocr-smoke docker-mineru25-pro mineru25-pro-model \
         mineru25-pro-smoke docker-chandra-ocr2 chandra-ocr2-model chandra-ocr2-smoke \
-        docker-olmocr2 olmocr2-model olmocr2-smoke
+        docker-olmocr2 olmocr2-model olmocr2-smoke docker-deepseek-ocr2 deepseek-ocr2-model \
+        deepseek-ocr2-smoke
 
 UV ?= uv
 BASE_VERSION ?= 1
@@ -34,6 +35,7 @@ GLM_OCR_IMAGE := ocrbench/engine-glm-ocr:0.9B-v1
 MINERU25_PRO_IMAGE := ocrbench/engine-mineru25-pro:2605-1.2B-v1
 CHANDRA_OCR2_IMAGE := ocrbench/engine-chandra-ocr2:2-v1
 OLMOCR2_IMAGE := ocrbench/engine-olmocr2:7B-1025-v1
+DEEPSEEK_OCR2_IMAGE := ocrbench/engine-deepseek-ocr2:2-v1
 # Host directory with the user-supplied PERO OCR model bundles (engines/pero/README.md).
 PERO_BUNDLES ?= dev_data/pero_ocr_models
 # Host directory mounted as /cache for engines whose weights are not in the image.
@@ -112,6 +114,9 @@ docker-lock:  ## Re-lock the hashed requirements of the CUDA bases and the GPU e
 	$(LOCK) engines/olmocr2/requirements.in -c docker/base-cu130-torch/requirements.txt \
 		--index-url https://pypi.org/simple --extra-index-url https://download.pytorch.org/whl/cu130 \
 		--index-strategy unsafe-best-match -o engines/olmocr2/requirements.txt
+	$(LOCK) engines/deepseek-ocr2/requirements.in -c docker/base-cu130-torch/requirements.txt \
+		--index-url https://pypi.org/simple --extra-index-url https://download.pytorch.org/whl/cu130 \
+		--index-strategy unsafe-best-match -o engines/deepseek-ocr2/requirements.txt
 	$(LOCK) engines/infinityparser2/requirements.in -c docker/base-cu130-torch/requirements.txt \
 		--index-url https://pypi.org/simple --extra-index-url https://download.pytorch.org/whl/cu130 \
 		--index-strategy unsafe-best-match -o engines/infinityparser2/requirements.txt
@@ -246,6 +251,16 @@ olmocr2-model:  ## Download the pinned olmOCR-2 weights (16.6 GB) into $(OCRBENC
 
 olmocr2-smoke:  ## Build the olmOCR-2 image and run, evaluate and report a synthetic dataset on the GPU (opt-in; needs olmocr2-model)
 	$(UV) run --locked pytest -m gpu --run-docker --run-gpu tests/test_olmocr2.py
+
+docker-deepseek-ocr2:  ## Build the DeepSeek-OCR-2 engine image (needs the torch base) and print its image ID
+	docker build -t $(DEEPSEEK_OCR2_IMAGE) engines/deepseek-ocr2
+	@docker image inspect --format '$(DEEPSEEK_OCR2_IMAGE) {{.Id}}' $(DEEPSEEK_OCR2_IMAGE)
+
+deepseek-ocr2-model:  ## Download the pinned DeepSeek-OCR-2 weights and code (6.8 GB) into $(OCRBENCH_CACHE) (opt-in)
+	python3 engines/deepseek-ocr2/fetch_model.py $(OCRBENCH_CACHE)
+
+deepseek-ocr2-smoke:  ## Build the DeepSeek-OCR-2 image and run, evaluate and report a synthetic dataset on the GPU (opt-in; needs deepseek-ocr2-model)
+	$(UV) run --locked pytest -m gpu --run-docker --run-gpu tests/test_deepseek_ocr2.py
 
 docker-infinityparser2:  ## Build the Infinity-Parser2-Flash engine image (needs the torch base) and print its image ID
 	docker build -t $(INFINITYPARSER2_IMAGE) engines/infinityparser2

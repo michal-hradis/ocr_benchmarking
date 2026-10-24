@@ -1,0 +1,13 @@
+# The model's remote code (modeling_deepseekocr2.py, modeling_deepseekv2.py, deepencoderv2.py in
+# the checkpoint) is written for transformers 4.46.3 and tokenizers 0.20.3, the versions of the
+# model card and the official requirements.txt: it overrides internals (Qwen2Model's
+# _update_causal_mask, DynamicCache.seen_tokens) that later releases changed. torchvision (its
+# image transforms), einops, addict and easydict are imports of that code; Pillow and numpy too.
+transformers==4.46.3
+tokenizers==0.20.3
+torchvision==0.29.1+cu130
+pillow
+numpy
+einops==0.8.2
+addict==2.4.0
+easydict==1.13

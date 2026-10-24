@@ -1,0 +1,20 @@
+# DeepSeek-OCR-2 page-image to Markdown model (README.md next to this file; format: docs/RUNNER.md).
+# Run with --cache <dir> holding the weights from make deepseek-ocr2-model.
+name = "deepseek-ocr2"
+engine_version = "1"
+image = "ocrbench/engine-deepseek-ocr2:2-v1"
+model = "deepseek-ai/DeepSeek-OCR-2@aaa02f3811945a91062062994c5c4a3f4c0af2b0"
+
+[params]
+device = "cuda:0"
+max_new_tokens = 8192  # other parameters: README.md
+
+[resources]
+cpus = 4
+memory = "24g"
+gpus = "all"
+shm_size = "2g"
+
+[timeouts]
+sample = 1200
+startup = 600
