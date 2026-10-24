@@ -1,0 +1,20 @@
+# Chandra OCR 2 page-image OCR model (README.md next to this file; format: docs/RUNNER.md). Run
+# with --cache <dir> holding the weights from make chandra-ocr2-model.
+name = "chandra-ocr2"
+engine_version = "1"
+image = "ocrbench/engine-chandra-ocr2:2-v1"
+model = "datalab-to/chandra-ocr-2@af93b47dba1b47b6640c86ccf487ed2260ab9a09"
+
+[params]
+device = "cuda:0"
+max_new_tokens = 12384  # other parameters: README.md
+
+[resources]
+cpus = 4
+memory = "24g"
+gpus = "all"
+shm_size = "2g"
+
+[timeouts]
+sample = 1800
+startup = 600
