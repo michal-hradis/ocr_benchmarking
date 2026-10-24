@@ -92,6 +92,7 @@ make check   # ruff lint + format check, then offline unit tests
 | `make docker-fireredocr`, `make fireredocr-model`, `make fireredocr-smoke` | The same for FireRed-OCR (4.3 GB of weights), see [engines/fireredocr](engines/fireredocr/README.md) |
 | `make docker-ovisocr2`, `make ovisocr2-model`, `make ovisocr2-smoke` | The same for OvisOCR2 (1.7 GB of weights), see [engines/ovisocr2](engines/ovisocr2/README.md) |
 | `make docker-glm-ocr`, `make glm-ocr-model`, `make glm-ocr-smoke` | The same for GLM-OCR (2.7 GB of weights), see [engines/glm-ocr](engines/glm-ocr/README.md) |
+| `make docker-mineru25-pro`, `make mineru25-pro-model`, `make mineru25-pro-smoke` | The same for MinerU2.5-Pro (2.3 GB of weights), see [engines/mineru25-pro](engines/mineru25-pro/README.md) |
 | `make docker-infinityparser2`, `make infinityparser2-model`, `make infinityparser2-smoke` | The same for Infinity-Parser2-Flash (4.4 GB of weights), see [engines/infinityparser2](engines/infinityparser2/README.md) |
 | `make docker-pero`, `make pero-bundles`, `make pero-smoke` | Build the PERO OCR engine image / copy the user-supplied PERO model bundles from `PERO_BUNDLES` (default `dev_data/pero_ocr_models`) into `OCRBENCH_CACHE`, checked against `bundles.sha256` / opt-in, GPU: run it through `run`, `evaluate` and `report` on synthetic samples, see [engines/pero](engines/pero/README.md) |
 | `make docker-smoke`, `make gpu-preflight`, `make gpu-smoke` | Opt-in Docker and GPU checks (including the fake-engine runner tests), see [docs/DOCKER.md](docs/DOCKER.md) |

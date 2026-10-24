@@ -1,0 +1,37 @@
+[
+ {
+  "type": "title",
+  "bbox": [
+   0.045,
+   0.082,
+   0.32,
+   0.152
+  ],
+  "angle": 0,
+  "content": "The Daily Chronicle"
+ },
+ {
+  "type": "text",
+  "bbox": [
+   0.043,
+   0.268,
+   0.495,
+   0.436
+  ],
+  "angle": 0,
+  "content": "The quick brown fox jumps over the lazy dog near the river.",
+  "merge_prev": false
+ },
+ {
+  "type": "text",
+  "bbox": [
+   0.043,
+   0.557,
+   0.532,
+   0.717
+  ],
+  "angle": 0,
+  "content": "A second paragraph and more text with numbers 1923 and 2026.",
+  "merge_prev": false
+ }
+]

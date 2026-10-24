@@ -1,0 +1,37 @@
+[
+ {
+  "type": "title",
+  "bbox": [
+   0.037,
+   0.095,
+   0.397,
+   0.215
+  ],
+  "angle": 0,
+  "content": "Two Columns"
+ },
+ {
+  "type": "text",
+  "bbox": [
+   0.034,
+   0.344,
+   0.317,
+   0.602
+  ],
+  "angle": 0,
+  "content": "The left column starts with this first line and ends here at last.",
+  "merge_prev": false
+ },
+ {
+  "type": "text",
+  "bbox": [
+   0.516,
+   0.344,
+   0.817,
+   0.602
+  ],
+  "angle": 0,
+  "content": "The right column holds another short story about the harbour.",
+  "merge_prev": false
+ }
+]

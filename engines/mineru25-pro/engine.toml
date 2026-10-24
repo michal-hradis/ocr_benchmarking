@@ -1,0 +1,20 @@
+# MinerU2.5-Pro-2605-1.2B coarse-to-fine page parsing on the GPU: layout detection on the whole
+# page, then every block read from a crop of the original image (README.md next to this file;
+# format: docs/RUNNER.md). Run with --cache <dir> holding the weights from make mineru25-pro-model.
+name = "mineru25-pro"
+engine_version = "1"
+image = "ocrbench/engine-mineru25-pro:2605-1.2B-v1"
+model = "opendatalab/MinerU2.5-Pro-2605-1.2B@08aaea840498d49ce16247b6263196cf02814885"
+
+[params]
+device = "cuda:0"  # max_new_tokens: README.md
+
+[resources]
+cpus = 4
+memory = "16g"
+gpus = "all"
+shm_size = "2g"
+
+[timeouts]
+sample = 900
+startup = 300

@@ -1,0 +1,85 @@
+[
+ {
+  "type": "title",
+  "bbox": [
+   0.025,
+   0.062,
+   0.245,
+   0.134
+  ],
+  "angle": 0,
+  "content": "Evening Gazette"
+ },
+ {
+  "type": "text",
+  "bbox": [
+   0.023,
+   0.194,
+   0.177,
+   0.336
+  ],
+  "angle": 0,
+  "content": "Rain fell over the city for the third day while the river kept rising.",
+  "merge_prev": false
+ },
+ {
+  "type": "text",
+  "bbox": [
+   0.023,
+   0.394,
+   0.19,
+   0.536
+  ],
+  "angle": 0,
+  "content": "Shops near the bridge\nclosed early and moved\ntheir goods upstairs.",
+  "merge_prev": false
+ },
+ {
+  "type": "text",
+  "bbox": [
+   0.347,
+   0.194,
+   0.545,
+   0.336
+  ],
+  "angle": 0,
+  "content": "The council met on Monday to discuss a new road along the northern hill.",
+  "merge_prev": false
+ },
+ {
+  "type": "text",
+  "bbox": [
+   0.347,
+   0.394,
+   0.513,
+   0.536
+  ],
+  "angle": 0,
+  "content": "Members voted to fund the work next spring after a long debate.",
+  "merge_prev": false
+ },
+ {
+  "type": "text",
+  "bbox": [
+   0.671,
+   0.194,
+   0.828,
+   0.336
+  ],
+  "angle": 0,
+  "content": "A travelling circus\narrived at the market\nsquare with six horses.",
+  "merge_prev": false
+ },
+ {
+  "type": "text",
+  "bbox": [
+   0.671,
+   0.394,
+   0.843,
+   0.536
+  ],
+  "angle": 0,
+  "content": "Tickets are sold at the town hall from noon until late evening.",
+  "merge_prev": false
+ }
+]

@@ -8,7 +8,8 @@
         docker-ppstructurev3 ppstructurev3-smoke docker-paddleocr-vl paddleocr-vl-model \
         paddleocr-vl-smoke docker-ocrd-calamari ocrd-calamari-smoke \
         docker-surya surya-model surya-smoke docker-doctr doctr-model doctr-smoke \
-        docker-glm-ocr glm-ocr-model glm-ocr-smoke
+        docker-glm-ocr glm-ocr-model glm-ocr-smoke docker-mineru25-pro mineru25-pro-model \
+        mineru25-pro-smoke
 
 UV ?= uv
 BASE_VERSION ?= 1
@@ -29,6 +30,7 @@ OCRD_CALAMARI_IMAGE := ocrbench/engine-ocrd-calamari:2.1.0-v1
 SURYA_IMAGE := ocrbench/engine-surya:0.17.1-v1
 DOCTR_IMAGE := ocrbench/engine-doctr:1.1.0-v1
 GLM_OCR_IMAGE := ocrbench/engine-glm-ocr:0.9B-v1
+MINERU25_PRO_IMAGE := ocrbench/engine-mineru25-pro:2605-1.2B-v1
 # Host directory with the user-supplied PERO OCR model bundles (engines/pero/README.md).
 PERO_BUNDLES ?= dev_data/pero_ocr_models
 # Host directory mounted as /cache for engines whose weights are not in the image.
@@ -98,6 +100,9 @@ docker-lock:  ## Re-lock the hashed requirements of the CUDA bases and the GPU e
 	$(LOCK) engines/glm-ocr/requirements.in -c docker/base-cu130-torch/requirements.txt \
 		--index-url https://pypi.org/simple --extra-index-url https://download.pytorch.org/whl/cu130 \
 		--index-strategy unsafe-best-match -o engines/glm-ocr/requirements.txt
+	$(LOCK) engines/mineru25-pro/requirements.in -c docker/base-cu130-torch/requirements.txt \
+		--index-url https://pypi.org/simple --extra-index-url https://download.pytorch.org/whl/cu130 \
+		--index-strategy unsafe-best-match -o engines/mineru25-pro/requirements.txt
 	$(LOCK) engines/infinityparser2/requirements.in -c docker/base-cu130-torch/requirements.txt \
 		--index-url https://pypi.org/simple --extra-index-url https://download.pytorch.org/whl/cu130 \
 		--index-strategy unsafe-best-match -o engines/infinityparser2/requirements.txt
@@ -202,6 +207,16 @@ glm-ocr-model:  ## Download the pinned GLM-OCR weights (2.7 GB) into $(OCRBENCH_
 
 glm-ocr-smoke:  ## Build the GLM-OCR image and run, evaluate and report a synthetic dataset on the GPU (opt-in; needs glm-ocr-model)
 	$(UV) run --locked pytest -m gpu --run-docker --run-gpu tests/test_glm_ocr.py
+
+docker-mineru25-pro:  ## Build the MinerU2.5-Pro engine image (needs the torch base) and print its image ID
+	docker build -t $(MINERU25_PRO_IMAGE) engines/mineru25-pro
+	@docker image inspect --format '$(MINERU25_PRO_IMAGE) {{.Id}}' $(MINERU25_PRO_IMAGE)
+
+mineru25-pro-model:  ## Download the pinned MinerU2.5-Pro weights (2.3 GB) into $(OCRBENCH_CACHE) (opt-in)
+	python3 engines/mineru25-pro/fetch_model.py $(OCRBENCH_CACHE)
+
+mineru25-pro-smoke:  ## Build the MinerU2.5-Pro image and run, evaluate and report a synthetic dataset on the GPU (opt-in; needs mineru25-pro-model)
+	$(UV) run --locked pytest -m gpu --run-docker --run-gpu tests/test_mineru25_pro.py
 
 docker-infinityparser2:  ## Build the Infinity-Parser2-Flash engine image (needs the torch base) and print its image ID
 	docker build -t $(INFINITYPARSER2_IMAGE) engines/infinityparser2
