@@ -1,0 +1,6 @@
+# mineru-vl-utils 2.0.7 is MinerU's official client for the MinerU2.5(-Pro) VLM: the two-step
+# (layout, then per-block) extraction and its post-processing. Its "transformers" extra runs the
+# model with transformers (>= 5.10.1), accelerate and the torchvision image processor.
+mineru-vl-utils[transformers]==2.0.7
+transformers==5.19.0
+torchvision==0.29.1+cu130
