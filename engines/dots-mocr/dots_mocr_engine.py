@@ -25,6 +25,9 @@ from importlib import metadata
 from pathlib import Path
 from typing import Any
 
+from markdown_it import MarkdownIt
+from mdit_py_plugins.dollarmath import dollarmath_plugin
+
 REPOSITORY = "dots-studio/dots.mocr"
 REVISION = "e539fbb52280393adc081b289ec597430a0f9031"
 # The weights are not in the image: they are read from the runner's /cache mount (README.md).
@@ -363,18 +366,39 @@ def formula_text(content: str) -> str:
 
 HEADING = re.compile(r"#{1,6}[ \t]+")
 BULLET = re.compile(r"[-*+•][ \t]+")
-BOLD = re.compile(r"\*\*(.+?)\*\*", re.DOTALL)
+# The host Markdown converter's parser (src/ocrbench/convert.py, same pinned versions).
+MARKDOWN = MarkdownIt("commonmark").enable(["table", "strikethrough"])
+MARKDOWN.use(dollarmath_plugin, allow_space=True, double_inline=True)
+BREAK = re.compile(r"<br\s*/?>", re.IGNORECASE)
+INLINE_TEXT = ("text", "code_inline", "math_inline", "math_inline_double")
+
+
+def inline_text(content: str) -> str:
+    """Text of inline Markdown by the host converter's inline rules (docs/PREDICTIONS.md):
+    emphasis, links, strikethrough and code keep only their text, inline math its TeX source,
+    escapes and entities are decoded, images and HTML tags add nothing except ``<br>``, a line
+    break; spaces are collapsed and blank lines dropped."""
+    parts = []
+    for child in MARKDOWN.parseInline(content)[0].children or []:
+        if child.type in INLINE_TEXT:
+            parts.append(child.content)
+        elif child.type in ("softbreak", "hardbreak") or (
+            child.type == "html_inline" and BREAK.fullmatch(child.content)
+        ):
+            parts.append("\n")
+    lines = (re.sub(r"[ \t\r\f]+", " ", line).strip() for line in "".join(parts).split("\n"))
+    return "\n".join(line for line in lines if line)
 
 
 def markdown_text(category: str, content: str) -> str:
-    """Plain text of a Markdown element: the heading marks of a Title or Section-header, the
-    bullet of a List-item and ``**`` bold marks are removed; everything else is kept."""
-    text = BOLD.sub(r"\1", content.strip())
+    """Plain text of a Markdown element: the heading marks of a Title or Section-header and the
+    bullet of a List-item are removed, then inline Markdown is converted (``inline_text``)."""
+    text = content.strip()
     if category in ("Title", "Section-header"):
         text = HEADING.sub("", text, count=1) if HEADING.match(text) else text
     elif category == "List-item":
         text = BULLET.sub("", text, count=1) if BULLET.match(text) else text
-    return text.strip()
+    return inline_text(text)
 
 
 def element_text(category: str, content: str) -> str:
