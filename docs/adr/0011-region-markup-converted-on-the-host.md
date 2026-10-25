@@ -1,6 +1,6 @@
 # 0011: Region markup converted on the host
 
-- Status: proposed
+- Status: accepted
 - Date: 2026-10-25
 - Related issue: [#67](https://github.com/michal-hradis/ocr_benchmarking/issues/67)
 
@@ -10,6 +10,7 @@ Layout models such as Surya 2 and Chandra OCR 2 return positioned blocks whose t
 
 ## Decision
 
+- Text conversion happens only on the host, in shared code (`ocrbench.convert`). Engines never convert markup in their containers, and no engine has its own conversion code.
 - A prediction region may carry `markup` (`{"format": "markdown" | "html", "content": "…"}`) instead of `text` and `lines`.
 - When the host validates a prediction (the runner, `ocrbench prediction validate`), it converts every region's markup with `ocrbench.convert.fragment_text`. That function applies the rules of `convert_native` to one fragment and joins its blocks by line breaks. The standardized prediction holds the plain text and records `conversion` with the converter version.
 - The engine keeps its native output and writes the markup unchanged; an empty page text is rebuilt from the converted regions.
@@ -23,6 +24,6 @@ Layout models such as Surya 2 and Chandra OCR 2 return positioned blocks whose t
 
 ## Consequences and verification
 
-- Engines with positioned markup need no conversion code. Surya 2 ([#67](https://github.com/michal-hradis/ocr_benchmarking/issues/67)) is the first; Chandra OCR 2 and dots.mocr could follow in separate changes.
+- Engines with positioned markup need no conversion code. Surya 2 ([#67](https://github.com/michal-hradis/ocr_benchmarking/issues/67)) is the first. dots.mocr (region Markdown) and Surya (inline tags in line text) still convert in their adapters and must move to region `markup` in separate changes; Chandra OCR 2 already converts on the host and can keep its boxes the same way.
 - A converter rule change re-converts stored predictions when they are validated again; `conversion.version` identifies the rules used.
 - `tests/test_convert.py` checks `fragment_text` against the document rules, and `tests/test_prediction.py` checks the conversion, the kept positions and reading order, the rebuilt page text and the conflicts.
