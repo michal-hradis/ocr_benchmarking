@@ -1,3 +1,9 @@
+from surya.inference.prompts import SKIP_OCR_LABELS
+from surya.layout.label import LAYOUT_PRED_RELABEL
+
+SKIP_CANON_LABELS = {LAYOUT_PRED_RELABEL.get(label, label) for label in SKIP_OCR_LABELS}
+
+
 def _crop_block(image, polygon, pad=4):
     xs, ys = [p[0] for p in polygon], [p[1] for p in polygon]
     x0, y0 = max(0, int(min(xs)) - pad), max(0, int(min(ys)) - pad)

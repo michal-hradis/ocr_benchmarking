@@ -292,15 +292,15 @@ def blocks_to_prediction(
     what Surya's post-processing changed.
 
     As in Surya's full-page OCR (recognition._full_page_ocr): boxes are normalized to 0-1000 of
-    the image size, the blocks of labels without text (Image, Figure, Diagram, Blank-Page) keep
-    no HTML, and a text-like block over an essentially blank part of the page is dropped. Every
+    the image size, the blocks whose canonical label has no text (Surya's SKIP_CANON_LABELS:
+    Image, Figure, Complex-Block, Diagram, Blank-Page) keep no HTML, and a text-like block over an
+    essentially blank part of the page is dropped. Every
     remaining block becomes a region in output order, the reading order, with its box in
     input-image pixels and its HTML as region markup, which the host converts to text.
     """
     from surya.common.blank import is_blank_region
-    from surya.inference.prompts import SKIP_OCR_LABELS
     from surya.layout.label import LAYOUT_PRED_RELABEL, TEXT_LABELS
-    from surya.recognition import _crop_block
+    from surya.recognition import SKIP_CANON_LABELS, _crop_block
     from surya.settings import settings
 
     width, height = image.size
@@ -315,7 +315,12 @@ def blocks_to_prediction(
             [x0 * width, y1 * height],
         ]
         canonical = LAYOUT_PRED_RELABEL.get(block.label, block.label)
-        if canonical in TEXT_LABELS and is_blank_region(_crop_block(image, polygon)):
+        skipped = canonical in SKIP_CANON_LABELS
+        if (
+            not skipped
+            and canonical in TEXT_LABELS
+            and is_blank_region(_crop_block(image, polygon))
+        ):
             counts["blank_blocks"] += 1
             continue
         region: dict[str, Any] = {
@@ -324,7 +329,7 @@ def blocks_to_prediction(
             "native_type": block.label,
             "polygon": polygon,
         }
-        if block.label in SKIP_OCR_LABELS:
+        if skipped:
             counts["skipped_blocks"] += 1
         elif block.html.strip():
             region["markup"] = {"format": "html", "content": block.html}
@@ -344,6 +349,7 @@ def blocks_to_prediction(
 
 def process(client: Any, params: dict, sample: dict, source: Path, out: Path) -> dict[str, Any]:
     """OCR one sample, write its outputs and return ``result.json`` content."""
+    from surya.common.blank import is_blank_region
     from surya.recognition import _detect_repeat_loop
 
     image = read_image(source / sample["image"])
@@ -369,6 +375,10 @@ def process(client: Any, params: dict, sample: dict, source: Path, out: Path) ->
             "message": f"generation stopped: {reason} ({generation['generated_tokens']} of "
             f"{params['max_tokens']} tokens); {len(blocks)} blocks are used",
         }
+    elif not text.strip() and not is_blank_region(image):
+        # Surya accepts an empty output only for a blank page and otherwise falls back to block
+        # mode, which this adapter does not do (README.md).
+        raise AdapterError("the output is empty but the page is not blank (output.html)")
     elif text.strip() and not blocks:
         raise AdapterError("the output has no layout blocks (output.html)")
     else:

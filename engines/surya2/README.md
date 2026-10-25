@@ -55,7 +55,7 @@ There is one configuration (`engine.toml`, `name = "surya2"`): Surya's default O
    > OCR this image to HTML. Each block is a div with data-label and data-bbox (x0 y0 x1 y1, normalized 0-1000).
 
    The request uses Surya's client defaults: temperature 0 (greedy) and top-p 0.1, and `max_tokens` 12,288 (`SURYA_MAX_TOKENS_FULL_PAGE`). vLLM's image processor rescales the PNG again to whole 32-pixel units for the model's patches. The sample `language` is not used.
-3. **Parsing.** Surya's `parse_full_page_html` reads the top-level `<div data-label data-bbox>` blocks and their inner HTML; a div without a label or a four-number box is left out. Then, as in Surya's `_full_page_ocr`: blocks with labels that carry no text (`Image`, `Figure`, `Diagram`, `Blank-Page`) keep no HTML, and a text-like block whose crop of the page is essentially blank (`is_blank_region`) is dropped as a hallucination.
+3. **Parsing.** Surya's `parse_full_page_html` reads the top-level `<div data-label data-bbox>` blocks and their inner HTML; a div without a label or a four-number box is left out. Then, as in Surya's `_full_page_ocr`: blocks whose canonical label carries no text (Surya's `SKIP_CANON_LABELS`: `Image`, `Figure`, `Complex-Block`, which Surya relabels `Figure`, `Diagram` and `Blank-Page`) keep their box but no HTML, and a text-like block whose crop of the page is essentially blank (`is_blank_region`) is dropped as a hallucination.
 
 **Greedy only.** Surya can make other requests that are not used here:
 
@@ -86,7 +86,7 @@ The adapter writes the native output unchanged (`output.html`) and a positioned 
 ## Truncation, failures, memory and time
 
 - Generation stops at the end token, at `max_tokens` or at the end of the 18,000-token context. vLLM caps the request at the context left after the prompt: a large page has about 6,200 prompt tokens, so it can generate only about 11,800 tokens, below `max_tokens`. Without an end token the sample is `truncated` (`extra.stop_reason` `length`). The complete blocks and the unclosed last block are scored as produced ([EVALUATION.md](../../docs/EVALUATION.md#failed-partial-and-truncated-samples)).
-- An output with text but no layout blocks fails the sample (`engine-error`, `the output has no layout blocks`); `output.html` keeps it. An empty output is a genuine empty result.
+- An output with text but no layout blocks fails the sample (`engine-error`, `the output has no layout blocks`); `output.html` keeps it. An empty output is a genuine empty result only when the page is blank (`is_blank_region` on the whole image, as in Surya). On any other page it fails the sample (`the output is empty but the page is not blank`), because Surya would fall back to block mode there, which this adapter does not do.
 - A failed request (for example an out-of-memory error in the server) fails only that sample. If the server exits, that sample and every later one fail with its log tail.
 - Every sample fails when the GPU is unusable, the parameters are invalid, the model directory is missing or does not match `models.sha256`, or the server does not start (the message has the end of its log).
 
@@ -119,9 +119,9 @@ Measured in run `dev01-surya2-0.22.1-v1`; the scores are in the pull request for
 `tests/test_surya2.py` runs offline in `make test`:
 
 - parameter validation, the server command against Surya's settings, and the pinned model;
-- the conversion of blocks to positioned regions with markup, including blank and figure blocks, and its host-side conversion against the expected plain text;
+- the conversion of blocks to positioned regions with markup, including blank and figure blocks and a `Complex-Block` skipped by its canonical label, and its host-side conversion against the expected plain text;
 - the model checksums and the download script;
-- the engine protocol through the runner, with a fake `vllm` executable that serves fixed outputs over the loopback interface and checks every request, and fake `surya`, `openai` and `torch` modules (`tests/fixtures/surya2/fake`). The outputs are hand-written layout blocks (`tests/fixtures/surya2/output.html`, not real model output), an empty output, text without blocks, a newspaper page cut off at `max_tokens` in a repetition loop, a failed request and a server that exits. That run is then evaluated and reported, including the truncated page against a 2,000-line reference;
+- the engine protocol through the runner, with a fake `vllm` executable that serves fixed outputs over the loopback interface and checks every request, and fake `surya`, `openai` and `torch` modules (`tests/fixtures/surya2/fake`). The outputs are hand-written layout blocks (`tests/fixtures/surya2/output.html`, not real model output), an empty output on a blank page (success) and on a non-blank page (failure), text without blocks, a newspaper page cut off at `max_tokens` in a repetition loop, a failed request and a server that exits. That run is then evaluated and reported, including the truncated page against a 2,000-line reference;
 - start-up failures: invalid parameters, no GPU, missing or changed model files and a server that exits during start-up.
 
 The fake `surya` modules are small stand-ins written for the test. `make surya2-smoke` (after `make surya2-model`) builds the image and runs the real Surya and vLLM on the GPU through `ocrbench run start`, `evaluate` and `report` on a synthetic full page, a paragraph crop and a blank page. It checks that every region has a polygon and that the markup was converted on the host.
