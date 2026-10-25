@@ -64,9 +64,20 @@
         "native_type": { "$ref": "#/$defs/label" },
         "polygon": { "$ref": "#/$defs/polygon" },
         "text": { "type": "string" },
+        "markup": { "$ref": "#/$defs/markup" },
         "lines": { "type": "array", "items": { "$ref": "#/$defs/line" } },
         "confidence": { "type": "number" },
         "extra": { "$ref": "#/$defs/extra" }
+      }
+    },
+    "markup": {
+      "description": "The region's native Markdown or HTML, converted to its text on the host; used instead of text and lines.",
+      "type": "object",
+      "required": ["format", "content"],
+      "additionalProperties": false,
+      "properties": {
+        "format": { "enum": ["markdown", "html"] },
+        "content": { "type": "string" }
       }
     },
     "line": {

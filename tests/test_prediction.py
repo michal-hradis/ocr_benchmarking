@@ -214,3 +214,64 @@ def test_unusable_files_are_errors(tmp_path, content, code):
     assert prediction is None
     assert codes(issues) == [code]
     assert issues[0].sample_id == "s1"
+
+
+def marked_up(*markups):
+    return minimal(
+        image={"width": 100, "height": 100},
+        regions=[
+            {"id": f"b{i}", "type": "text", "polygon": box(0, 10 * i, 50, 10 * i + 9), "markup": m}
+            for i, m in enumerate(markups)
+        ],
+        reading_order=[f"b{i}" for i in reversed(range(len(markups)))],
+    )
+
+
+def test_region_markup_is_converted_on_the_host_and_keeps_positions():
+    data = marked_up(
+        {"format": "html", "content": "<p>erste <b>Zeile</b></p><p>zweite</p>"},
+        {"format": "html", "content": "<h1>Kopf</h1>"},
+    )
+    native = copy.deepcopy(data)
+    prediction, issues = validate_prediction(data, sample_id="s1", image_size=(100, 100))
+    assert codes(issues) == []  # the empty page text is rebuilt without a warning
+    assert data == native
+    assert [(r.id, r.text) for r in prediction.regions] == [
+        ("b1", "Kopf"),
+        ("b0", "erste Zeile\nzweite"),
+    ]
+    assert prediction.regions[1].polygon == ((0, 0), (50, 0), (50, 9), (0, 9))
+    assert prediction.text == "Kopf\n\nerste Zeile\nzweite"
+    assert prediction.conversion == {"from": "html", "version": 1}
+    standardized = prediction_to_json(prediction)
+    assert "markup" not in standardized["regions"][0]
+    assert validate_prediction(standardized)[0] == prediction
+
+
+def test_page_text_given_with_region_markup_is_still_checked():
+    data = marked_up({"format": "markdown", "content": "*a*"}) | {"text": "b"}
+    prediction, issues = validate_prediction(data)
+    assert codes(issues) == ["text-mismatch"]
+    assert prediction.text == "a"
+
+
+@pytest.mark.parametrize(
+    "change",
+    [
+        lambda d: d["regions"][0].update(text="x"),
+        lambda d: d["regions"][0].update(lines=[{"text": "x"}]),
+        lambda d: d["regions"][1]["markup"].update(format="markdown"),
+        lambda d: d.update(conversion={"from": "html", "version": 1}),
+    ],
+)
+def test_conflicting_region_markup_is_an_error(change):
+    data = marked_up({"format": "html", "content": "a"}, {"format": "html", "content": "b"})
+    change(data)
+    prediction, issues = validate_prediction(data)
+    assert prediction is None
+    assert codes(issues, Severity.ERROR) == ["markup-conflict"]
+
+
+def test_region_markup_format_is_checked_by_the_schema():
+    data = marked_up({"format": "latex", "content": "x"})
+    assert codes(validate_prediction(data)[1]) == ["schema-violation"]

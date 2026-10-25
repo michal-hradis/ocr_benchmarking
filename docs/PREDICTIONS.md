@@ -53,10 +53,10 @@ uv run ocrbench prediction convert page.md --sample-id <id> [-o pred.json]   # .
 | `image` | when positions are given | `width` and `height` of the original input image in pixels. |
 | `regions` | no | A **flat** list of regions; regions are never nested. Absent or empty for a text-only result. |
 | `reading_order` | no | Region IDs in reading order. Absent means the engine gave **no explicit reading order**, and regions are read in array order. |
-| `conversion` | no | `{"from": "markdown", "version": 1}` when the prediction was converted on the host from a native output (see below). |
+| `conversion` | no | `{"from": "markdown", "version": 1}` when the prediction was converted on the host from a native output, or from region markup (see below). |
 | `extra` | no | Engine-specific data. Allowed on the prediction, regions and lines; never used by metrics. |
 
-**Region:** `id` (required, unique among regions), `type`, `native_type` (the engine's own label), `polygon`, `text`, `lines`, `confidence`, `extra`.
+**Region:** `id` (required, unique among regions), `type`, `native_type` (the engine's own label), `polygon`, `text`, `markup` (native Markdown or HTML to be converted on the host, [below](#markup-in-positioned-regions)), `lines`, `confidence`, `extra`.
 
 **Line:** `text` (required), `id` (optional, unique among lines), `type` (free label, for example `handwritten`), `polygon`, `baseline`, `confidence`, `extra`.
 
@@ -68,7 +68,7 @@ The recommended types are `text`, `heading`, `list-item`, `caption`, `footnote`,
 
 ### Text
 
-- **One text source per region.** A region's text comes from its lines when it has any; otherwise from its own `text`. A region with both gets a warning, and its own `text` is dropped. A region may have no text at all, such as a figure.
+- **One text source per region.** A region's text comes from its lines when it has any; otherwise from its own `text`, or from its `markup` converted on the host. A region with both gets a warning, and its own `text` is dropped. A region may have no text at all, such as a figure.
 - **Lines are optional.** A formula, a table or a paragraph from an image-to-text model can be a region with its own text and no lines. A line is whatever the engine reports; there is no marker for detected versus derived lines.
 - **Page text agrees with the structure.** When any region carries text, the **structure text** is built in reading order: lines of a region joined by `\n`, regions joined by a blank line (`\n\n`). The page text must equal it up to whitespace: the comparison treats any run of whitespace as one separator and ignores leading and trailing whitespace.
   - If they agree, the page text is kept as the engine wrote it.
@@ -108,15 +108,30 @@ Known limitations of converter version 1: `\[…\]` and `\(…\)` math delimiter
 
 The **shared text-conversion rules apply to text inside positioned model output too**. An engine may produce native JSON with categories, boxes and Markdown/HTML text per element. Keep that native JSON unchanged and preserve the real positions, region identifiers and reading order in `ocrbench.prediction` v1, but convert the **textual content** according to the same rules above: formatting delimiters are not recognized text, while the text within emphasis/links, table cells and formulas is retained according to its content type.
 
-**Do not pass the entire positioned document to `convert_native()`.** Its existing whole-document API builds **unpositioned** regions and would discard the model's geometry and reading order. Reuse shared conversion logic at the per-region level; when no suitable shared API exists, extend/refactor `ocrbench.convert` rather than reimplementing its parsing rules in every adapter. If an engine-specific exception is unavoidable, document why and test it against the shared semantics.
+**Do not pass the entire positioned document to `convert_native()`.** Its existing whole-document API builds **unpositioned** regions and would discard the model's geometry and reading order. Reuse shared conversion logic at the per-region level, preferably by region markup (below); when no suitable shared API exists, extend/refactor `ocrbench.convert` rather than reimplementing its parsing rules in every adapter. If an engine-specific exception is unavoidable, document why and test it against the shared semantics.
 
 This is **markup-to-text conversion, not transcription correction**: do not alter recognized spelling, historical glyphs or punctuation to make a model score better. Tests should exercise representative formatting and verify that both page/region text and genuine polygons/reading order are preserved. Changes to the shared converter's rules require the converter-version change documented above; do not introduce a separate, silently inconsistent rule set for positioned engines.
+
+### Markup in positioned regions
+
+An engine whose positioned regions carry Markdown or HTML writes that markup unchanged into the region instead of `text`, and the host converts it when it validates the prediction ([ADR 0011](adr/0011-region-markup-converted-on-the-host.md)):
+
+```json
+{"id": "b2", "type": "text", "native_type": "Text", "polygon": [[36.9, 113.4], [447.3, 113.4], [447.3, 181.4], [36.9, 181.4]],
+ "markup": {"format": "html", "content": "<p>The quick brown fox jumps over<br/>the lazy dog.</p>"}}
+```
+
+- `markup.format` is `markdown` or `html`; `markup.content` is the region's native markup.
+- The region text is `ocrbench.convert.fragment_text(content, format)`: the region's blocks by the rules of the table above, joined by line breaks (`\n`). For example, two paragraphs become two lines, a list one line per item, a table one line per row with tab-separated cells, and markup such as `<i>` or `*…*` adds nothing. The block types inside the markup are not kept; the region keeps its own `type`.
+- A region with `markup` must not also have `text` or `lines`, all region markup of a prediction uses one format, and the engine does not set `conversion`. Each of these is an error (`markup-conflict`).
+- The engine cannot know the converted text, so it may write an empty page `text`: the page text is then built from the converted regions without a `text-mismatch` warning. A non-empty page text is checked as usual.
+- The standardized prediction holds the converted `text` (no `markup`) and `conversion` `{"from": "html", "version": 1}` with the converter version. The engine's own `prediction.json` keeps the markup, so a converter fix means re-validating stored output, not re-running the model.
 
 ## Validation findings
 
 | Severity | Meaning | Examples (`code`) |
 | --- | --- | --- |
-| error | The prediction is invalid and must not be treated as a successful result | `prediction-unreadable`, `prediction-json-error` (including `NaN`/`Infinity`), `schema-violation`, `invalid-unicode`, `sample-id-mismatch`, `image-size-mismatch`, `missing-image-size`, `invalid-coordinate`, `duplicate-id`, `unknown-reading-order-ref`, `duplicate-reading-order-ref` |
+| error | The prediction is invalid and must not be treated as a successful result | `prediction-unreadable`, `prediction-json-error` (including `NaN`/`Infinity`), `schema-violation`, `invalid-unicode`, `sample-id-mismatch`, `image-size-mismatch`, `missing-image-size`, `invalid-coordinate`, `duplicate-id`, `unknown-reading-order-ref`, `duplicate-reading-order-ref`, `markup-conflict` |
 | warning | Usable; the standardized result was fixed | `text-mismatch`, `region-text-ignored`, `region-not-in-reading-order` (appended in array order), `points-out-of-bounds`, `degenerate-polygon` |
 | info | Noteworthy only | `unknown-region-type`, `empty-prediction` |
 
