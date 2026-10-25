@@ -23,6 +23,7 @@ import pytest
 from PIL import Image
 
 from ocrbench.cli import main
+from ocrbench.convert import convert_native
 from ocrbench.engine import parse_engine_config
 from ocrbench.prediction import validate_prediction
 from ocrbench.runner import ProcessLauncher, create_run, execute, latest_record, load_run
@@ -133,7 +134,10 @@ def test_layout_parsing_keeps_complete_elements(text, elements, complete):
         ("Section-header", "### **Part 2**", "Part 2"),
         ("Section-header", "#hashtag", "#hashtag"),  # not a heading mark
         ("Text", "# not a heading in Text", "# not a heading in Text"),
-        ("Text", " a **bold** and *italic* word ", "a bold and *italic* word"),
+        ("Text", " a **bold** and *italic* word ", "a bold and italic word"),
+        ("Caption", "*Fig. 1.* [A ship](x.png) ![](i.png)", "Fig. 1. A ship"),
+        ("Text", "line one<br>line  two\nthree", "line one\nline two\nthree"),
+        ("Text", "Note*) here \\*not\\* &amp; `x`", "Note*) here *not* & x"),
         ("List-item", "- item", "item"),
         ("List-item", "• item", "item"),
         ("List-item", "2. item", "2. item"),  # the number is kept, as the host converter does
@@ -148,6 +152,20 @@ def test_layout_parsing_keeps_complete_elements(text, elements, complete):
 )
 def test_element_text_is_plain(category, content, text):
     assert dm.element_text(category, content) == text
+
+
+@pytest.mark.parametrize(
+    "content",
+    [
+        "a **bold**, *italic* and _italic_ word, ~~struck~~",
+        "[a link](https://example.org) <https://example.org> ![an image](i.png)",
+        "\\*escaped\\* &amp; &#x17F; `code` and $x^2$",
+        "a<sup>1</sup> b<br/>next *) line\nnie-\nman",
+        "**unclosed and a_b_c",
+    ],
+)
+def test_inline_markdown_matches_the_host_converter(content):
+    assert dm.markdown_text("Text", content) == convert_native(content, "markdown", "s")["text"]
 
 
 def test_layout_to_prediction_maps_boxes_to_the_input_image():

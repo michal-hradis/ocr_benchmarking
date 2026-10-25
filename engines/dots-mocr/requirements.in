@@ -6,3 +6,7 @@
 transformers==4.57.6
 torchvision==0.29.1+cu130
 pillow
+# The host Markdown converter's parser (src/ocrbench/convert.py), at the host's versions, for the
+# inline Markdown of element texts.
+markdown-it-py==4.2.0
+mdit-py-plugins==0.6.1
