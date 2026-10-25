@@ -1,0 +1,21 @@
+# HunyuanOCR-1.5 page-image to Markdown model, preset doc_parse (README.md next to this file;
+# format: docs/RUNNER.md). Run with --cache <dir> holding the weights from make hunyuanocr-model.
+name = "hunyuanocr"
+engine_version = "1"
+image = "ocrbench/engine-hunyuanocr:1.5-v1"
+model = "tencent/HunyuanOCR@47644ecc4fc854efa4f505155158831f36773ee4"
+
+[params]
+device = "cuda:0"
+task = "doc_parse"  # the official document parsing prompt; it leaves out page headers and footers
+max_new_tokens = 32768  # other parameters: README.md
+
+[resources]
+cpus = 4
+memory = "16g"
+gpus = "all"
+shm_size = "2g"
+
+[timeouts]
+sample = 1800
+startup = 300
