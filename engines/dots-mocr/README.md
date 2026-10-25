@@ -103,17 +103,19 @@ Generation stops at the first end token, at `max_new_tokens`, or at the end of t
 - An output that ends with an end token but is not a complete JSON list is `partial`, with the complete elements used.
 - An output with no list at all (for example plain text) fails the sample (`engine-error`, `the output is not a JSON list of layout elements`); `output.json` keeps it.
 - The text of the complete elements is scored as produced, including omissions ([EVALUATION.md](../../docs/EVALUATION.md#failed-partial-and-truncated-samples)).
-- **Repetition.** Greedy decoding can fall into a loop that repeats an element until the token limit. Such a sample is `truncated`, and `extra.repeated_elements` counts the elements whose category and text equal the previous element's. The repeated elements stay in the prediction, scored as produced.
+- **Repetition.** Greedy decoding can fall into a loop that repeats an element until the token limit. Such a sample is `truncated`, and `extra.repeated_elements` counts the elements whose category and text equal the previous element's. The repeated elements stay in the prediction, scored as produced. A loop inside the text of one element is not counted; it leaves that element incomplete, so it is not in the prediction.
 
-**Memory.** These are estimates; no GPU measurements are recorded yet:
+**Repetition on dev-01.** Only the Glagolitic page `CkXII61-0017` looped: after one element of Georgian-script text, the second element repeated `მიმართება და` until the 24,000-token limit, so the page is `truncated` with one complete element (`repeated_elements` 0). All other pages ended with an end token.
+
+**Memory.** Measured on an RTX 4090 (24 GB) for the dev-01 pages:
 
 - The bfloat16 weights take about 6.1 GB of GPU memory.
 - The key/value cache takes about 28 KB per token (28 layers, 2 key/value heads of 128 dimensions), so about 1.1 GB for 14,400 image tokens and 24,000 generated ones.
 - The vision encoder attends over up to 57,600 patches at once.
 
-The peak allocated GPU memory of every sample is recorded as `gpu_peak_memory_mb`. A CUDA out-of-memory error fails only that sample (`engine-error`), and the container continues.
+The peak allocated GPU memory of every sample is recorded as `gpu_peak_memory_mb`. It was 6.6–6.8 GB for the 1600-pixel book pages and the Glagolitic page, and 8.3 GB for the newspaper pages, which are reduced to the 11,289,600-pixel limit (about 14,300 image tokens). A CUDA out-of-memory error fails only that sample (`engine-error`), and the container continues.
 
-**Time.** Generation is token by token with batch size 1. A page that runs to `max_new_tokens` must finish within `timeouts.sample = 1800` seconds, about 13 tokens/s. `preprocess_seconds`, `generate_seconds` and `tokens_per_second` are recorded per sample.
+**Time.** Generation is token by token with batch size 1. On the RTX 4090, generation ran at about 40–43 tokens/s, so a book page took 15–28 s and a newspaper page 196–270 s (8,136 and 11,516 tokens). The Glagolitic page ran to `max_new_tokens` in 553 s, within `timeouts.sample = 1800`. Checking and loading the weights took 15 s. `preprocess_seconds`, `generate_seconds` and `tokens_per_second` are recorded per sample.
 
 ## Outputs
 
@@ -158,4 +160,4 @@ The SDPA replacement for `flash_attn_varlen_func` needs PyTorch and is exercised
 
 `make dots-mocr-smoke` (after `make dots-mocr-model`) builds the image and runs the real model on the GPU. It goes through `ocrbench run start`, `evaluate` (twice, without rerunning OCR) and `report` on a synthetic full page, a paragraph crop and a blank page, and checks that every region has a polygon. A second run with `max_new_tokens = 40` must mark the page `truncated` and score the complete elements. A third run without `--cache` must fail explicitly.
 
-The GPU smoke test and the dev-01 evaluation have not been run yet ([#52](https://github.com/michal-hradis/ocr_benchmarking/issues/52)).
+The GPU smoke test passed on an RTX 4090. The dev-01 results are in the pull request for [#52](https://github.com/michal-hradis/ocr_benchmarking/issues/52).
