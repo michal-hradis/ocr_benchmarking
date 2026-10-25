@@ -1,0 +1,21 @@
+# dots.mocr page-image to layout model with the official prompt_layout_all_en prompt: boxes,
+# categories and text of the layout elements in reading order (README.md next to this file;
+# format: docs/RUNNER.md). Run with --cache <dir> holding the weights from make dots-mocr-model.
+name = "dots-mocr"
+engine_version = "1"
+image = "ocrbench/engine-dots-mocr:3B-v1"
+model = "dots-studio/dots.mocr@e539fbb52280393adc081b289ec597430a0f9031"
+
+[params]
+device = "cuda:0"
+max_new_tokens = 24000  # the official transformers inference's
+
+[resources]
+cpus = 4
+memory = "24g"
+gpus = "all"
+shm_size = "2g"
+
+[timeouts]
+sample = 1800
+startup = 600

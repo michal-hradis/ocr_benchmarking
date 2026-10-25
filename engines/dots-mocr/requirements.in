@@ -1,0 +1,8 @@
+# The model's remote code (configuration_dots.py, modeling_dots_ocr.py, modeling_dots_vision.py in
+# the checkpoint) is used with transformers 4.57.6, the version of the official requirements.txt;
+# its processor (DotsVLProcessor) subclasses transformers' Qwen2.5-VL processor. torchvision and
+# Pillow are needed by the image and video processors that processor loads. flash-attn, which the
+# remote code imports, is not installed: the adapter provides the one function it uses (README.md).
+transformers==4.57.6
+torchvision==0.29.1+cu130
+pillow
