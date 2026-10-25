@@ -19,7 +19,12 @@ from markdown_it import MarkdownIt
 from markdown_it.token import Token
 from mdit_py_plugins.dollarmath import dollarmath_plugin
 
-from ocrbench.prediction import PREDICTION_FORMAT, PREDICTION_VERSION, REGION_SEPARATOR
+from ocrbench.prediction import (
+    LINE_SEPARATOR,
+    PREDICTION_FORMAT,
+    PREDICTION_VERSION,
+    REGION_SEPARATOR,
+)
 
 CONVERTER_VERSION = 1
 FORMATS = ("text", "markdown", "html")
@@ -64,6 +69,19 @@ def convert_native(content: str, source_format: str, sample_id: str) -> dict[str
         ]
     data["conversion"] = {"from": source_format, "version": CONVERTER_VERSION}
     return data
+
+
+def fragment_text(content: str, source_format: str) -> str:
+    """Plain text of one Markdown or HTML fragment, such as the markup of a positioned region
+    (docs/PREDICTIONS.md#markup-in-positioned-regions): the texts of its blocks by the rules of
+    convert_native, joined by line breaks. Block types are not kept; the region has its own."""
+    if source_format == "markdown":
+        blocks = _markdown(content)
+    elif source_format == "html":
+        blocks = _html(content)
+    else:
+        raise ValueError(f"unknown markup format {source_format!r}; expected markdown or html")
+    return LINE_SEPARATOR.join(block.text for block in blocks if block.text.strip())
 
 
 def _tidy(text: str) -> str:

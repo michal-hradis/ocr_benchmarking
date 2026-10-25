@@ -250,6 +250,7 @@ class _Validator:
         self.sample_id = sample_id
         self.location = location
         self.issues: list[Issue] = []
+        self.markup: set[str] = set()  # formats of region markup converted on the host
 
     def issue(self, severity: Severity, code: str, message: str, path: str = "") -> None:
         where = f"{self.location}#{path}" if path else self.location
@@ -287,6 +288,13 @@ class _Validator:
 
         text = data["text"]
         expected = structure_text(ordered)
+        conversion = data.get("conversion")
+        if self.markup:
+            # The engine cannot know the converted text: an empty page text is rebuilt silently.
+            conversion = self.markup_conversion(conversion)
+            text = text if text.strip() or expected is None else expected
+        if self.errors():
+            return None, self.issues
         if expected is not None and not same_text(text, expected):
             self.issue(
                 Severity.WARNING,
@@ -303,7 +311,7 @@ class _Validator:
             regions=ordered,
             explicit_reading_order=explicit,
             image_size=size,
-            conversion=data.get("conversion"),
+            conversion=conversion,
             extra=data.get("extra"),
         )
         return prediction, self.issues
@@ -347,7 +355,10 @@ class _Validator:
                 self.issue(
                     Severity.INFO, "unknown-region-type", f"region type {region_type!r}", where
                 )
-            if item.get("lines") and "text" in item:
+            text = item.get("text")
+            if "markup" in item:
+                text = self.region_markup(item, where)
+            elif item.get("lines") and "text" in item:
                 self.issue(
                     Severity.WARNING,
                     "region-text-ignored",
@@ -380,7 +391,7 @@ class _Validator:
                     type=region_type,
                     native_type=item.get("native_type"),
                     polygon=self.geometry(geometry, item, "polygon", where),
-                    text=None if lines else item.get("text"),
+                    text=None if lines else text,
                     lines=tuple(lines),
                     confidence=item.get("confidence"),
                     extra=item.get("extra"),
@@ -402,6 +413,42 @@ class _Validator:
                 geometry.degenerate[0],
             )
         return regions
+
+    def region_markup(self, item: dict, where: str) -> str | None:
+        """The text of a region's native markup by the shared host converter."""
+        from ocrbench.convert import fragment_text  # convert imports this module
+
+        if "text" in item or "lines" in item:
+            self.issue(
+                Severity.ERROR,
+                "markup-conflict",
+                "a region with markup must not have text or lines",
+                f"{where}/markup",
+            )
+            return None
+        markup = item["markup"]
+        self.markup.add(markup["format"])
+        return fragment_text(markup["content"], markup["format"])
+
+    def markup_conversion(self, conversion: dict[str, Any] | None) -> dict[str, Any] | None:
+        from ocrbench.convert import CONVERTER_VERSION
+
+        if conversion is not None:
+            self.issue(
+                Severity.ERROR,
+                "markup-conflict",
+                "a prediction with region markup must not declare a conversion",
+                "/conversion",
+            )
+        if len(self.markup) > 1:
+            self.issue(
+                Severity.ERROR,
+                "markup-conflict",
+                f"region markup mixes formats: {', '.join(sorted(self.markup))}",
+                "/regions",
+            )
+            return None
+        return {"from": next(iter(self.markup)), "version": CONVERTER_VERSION}
 
     def geometry(self, geometry: _Geometry | None, item: dict, key: str, where: str):
         raw = item.get(key)

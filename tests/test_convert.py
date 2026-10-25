@@ -7,7 +7,7 @@ import pytest
 from PIL import Image
 
 from ocrbench.cli import main
-from ocrbench.convert import CONVERTER_VERSION, convert_native
+from ocrbench.convert import CONVERTER_VERSION, convert_native, fragment_text
 from ocrbench.issues import Severity
 from ocrbench.prediction import validate_prediction
 
@@ -157,3 +157,28 @@ def test_html_and_markdown_inline_html_agree():
     html = convert("<p>A <script>x()</script> <span>visible</span>  Z</p>", "html")
     markdown = convert("A <script>x()</script> <span>visible</span>  Z", "markdown")
     assert regions(html) == regions(markdown) == [("text", "A visible Z")]
+
+
+@pytest.mark.parametrize(
+    ("content", "source_format", "expected"),
+    [
+        ("<p>Die <i>alte</i> Zeit<br>und &amp; mehr</p>", "html", "Die alte Zeit\nund & mehr"),
+        ("<h2>Kapitel 1</h2><p>Text</p>", "html", "Kapitel 1\nText"),
+        ("<ol><li>eins</li><li>zwei</li></ol>", "html", "1. eins\n2. zwei"),
+        (
+            "<table><tr><th>a</th><td>b</td></tr><tr><td>c</td><td>d</td></tr></table>",
+            "html",
+            "a\tb\nc\td",
+        ),
+        ('<math display="block">x^2</math>', "html", "x^2"),
+        ('<img src="a.png" alt="Logo">', "html", ""),
+        ("# Titel\n\n*kursiv* und [Link](https://x)", "markdown", "Titel\nkursiv und Link"),
+    ],
+)
+def test_fragment_text_uses_the_document_rules(content, source_format, expected):
+    assert fragment_text(content, source_format) == expected
+
+
+def test_fragment_text_rejects_unknown_formats():
+    with pytest.raises(ValueError, match="markup format"):
+        fragment_text("x", "text")
