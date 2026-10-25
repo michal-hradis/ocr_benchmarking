@@ -13,13 +13,13 @@ process without vLLM, Surya, PyTorch, weights or a GPU.
   | 100 | 100 newspaper line blocks, then the last one repeated up to `max_tokens` (stop reason `length`) |
   | 50 | an HTTP 500 error (a request failure) |
   | 20 | the server exits |
-  | other | an empty output and an end token |
+  | other (70 in the test) | an empty output and an end token; a uniform page of that gray is blank, a checkerboard is not |
 
   `FAKE_VLLM_EXIT=1` makes it exit during start-up.
 - `openai` is a minimal client for that endpoint.
 - `surya` holds small stand-ins for the Surya 0.22.1 functions the adapter uses (the full-page
   prompt, `scale_to_fit`, `_build_messages`, `parse_full_page_html`, `is_blank_region`, the label
-  tables, `_crop_block` and `_detect_repeat_loop`), written for the test, not copied from Surya.
+  tables, `SKIP_CANON_LABELS`, `_crop_block` and `_detect_repeat_loop`), written for the test, not copied from Surya.
   The GPU smoke test runs the real ones.
 - `torch.py` is a copy of the dots.mocr fake. The `*.dist-info` directories provide the package
   versions.

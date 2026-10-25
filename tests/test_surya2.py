@@ -182,6 +182,28 @@ def test_blocks_become_positioned_regions_with_markup(monkeypatch):
     assert standardized.conversion == {"from": "html", "version": 1}
 
 
+def test_blocks_skipped_by_their_canonical_label(monkeypatch):
+    """Surya skips Complex-Block, canonically Figure, although the raw label is not in
+    SKIP_OCR_LABELS: the region keeps its box but not the block's text."""
+    monkeypatch.syspath_prepend(str(FAKE))
+    from surya.inference.parsers import parse_full_page_html
+
+    blocks = parse_full_page_html(
+        '<div data-bbox="100 100 500 400" data-label="Complex-Block"><p>Chart: sales 2024</p></div>'
+        '<div data-bbox="100 500 900 600" data-label="Text"><p>Body text.</p></div>'
+    )
+    prediction, counts = s2.blocks_to_prediction(blocks, "s", page_image(200, (1000, 700)))
+    assert counts == {"blank_blocks": 0, "skipped_blocks": 1}
+    figure, text = prediction["regions"]
+    assert (figure["native_type"], figure["type"]) == ("Complex-Block", "figure")
+    corners = ([100, 70], [500, 70], [500, 280], [100, 280])
+    assert figure["polygon"] == [pytest.approx(corner) for corner in corners]
+    assert "markup" not in figure
+    standardized, issues = validate_prediction(prediction, sample_id="s", image_size=(1000, 700))
+    assert issues == []
+    assert standardized.text == "Body text."
+
+
 def model_cache(root, corrupt=False, extra_file=False):
     """A cache with fake model files at the pinned path, and checksums that match them."""
     directory = root / "cache" / s2.PINNED_DIR
@@ -204,7 +226,8 @@ def model_cache(root, corrupt=False, extra_file=False):
 
 NEWSPAPER_LINES = 2000
 # The fake server chooses its output by the gray level in the top-left corner (fake/README.md).
-GRAY = {"page": 200, "nohtml": 150, "news": 100, "boom": 50, "die": 20, "empty": 70}
+# "blank" is a uniform page of the empty-output gray level, which is_blank_region accepts.
+GRAY = {"page": 200, "nohtml": 150, "news": 100, "boom": 50, "die": 20, "empty": 70, "blank": 70}
 
 
 def make_dataset(root, samples):
@@ -212,7 +235,11 @@ def make_dataset(root, samples):
     data.mkdir()
     entries = []
     for sid, (kind, size) in samples.items():
-        page_image(GRAY[kind], size, white_area=kind == "page").save(data / f"{sid}.png")
+        if kind == "blank":
+            image = Image.new("L", size, GRAY[kind])
+        else:
+            image = page_image(GRAY[kind], size, white_area=kind == "page")
+        image.save(data / f"{sid}.png")
         if kind == "news":  # a newspaper page whose reference has 2,000 lines
             lines = [_newspaper_line(n) for n in range(1, NEWSPAPER_LINES + 1)]
             regions = [[(text, (10, n, 20, n + 1)) for n, text in enumerate(lines)]]
@@ -255,6 +282,7 @@ def run_adapter(tmp_path, samples, params=None, env=None):
 def test_adapter_follows_the_engine_protocol(tmp_path):
     samples = {
         "page": ("page", (1000, 700)),
+        "blank": ("blank", (300, 200)),
         "empty": ("empty", (300, 200)),
         "nohtml": ("nohtml", (500, 500)),
         "boom": ("boom", (666, 400)),
@@ -268,7 +296,8 @@ def test_adapter_follows_the_engine_protocol(tmp_path):
     got = {sid: (r["status"], r["reason"]) for sid, r in records.items()}
     assert got == {
         "page": ("success", None),
-        "empty": ("success", None),
+        "blank": ("success", None),  # an empty output is accepted only for a blank page
+        "empty": ("failure", "engine-error"),
         "nohtml": ("failure", "engine-error"),
         "boom": ("failure", "engine-error"),
         "news": ("truncated", None),  # stopped at max_tokens, scored as produced
@@ -277,6 +306,9 @@ def test_adapter_follows_the_engine_protocol(tmp_path):
         "die": ("failure", "engine-error"),
         "after": ("failure", "engine-error"),
     }
+    assert (
+        records["empty"]["message"] == "the output is empty but the page is not blank (output.html)"
+    )
     assert records["nohtml"]["message"] == "the output has no layout blocks (output.html)"
     assert "fake CUDA out of memory" in records["boom"]["message"]
     assert records["after"]["message"].startswith("the vLLM server has exited")
@@ -325,8 +357,10 @@ def test_adapter_follows_the_engine_protocol(tmp_path):
 
     big = records["big"]["engine_extra"]["model_image"]
     assert big["width"] * big["height"] <= 3072 * 2048
+    blank = run.path / "samples" / "blank" / "attempt-1"
+    assert (blank / "prediction.txt").read_text(encoding="utf-8") == ""
     empty = run.path / "samples" / "empty" / "attempt-1"
-    assert (empty / "prediction.txt").read_text(encoding="utf-8") == ""
+    assert (empty / "output" / "output.html").read_text(encoding="utf-8") == ""  # kept
 
     news = records["news"]
     assert news["message"].startswith("generation stopped: length (12288 of 12288 tokens); ")
