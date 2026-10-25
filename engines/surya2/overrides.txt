@@ -1,0 +1,3 @@
+# Surya 0.22.1 pins pillow<11 and opencv-python-headless==4.11.0.86; vLLM 0.20.1 needs newer ones.
+pillow==13.0.0
+opencv-python-headless==5.0.0.93

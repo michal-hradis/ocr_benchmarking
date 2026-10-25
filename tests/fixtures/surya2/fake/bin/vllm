@@ -1,0 +1,98 @@
+#!/usr/bin/env python3
+"""Fake `vllm serve`: an OpenAI-compatible chat completions server on the loopback interface that
+"generates" a fixed output chosen by the gray level of the page image's top-left corner
+(README.md). It checks the command line and every request as the adapter must send them."""
+
+import base64
+import io
+import json
+import os
+import sys
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
+
+from PIL import Image
+
+HERE = Path(__file__).resolve().parent
+PROMPT = (
+    "OCR this image to HTML. Each block is a div with data-label and data-bbox "
+    "(x0 y0 x1 y1, normalized 0-1000)."
+)
+
+
+def news(limit):
+    lines = [
+        f'<div data-bbox="0 {n} 1000 {n + 1}" data-label="Text"><p>Line {n} of a very long '
+        "newspaper page.</p></div>"
+        for n in range(1, 101)
+    ]
+    text = "".join(lines)
+    while len(text) < limit:
+        text += lines[-1]
+    return text[:limit], "length"
+
+
+def output(gray, max_tokens):
+    if gray > 190:  # 200
+        return (HERE.parent.parent / "output.html").read_text(encoding="utf-8").strip(), "stop"
+    if gray > 125:  # 150
+        return "This page has no layout.", "stop"
+    if gray > 75:  # 100
+        return news(max_tokens)
+    return "", "stop"
+
+
+class Handler(BaseHTTPRequestHandler):
+    def log_message(self, *args):
+        pass
+
+    def reply(self, status, body):
+        data = json.dumps(body).encode()
+        self.send_response(status)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(data)))
+        self.end_headers()
+        self.wfile.write(data)
+
+    def do_GET(self):
+        self.reply(200 if self.path == "/health" else 404, {})
+
+    def do_POST(self):
+        request = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
+        (message,) = request["messages"]
+        image_part, text_part = message["content"]
+        assert message["role"] == "user" and text_part == {"type": "text", "text": PROMPT}
+        assert request["model"] == "datalab-to/surya-ocr-2"
+        assert (request["temperature"], request["top_p"]) == (0.0, 0.1)
+        url = image_part["image_url"]["url"]
+        assert image_part["type"] == "image_url" and url.startswith("data:image/png;base64,")
+        image = Image.open(io.BytesIO(base64.b64decode(url.split(",", 1)[1]))).convert("L")
+        gray = image.getpixel((image.width // 40, image.height // 40))
+        if 35 < gray < 65:  # 50: a request error
+            return self.reply(500, {"error": {"message": "fake CUDA out of memory"}})
+        if gray < 35:  # 20: the server dies
+            os._exit(1)
+        text, reason = output(gray, request["max_tokens"])
+        tokens = (image.width // 28) * (image.height // 28) + len(PROMPT)
+        self.reply(
+            200,
+            {
+                "choices": [{"message": {"content": text}, "finish_reason": reason}],
+                "usage": {"prompt_tokens": tokens, "completion_tokens": len(text)},
+            },
+        )
+
+
+def main():
+    args = sys.argv[1:]
+    assert args[0] == "serve" and args[1].endswith("3b3d4cdf88d6928b0acdc75181b13206ea67c4a3")
+    assert args[args.index("--host") + 1] == "127.0.0.1"
+    if os.environ.get("FAKE_VLLM_EXIT"):
+        print("fake vLLM start-up failure", flush=True)
+        sys.exit(3)
+    port = int(args[args.index("--port") + 1])
+    ThreadingHTTPServer(("127.0.0.1", port), Handler).serve_forever()
+
+
+if __name__ == "__main__":
+    main()

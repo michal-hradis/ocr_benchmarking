@@ -1,0 +1,5 @@
+# Surya 0.22.1 for its prompt, image scaling and output parser (README.md); the model is served by
+# the base's vLLM. Its exact pins of Pillow (< 11) and OpenCV (4.11.0.86) conflict with vLLM's
+# and are overridden with the base's versions (overrides.txt); the modules the adapter uses do not
+# depend on them.
+surya-ocr==0.22.1
