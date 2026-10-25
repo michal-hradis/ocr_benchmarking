@@ -1,0 +1,8 @@
+# transformers 5.19.0 has HunYuanVLForConditionalGeneration and its processor (5.13.0 or later,
+# as the model card asks); torchvision and Pillow are its "vision" extra, which the PIL image
+# processor needs. accelerate lets transformers load the weights directly onto the GPU
+# (device_map).
+transformers==5.19.0
+torchvision==0.29.1+cu130
+pillow
+accelerate==1.15.0
