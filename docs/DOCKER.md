@@ -18,8 +18,9 @@ Engines run in per-engine Docker images on one Linux machine ([architecture](ARC
 | CPU | `docker/base-cpu` | `ocrbench/base-cpu:py3.12-v1` | Debian bookworm slim, Python 3.12.15, uv, empty venv |
 | CUDA 13.0 + PyTorch | `docker/base-cu130-torch` | `ocrbench/base-cu130-torch:torch2.14.1-py3.12-v1` | Ubuntu 24.04 `nvidia/cuda` base, Python 3.12.15, torch 2.14.1+cu130 from a hash-locked requirements file |
 | CUDA 13.0 + PaddlePaddle | `docker/base-cu130-paddle` | `ocrbench/base-cu130-paddle:paddle3.4.0-py3.12-v1` | The same `nvidia/cuda` base, Python 3.12.15, `libgomp1`, paddlepaddle-gpu 3.4.0 (cu130) from a hash-locked requirements file. A separate family because Paddle pins other cuDNN and nvJitLink wheels than torch; numpy is held below 2.4 for PaddleX 3.7 |
+| CUDA 13.0 + vLLM | `docker/base-cu130-vllm` | `ocrbench/base-cu130-vllm:vllm0.20.1-py3.12-v1` | The same `nvidia/cuda` base, Python 3.12.15, `gcc` (Triton compiles kernel launchers at run time), vLLM 0.20.1 with the torch 2.11.0 (CUDA 13.0) it pins and transformers 5.12.1, from a hash-locked requirements file. A separate family because vLLM pins its own torch. For engines that serve their model with vLLM inside the container ([ADR 0012](adr/0012-inference-servers-inside-engine-containers.md)) |
 
-Both images provide:
+All base images provide:
 
 - a virtual environment at `/opt/venv`, already on `PATH`, and `uv` for installing engine dependencies;
 - a non-root user `ocr` (UID 10001) as the final `USER`;
@@ -44,7 +45,8 @@ Publishing bases to a registry and pinning them by digest would also work, but w
 | `make docker-cpu` | Build the CPU base (small pull) |
 | `make docker-cu130-torch` | Build the CUDA/torch base (several GB pulled; cached afterwards) |
 | `make docker-cu130-paddle` | Build the CUDA/Paddle base (several GB pulled) |
-| `make docker-lock` | Re-lock the hashed `requirements.txt` of both CUDA bases and of the PaddleOCR, PP-StructureV3 and PaddleOCR-VL (against the Paddle base) and Kraken, LightOnOCR, FireRed-OCR, OvisOCR2, GLM-OCR, MinerU2.5-Pro, Chandra OCR 2, olmOCR-2, DeepSeek-OCR-2, Infinity-Parser2-Flash, PERO OCR, Surya and docTR (against the torch base) engines, and of the standalone OCR-D/Calamari image (Python 3.11), after editing a `requirements.in` |
+| `make docker-cu130-vllm` | Build the CUDA/vLLM base (several GB pulled; 8.7 GB image) |
+| `make docker-lock` | Re-lock the hashed `requirements.txt` of the CUDA bases and of the Surya 2 (against the vLLM base), PaddleOCR, PP-StructureV3 and PaddleOCR-VL (against the Paddle base) and Kraken, LightOnOCR, FireRed-OCR, OvisOCR2, GLM-OCR, MinerU2.5-Pro, Chandra OCR 2, olmOCR-2, DeepSeek-OCR-2, Infinity-Parser2-Flash, PERO OCR, Surya and docTR (against the torch base) engines, and of the standalone OCR-D/Calamari image (Python 3.11), after editing a `requirements.in` |
 | `make docker-smoke` | Opt-in: run the built images with `--network none --read-only` and check Python, the non-root user and that torch imports without a GPU; also build a minimal derived image (`tests/fixtures/derived-cpu`) from the CPU base and check it inherits the base layers; build the fake engine (`tests/fixtures/fake-engine`) and run it with `ocrbench run start` ([RUNNER.md](RUNNER.md)) |
 | `make docker-tesseract` | Build the Tesseract engine image from the CPU base ([engines/tesseract](../engines/tesseract/README.md)) |
 | `make tesseract-best` | Opt-in: download the pinned `tessdata_best` models (48 MB) for the Tesseract best presets into `$(OCRBENCH_CACHE)` |
@@ -96,6 +98,9 @@ Publishing bases to a registry and pinning them by digest would also work, but w
 | `make docker-dots-mocr` | Build the dots.mocr GPU engine image from the torch base, without weights ([engines/dots-mocr](../engines/dots-mocr/README.md)) |
 | `make dots-mocr-model` | Opt-in: download the pinned dots.mocr weights and model code (6.1 GB) into `OCRBENCH_CACHE`, checked against `models.sha256` |
 | `make dots-mocr-smoke` | Opt-in, GPU: build the dots.mocr image and run it with the cached weights on synthetic samples through the runner, evaluation and reports |
+| `make docker-surya2` | Build the Surya 2 GPU engine image from the vLLM base, without weights ([engines/surya2](../engines/surya2/README.md)) |
+| `make surya2-model` | Opt-in: download the pinned surya-ocr-2 weights (1.4 GB) into `OCRBENCH_CACHE`, checked against `models.sha256` |
+| `make surya2-smoke` | Opt-in, GPU: build the Surya 2 image and run it with the cached weights on synthetic samples through the runner, evaluation and reports |
 | `make docker-infinityparser2` | Build the Infinity-Parser2-Flash GPU engine image from the torch base, without weights ([engines/infinityparser2](../engines/infinityparser2/README.md)) |
 | `make infinityparser2-model` | Opt-in: download the pinned Infinity-Parser2-Flash weights (4.4 GB) into `OCRBENCH_CACHE`, checked against `models.sha256` |
 | `make infinityparser2-smoke` | Opt-in, GPU: build the Infinity-Parser2-Flash image and run it with the cached weights on synthetic samples through the runner, evaluation and reports |
@@ -118,4 +123,5 @@ Engine adapters ([#11–#17](https://github.com/michal-hradis/ocr_benchmarking/i
 - **Read-only inputs.** Images and other inputs are mounted read-only; the container writes only to its output location and `/cache`. The root filesystem should work with `--read-only` (use `--tmpfs /tmp` if the engine needs scratch space).
 - **Resource limits come from the runner** (`--cpus`, `--memory`, `--gpus`, timeouts) and are recorded in the run configuration ([RUNNER.md](RUNNER.md#engine-configuration)); images must not assume unlimited resources.
 - **Runner user.** The runner starts containers with the host user's UID/GID and `HOME=/tmp`, not as `ocr`, so files in `/output` and `/cache` belong to the host user. Do not depend on files writable only by `ocr`.
+- **Inference servers stay inside the container.** An engine may run a server such as vLLM as a child process on the loopback interface ([ADR 0012](adr/0012-inference-servers-inside-engine-containers.md)); it never starts other containers. Docker mounts the runner's `/tmp` with `noexec`, so kernels compiled at run time (Triton, torch.compile) must be cached under `/cache`.
 - **Ground truth never enters an engine image or container** ([ADR 0002](adr/0002-ground-truth-isolation.md)).

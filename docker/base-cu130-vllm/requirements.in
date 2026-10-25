@@ -1,0 +1,9 @@
+# vLLM 0.20.1 (the version Surya 2 runs) with the torch 2.11.0 it pins; the PyPI torch 2.11.0
+# wheels are built for CUDA 13.0. vLLM accepts transformers >= 5.5.1; 5.12.1 is the oldest
+# release Surya 0.22.1 accepts, the closest to vLLM 0.20.1 (2026-05), and supports Qwen3.5.
+vllm==0.20.1
+transformers==5.12.1
+# Caps for Surya 0.22.1 (engines/surya2), which vLLM accepts as well: openai < 3 (vLLM: >= 2)
+# and filelock < 4.
+openai<3
+filelock<4

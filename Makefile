@@ -12,13 +12,15 @@
         mineru25-pro-smoke docker-chandra-ocr2 chandra-ocr2-model chandra-ocr2-smoke \
         docker-olmocr2 olmocr2-model olmocr2-smoke docker-deepseek-ocr2 deepseek-ocr2-model \
         deepseek-ocr2-smoke docker-hunyuanocr hunyuanocr-model hunyuanocr-smoke \
-        docker-dots-mocr dots-mocr-model dots-mocr-smoke
+        docker-dots-mocr dots-mocr-model dots-mocr-smoke docker-cu130-vllm docker-surya2 \
+        surya2-model surya2-smoke
 
 UV ?= uv
 BASE_VERSION ?= 1
 CPU_IMAGE ?= ocrbench/base-cpu:py3.12-v$(BASE_VERSION)
 CU130_TORCH_IMAGE ?= ocrbench/base-cu130-torch:torch2.14.1-py3.12-v$(BASE_VERSION)
 CU130_PADDLE_IMAGE ?= ocrbench/base-cu130-paddle:paddle3.4.0-py3.12-v$(BASE_VERSION)
+CU130_VLLM_IMAGE ?= ocrbench/base-cu130-vllm:vllm0.20.1-py3.12-v$(BASE_VERSION)
 TESSERACT_IMAGE := ocrbench/engine-tesseract:5.3.0-v2
 PADDLEOCR_IMAGE := ocrbench/engine-paddleocr:3.7.0-v2
 PPSTRUCTUREV3_IMAGE := ocrbench/engine-ppstructurev3:3.7.0-v1
@@ -39,6 +41,7 @@ OLMOCR2_IMAGE := ocrbench/engine-olmocr2:7B-1025-v1
 DEEPSEEK_OCR2_IMAGE := ocrbench/engine-deepseek-ocr2:2-v1
 HUNYUANOCR_IMAGE := ocrbench/engine-hunyuanocr:1.5-v1
 DOTS_MOCR_IMAGE := ocrbench/engine-dots-mocr:3B-v1
+SURYA2_IMAGE := ocrbench/engine-surya2:0.22.1-v1
 # Host directory with the user-supplied PERO OCR model bundles (engines/pero/README.md).
 PERO_BUNDLES ?= dev_data/pero_ocr_models
 # Host directory mounted as /cache for engines whose weights are not in the image.
@@ -48,7 +51,7 @@ LOCK_FLAGS := --python-platform x86_64-manylinux_2_28 --generate-hashes --no-hea
 LOCK := $(UV) pip compile --python-version 3.12 $(LOCK_FLAGS)
 # The standalone OCR-D/Calamari image runs Python 3.11 (engines/ocrd-calamari/README.md).
 LOCK_PY311 := $(UV) pip compile --python-version 3.11 $(LOCK_FLAGS)
-export CPU_IMAGE CU130_TORCH_IMAGE CU130_PADDLE_IMAGE OCRBENCH_CACHE
+export CPU_IMAGE CU130_TORCH_IMAGE CU130_PADDLE_IMAGE CU130_VLLM_IMAGE OCRBENCH_CACHE
 
 help:  ## List targets
 	@grep -E '^[a-z0-9-]+:.*## ' $(MAKEFILE_LIST) | awk -F':.*## ' '{printf "  %-20s %s\n", $$1, $$2}'
@@ -81,11 +84,20 @@ docker-cu130-paddle:  ## Build the CUDA 13.0 + PaddlePaddle base image (multi-GB
 	docker build -t $(CU130_PADDLE_IMAGE) docker/base-cu130-paddle
 	@docker image inspect --format '$(CU130_PADDLE_IMAGE) {{.Id}}' $(CU130_PADDLE_IMAGE)
 
+docker-cu130-vllm:  ## Build the CUDA 13.0 + vLLM 0.20.1 base image (multi-GB download)
+	docker build -t $(CU130_VLLM_IMAGE) docker/base-cu130-vllm
+	@docker image inspect --format '$(CU130_VLLM_IMAGE) {{.Id}}' $(CU130_VLLM_IMAGE)
+
 docker-lock:  ## Re-lock the hashed requirements of the CUDA bases and the GPU engines
 	$(LOCK) docker/base-cu130-torch/requirements.in \
 		--index-url https://download.pytorch.org/whl/cu130 \
 		-o docker/base-cu130-torch/requirements.txt
 	$(LOCK) docker/base-cu130-paddle/requirements.in -o docker/base-cu130-paddle/requirements.txt
+	$(LOCK) docker/base-cu130-vllm/requirements.in --index-url https://pypi.org/simple \
+		-o docker/base-cu130-vllm/requirements.txt
+	$(LOCK) engines/surya2/requirements.in -c docker/base-cu130-vllm/requirements.txt \
+		--override engines/surya2/overrides.txt --index-url https://pypi.org/simple \
+		-o engines/surya2/requirements.txt
 	$(LOCK) engines/paddleocr/requirements.in -c docker/base-cu130-paddle/requirements.txt \
 		-o engines/paddleocr/requirements.txt
 	$(LOCK) engines/ppstructurev3/requirements.in -c docker/base-cu130-paddle/requirements.txt \
@@ -290,6 +302,16 @@ dots-mocr-model:  ## Download the pinned dots.mocr weights and code (6.1 GB) int
 
 dots-mocr-smoke:  ## Build the dots.mocr image and run, evaluate and report a synthetic dataset on the GPU (opt-in; needs dots-mocr-model)
 	$(UV) run --locked pytest -m gpu --run-docker --run-gpu tests/test_dots_mocr.py
+
+docker-surya2:  ## Build the Surya 2 engine image (needs the vLLM base) and print its image ID
+	docker build -t $(SURYA2_IMAGE) engines/surya2
+	@docker image inspect --format '$(SURYA2_IMAGE) {{.Id}}' $(SURYA2_IMAGE)
+
+surya2-model:  ## Download the pinned surya-ocr-2 weights (1.4 GB) into $(OCRBENCH_CACHE) (opt-in)
+	python3 engines/surya2/fetch_model.py $(OCRBENCH_CACHE)
+
+surya2-smoke:  ## Build the Surya 2 image and run, evaluate and report a synthetic dataset on the GPU (opt-in; needs surya2-model)
+	$(UV) run --locked pytest -m gpu --run-docker --run-gpu tests/test_surya2.py
 
 docker-infinityparser2:  ## Build the Infinity-Parser2-Flash engine image (needs the torch base) and print its image ID
 	docker build -t $(INFINITYPARSER2_IMAGE) engines/infinityparser2

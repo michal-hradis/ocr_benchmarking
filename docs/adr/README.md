@@ -16,6 +16,8 @@ Create short ADRs for agreed cross-engine decisions, including output schema, co
 | [0008: Strict text metrics and failure accounting](0008-strict-text-metrics.md) | proposed |
 | [0009: Flexible line alignment for CER/WER](0009-flexible-line-alignment.md) | proposed |
 | [0010: Reports from stored evaluations](0010-reports.md) | proposed |
+| [0011: Region markup converted on the host](0011-region-markup-converted-on-the-host.md) | proposed |
+| [0012: Inference servers inside engine containers](0012-inference-servers-inside-engine-containers.md) | proposed |
 
 ## Conventions
 

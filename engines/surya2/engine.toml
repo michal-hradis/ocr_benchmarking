@@ -1,0 +1,25 @@
+# Surya 2 full-page OCR: datalab-to/surya-ocr-2 served by vLLM inside the container, Surya's
+# full-page prompt, one greedy request per page; layout blocks with boxes, labels and HTML in
+# reading order (README.md next to this file; format: docs/RUNNER.md). Run with --cache <dir>
+# holding the weights from make surya2-model.
+name = "surya2"
+engine_version = "1"
+image = "ocrbench/engine-surya2:0.22.1-v1"
+model = "datalab-to/surya-ocr-2@3b3d4cdf88d6928b0acdc75181b13206ea67c4a3"
+
+[params]
+device = "cuda:0"
+max_tokens = 12288  # Surya's full-page limit; other parameters: README.md
+# Share of GPU memory for vLLM (weights, CUDA graphs and KV cache). Surya uses 0.85 of 24 GB, which
+# vLLM refuses when other processes hold more than about 3.5 GB; outputs do not depend on it.
+gpu_memory_utilization = 0.75
+
+[resources]
+cpus = 4
+memory = "24g"
+gpus = "all"
+shm_size = "4g"
+
+[timeouts]
+sample = 900
+startup = 1200
