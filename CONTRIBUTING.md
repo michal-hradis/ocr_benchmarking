@@ -31,6 +31,14 @@ Add regression tests for changed behavior. Normal developer tests should use syn
 Do not add CI workflows or a universal full-suite PR gate as part of unrelated changes.
 
 
+### Shared text conversion for engine outputs
+
+**Use the shared conversion rules for recognized text, not engine-specific markup cleaners.** Engines must keep native output unchanged. When the model returns Markdown or HTML, prefer the host-side `ocrbench.convert` converter ([prediction rules](docs/PREDICTIONS.md#host-side-conversion-of-native-output)) rather than copying its heading, emphasis, link, list, table, formula, entity, escape or whitespace handling into an adapter. The standardized prediction must contain recognized **plain text**, not formatting characters such as Markdown `*italic*` markers. This is **format extraction**, not permission to correct or normalize the model's spelling, characters or wording.
+
+For **positioned structured output** (for example, a JSON array of regions with bounding boxes and Markdown text), preserve the original regions, polygons, IDs and reading order. The existing `convert_native()` interface converts a **whole document to unpositioned regions**, so do **not** feed the entire positioned result to it. Instead, apply **the same shared text-conversion semantics to each region's text** while preserving its structure. If the shared code does not yet expose an appropriate per-element interface, extend/refactor `ocrbench.convert` with focused tests, or explicitly justify and document a narrow exception. Do not maintain an independent Markdown/HTML parser or partial formatting-regex implementation in each engine.
+
+For a new conversion path, add deterministic fixtures for the markup that engine can actually emit (as applicable: bold/italic, links, headings, lists, HTML entities and inline tags, tables, formulas, escapes, whitespace). Check that native output remains unchanged, markup is not counted as OCR text, and any genuine positions and reading order survive. Shared conversion-rule changes must follow the documented converter-versioning rules; do not silently change cross-engine scoring semantics.
+
 ### Development-set results for new engines and configurations
 
 Every PR that **adds a new OCR/HTR engine or predefined model/configuration/preset**, or **changes an existing configuration in a way that affects inference**, must evaluate **each new or affected configuration on all seven development pages** in [`datasets/dev-01.json`](datasets/dev-01.json). Synthetic fixtures and smoke tests remain necessary but do not replace this evaluation. If a PR adds two presets, run and report both; unchanged configurations do not need to be rerun.

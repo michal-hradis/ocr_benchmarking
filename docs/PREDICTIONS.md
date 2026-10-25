@@ -104,6 +104,14 @@ Inline rules: emphasis, links and other markup keep only their text; inline `$�
 
 Known limitations of converter version 1: `\[…\]` and `\(…\)` math delimiters are treated as ordinary Markdown escapes, and a whole page wrapped in a code fence stays one `other` region.
 
+### Markup-bearing text in positioned structured outputs
+
+The **shared text-conversion rules apply to text inside positioned model output too**. An engine may produce native JSON with categories, boxes and Markdown/HTML text per element. Keep that native JSON unchanged and preserve the real positions, region identifiers and reading order in `ocrbench.prediction` v1, but convert the **textual content** according to the same rules above: formatting delimiters are not recognized text, while the text within emphasis/links, table cells and formulas is retained according to its content type.
+
+**Do not pass the entire positioned document to `convert_native()`.** Its existing whole-document API builds **unpositioned** regions and would discard the model's geometry and reading order. Reuse shared conversion logic at the per-region level; when no suitable shared API exists, extend/refactor `ocrbench.convert` rather than reimplementing its parsing rules in every adapter. If an engine-specific exception is unavoidable, document why and test it against the shared semantics.
+
+This is **markup-to-text conversion, not transcription correction**: do not alter recognized spelling, historical glyphs or punctuation to make a model score better. Tests should exercise representative formatting and verify that both page/region text and genuine polygons/reading order are preserved. Changes to the shared converter's rules require the converter-version change documented above; do not introduce a separate, silently inconsistent rule set for positioned engines.
+
 ## Validation findings
 
 | Severity | Meaning | Examples (`code`) |
