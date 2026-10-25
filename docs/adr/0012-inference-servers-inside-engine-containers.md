@@ -1,6 +1,6 @@
 # 0012: Inference servers inside engine containers
 
-- Status: proposed
+- Status: accepted
 - Date: 2026-10-25
 - Related issue: [#67](https://github.com/michal-hradis/ocr_benchmarking/issues/67)
 
@@ -12,6 +12,7 @@ Several VLM pipelines are built around an inference server, usually vLLM, reache
 
 - An engine may start an inference server as a **child process of its adapter inside the engine container**, listening on the loopback interface only. The runner protocol is unchanged: the adapter still reads `job.json`, processes samples in order and writes `result.json`. The server runs under `--network none`, and the adapter stops it at the end.
 - An engine never starts other containers and never uses the Docker socket.
+- The server reserves at most 0.6 of the GPU's memory (vLLM `gpu_memory_utilization` ≤ 0.6); the adapter rejects a larger share.
 - Server and model versions, the full server command and the GPU memory share are pinned and recorded per sample.
 - vLLM pins its own torch, so it gets its own base family `base-cu130-vllm` ([ADR 0004](0004-docker-base-image-families.md), [DOCKER.md](../DOCKER.md)).
 - Kernels compiled at run time (Triton, torch.compile, FlashInfer) are cached under `/cache`, because the runner's `/tmp` is mounted `noexec`.

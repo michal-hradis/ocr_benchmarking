@@ -84,7 +84,7 @@ def test_server_command_has_suryas_settings():
         "--no-enforce-eager --max-num-seqs 32 --dtype bfloat16 --max-model-len 18000",
         "--max-num-batched-tokens 8192 --enable-prefix-caching",
         '--mm-processor-kwargs {"min_pixels": 3136, "max_pixels": 6291456}',
-        "--served-model-name datalab-to/surya-ocr-2 --gpu-memory-utilization 0.85",
+        "--served-model-name datalab-to/surya-ocr-2 --gpu-memory-utilization 0.6",
         '--speculative-config {"method": "mtp", "num_speculative_tokens": 2}',
     ):
         assert expected in options
@@ -101,7 +101,7 @@ def test_server_command_has_suryas_settings():
         ({"max_tokens": 100.0}, "max_tokens"),
         ({"max_tokens": 18000}, "below the 18000-token context"),
         ({"gpu_memory_utilization": 0}, "gpu_memory_utilization"),
-        ({"gpu_memory_utilization": 1.5}, "gpu_memory_utilization"),
+        ({"gpu_memory_utilization": 0.85}, r"gpu_memory_utilization must be in \(0, 0.6\]"),
         ({"mtp": 1}, "mtp"),
         ({"startup_seconds": -1}, "startup_seconds"),
     ],
@@ -116,11 +116,11 @@ def test_params_defaults():
     assert s2.DEFAULT_PARAMS == {
         "device": "cuda:0",
         "max_tokens": 12288,
-        "gpu_memory_utilization": 0.85,
+        "gpu_memory_utilization": 0.6,
         "mtp": True,
         "startup_seconds": 900,
     }
-    assert s2.parse_params(CONFIG["params"]) == s2.DEFAULT_PARAMS | {"gpu_memory_utilization": 0.75}
+    assert s2.parse_params(CONFIG["params"]) == s2.DEFAULT_PARAMS
 
 
 def page_image(gray, size, white_area=False):
@@ -346,14 +346,14 @@ def test_adapter_follows_the_engine_protocol(tmp_path):
     assert (environment["vllm"], environment["surya-ocr"]) == ("0.20.1+fake", "0.22.1+fake")
     assert environment["gpu"] == "Fake GPU"
     assert environment["server_command"][:2] == ["vllm", "serve"]
-    assert "0.75" in environment["server_command"]
+    assert "0.6" in environment["server_command"]
     models = extra["models"]
     assert models["job_model"] == CONFIG["model"]
     assert (models["repository"], models["revision"]) == (s2.REPOSITORY, s2.REVISION)
     assert set(models["files"]) == {"config.json", "model.safetensors"}
     assert models["prompt_sha256"] == UPSTREAM_PROMPT_SHA256
     assert (models["temperature"], models["top_p"]) == (0.0, 0.1)
-    assert extra["params"] == s2.DEFAULT_PARAMS | {"gpu_memory_utilization": 0.75}
+    assert extra["params"] == s2.DEFAULT_PARAMS
 
     big = records["big"]["engine_extra"]["model_image"]
     assert big["width"] * big["height"] <= 3072 * 2048

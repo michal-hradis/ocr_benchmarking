@@ -70,7 +70,7 @@ The adapter makes exactly one greedy request per page, so that runs can be repea
 | --- | --- | --- |
 | `device` | `cuda:0` | `cuda:<n>` |
 | `max_tokens` | 12288 | Generated tokens before the output counts as truncated (Surya's full-page limit); vLLM also stops at the 18,000-token context |
-| `gpu_memory_utilization` | 0.85 (Surya's); **0.75 in `engine.toml`** | Share of the GPU's memory vLLM reserves for the weights, CUDA graphs and key/value cache. vLLM refuses to start when less is free. On a 24 GB GPU, 0.85 needs 20 GB free, which fails when other processes hold more than about 3.5 GB. Samples are sent one at a time, so the share does not change outputs |
+| `gpu_memory_utilization` | **0.6**, also the maximum ([ADR 0012](../../docs/adr/0012-inference-servers-inside-engine-containers.md)); Surya uses 0.85 | Share of the GPU's memory vLLM reserves for the weights, CUDA graphs and key/value cache. vLLM refuses to start when less is free. Samples are sent one at a time, so the share does not change outputs |
 | `mtp` | `true` | MTP speculative decoding with two tokens (Surya's `VLLM_ENABLE_MTP`). With greedy decoding, speculation does not change which tokens are chosen, up to floating-point differences |
 | `startup_seconds` | 900 | Time allowed for the server to become ready |
 
@@ -90,7 +90,7 @@ The adapter writes the native output unchanged (`output.html`) and a positioned 
 - A failed request (for example an out-of-memory error in the server) fails only that sample. If the server exits, that sample and every later one fail with its log tail.
 - Every sample fails when the GPU is unusable, the parameters are invalid, the model directory is missing or does not match `models.sha256`, or the server does not start (the message has the end of its log).
 
-**Memory.** vLLM reserves `gpu_memory_utilization` of the GPU's memory up front: 0.75 × 24 GB = 18 GB on an RTX 4090. The bfloat16 weights take about 1.4 GB; most of the rest is key/value cache and CUDA graphs. The peak memory actually used per page is not measured.
+**Memory.** vLLM reserves `gpu_memory_utilization` of the GPU's memory up front: 0.6 × 24 GB = 14.4 GB on an RTX 4090. The bfloat16 weights take about 1.4 GB; most of the rest is key/value cache and CUDA graphs. The peak memory actually used per page is not measured.
 
 **Time.** Measured on an RTX 4090 for dev-01 (run `dev01-surya2-0.22.1-v1`):
 
