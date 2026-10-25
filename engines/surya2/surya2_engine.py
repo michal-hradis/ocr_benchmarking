@@ -68,11 +68,12 @@ REGION_TYPES = {
     "Bibliography": "text",
 }
 # Engine parameters (job.json "params"), README.md. max_tokens is Surya's
-# SURYA_MAX_TOKENS_FULL_PAGE, gpu_memory_utilization and mtp its VLLM_* defaults.
+# SURYA_MAX_TOKENS_FULL_PAGE and mtp its VLLM_* default; gpu_memory_utilization is the
+# benchmark's limit for an in-container server (ADR 0012), below Surya's 0.85.
 DEFAULT_PARAMS: dict[str, Any] = {
     "device": "cuda:0",
     "max_tokens": 12288,
-    "gpu_memory_utilization": 0.85,
+    "gpu_memory_utilization": 0.6,
     "mtp": True,
     "startup_seconds": 900,
 }
@@ -99,8 +100,8 @@ def parse_params(params: dict[str, Any]) -> dict[str, Any]:
             f"max_tokens must be an integer from 1 to below the 18000-token context: {tokens!r}"
         )
     share = merged["gpu_memory_utilization"]
-    if type(share) not in (int, float) or not 0 < share <= 1:
-        raise AdapterError(f"gpu_memory_utilization must be in (0, 1]: {share!r}")
+    if type(share) not in (int, float) or not 0 < share <= 0.6:
+        raise AdapterError(f"gpu_memory_utilization must be in (0, 0.6]: {share!r}")
     if type(merged["mtp"]) is not bool:
         raise AdapterError(f"mtp must be true or false: {merged['mtp']!r}")
     startup = merged["startup_seconds"]

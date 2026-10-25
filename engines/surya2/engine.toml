@@ -10,9 +10,9 @@ model = "datalab-to/surya-ocr-2@3b3d4cdf88d6928b0acdc75181b13206ea67c4a3"
 [params]
 device = "cuda:0"
 max_tokens = 12288  # Surya's full-page limit; other parameters: README.md
-# Share of GPU memory for vLLM (weights, CUDA graphs and KV cache). Surya uses 0.85 of 24 GB, which
-# vLLM refuses when other processes hold more than about 3.5 GB; outputs do not depend on it.
-gpu_memory_utilization = 0.75
+# Share of GPU memory for vLLM (weights, CUDA graphs and KV cache), at most 0.6 (ADR 0012);
+# Surya uses 0.85. Outputs do not depend on it.
+gpu_memory_utilization = 0.6
 
 [resources]
 cpus = 4
