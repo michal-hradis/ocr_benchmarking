@@ -39,13 +39,13 @@ uv run ocrbench report runs/<run-id> -o reports/pylaia --inspect
 make pylaia-smoke                   # opt-in: build the image, run it on synthetic samples on the GPU
 ```
 
-The model is in the image, so inference needs no `--cache` and no network. The container runs with `--gpus all` (`[resources]` in `engine.toml`). Segmentation and recognition both use `device`. If the requested GPU is not visible, every sample fails with `engine-error` (`cuda:0 requested but 0 CUDA devices are visible`); there is no silent CPU fallback. With `device = "cpu"` both run on the CPU, which is slower and not the configuration recorded here.
+The model is in the image, so inference needs no `--cache` and no network. The container runs with `--gpus all` (`[resources]` in `engine.toml`). Segmentation and recognition both use `device`. If the requested GPU is not visible, every sample fails with `engine-error` (`cuda:0 requested but 0 CUDA devices are visible`); there is no silent CPU fallback. To run both stages on the CPU, use a copy of `engine.toml` with `device = "cpu"` **and without** `gpus` in `[resources]`: the runner passes `gpus` to Docker as `--gpus` whatever `device` says, so a host without the NVIDIA Container Toolkit fails to start the container otherwise. The CPU mode is slower, untested with the real image and not the configuration recorded here.
 
 ## Pipeline
 
 1. **Image.** Decoded as stored with Pillow (EXIF orientation not applied, [PREDICTIONS.md](../../docs/PREDICTIONS.md#positions)); modes other than grayscale and RGB are converted to RGB.
 2. **Segmentation.** This is the Kraken engine's code and model, including its [segmentation canvas](../kraken/README.md#parameters): an image less than `segmentation_min_height` pixels high is segmented on a taller canvas and the result moved back into image pixels, so paragraph crops (`unit: paragraph`) are segmented too. The adapter never reads PAGE XML or any other GT geometry, and it has no separate line-crop input mode.
-3. **Line crops.** For each Kraken line, the adapter crops the axis-aligned bounding box of its boundary polygon (rounded outwards and clipped to the image) from the original image converted to grayscale. Pixels outside the polygon are not masked, and the line is not dewarped. A line whose polygon has fewer than 3 points or an empty box is not recognized (`crop: null`).
+3. **Line crops.** For each Kraken line, the adapter crops the axis-aligned bounding box of its boundary polygon (rounded outwards and clipped to the image) from the original image converted to grayscale. Pixels outside the polygon are not masked, and the line is not dewarped. A line whose polygon has fewer than 3 points or an empty box is not recognized (`crop: null`), and the sample is marked `partial`.
 4. **Recognition.** PyLaia's `pylaia-htr-decode-ctc` path, called through PyLaia's own classes:
    - `ToImageTensor` inverts the crop and resizes it to the model's **fixed height of 128 pixels** with Lanczos, keeping the aspect ratio, then pads it to the model's minimum valid width.
    - Batches of `batch_size` crops are sorted by descending width and zero-padded (`PaddingCollater`), and run through the model.
@@ -77,7 +77,7 @@ For every sample the adapter writes into the sample directory:
 | `prediction.json` | Standardized prediction ([PREDICTIONS.md](../../docs/PREDICTIONS.md)), the primary output; lines carry `extra.kraken_id` |
 | `result.json` | Status, processing time and, in `extra`: `canvas_offset`; the numbers of Kraken lines and regions, uncropped lines and predicted lines and regions; the Kraken, both torch, CUDA and PyLaia versions; the GPU name; the model loading time; the model files with SHA-256; and the parameters |
 
-**Status.** An error in segmentation or recognition, for example CUDA out of memory, fails only that sample (`status: failed`, runner `engine-error`), and the container continues. If the recognizer process exits, the sample fails and the process is restarted for the next sample. An unusable GPU, invalid parameters, or a missing or unloadable model fail every sample. A page on which Kraken finds no lines, or only lines with blank text, is a **genuine empty result**: `success` with empty text and no regions.
+**Status.** An error in segmentation or recognition, for example CUDA out of memory, fails only that sample (`status: failed`, runner `engine-error`), and the container continues. If the recognizer process exits, the sample fails and the process is restarted for the next sample. An unusable GPU, invalid parameters, or a missing or unloadable model fail every sample. A page on which some segmented lines could not be cropped is `partial` (runner `partial`, scored on the text that was recognized); the message gives their number. A page on which Kraken finds no lines, or only lines with blank recognized text, is a **genuine empty result**: `success` with empty text and no regions.
 
 ## Tests
 

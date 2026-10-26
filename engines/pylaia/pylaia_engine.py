@@ -215,7 +215,14 @@ def process(models: tuple, params: dict, sample: dict, source: Path, out: Path) 
         "lines": sum(len(region["lines"]) for region in regions),
         "regions": len(regions),
     }
-    return {"status": "ok", "primary": "prediction.json", "extra": counts}
+    result: dict[str, Any] = {"status": "ok", "primary": "prediction.json", "extra": counts}
+    if counts["uncropped_lines"]:  # segmented text that was never recognized
+        result["status"] = "partial"
+        result["message"] = (
+            f"{counts['uncropped_lines']} of {len(records)} segmented lines have no usable "
+            "polygon and were not recognized"
+        )
+    return result
 
 
 def load(params: dict[str, Any]) -> tuple[tuple, dict[str, Any]]:

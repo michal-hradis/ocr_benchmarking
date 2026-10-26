@@ -6,7 +6,7 @@ image = "ocrbench/engine-pylaia:1.1.2-v1"
 model = "blla+pylaia-newseye-austrian@5361aa77db34d23cb23b27194c7c095f01f5ea54"  # segmentation + recognition
 
 [params]
-device = "cuda:0"
+device = "cuda:0"  # "cpu" also needs resources.gpus removed (README.md)
 recognition_model = "newseye-austrian"  # other parameters: README.md
 
 [resources]

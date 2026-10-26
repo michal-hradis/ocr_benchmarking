@@ -8,6 +8,7 @@ runs real Kraken segmentation and PyLaia recognition through ``ocrbench run``, `
 ``report``.
 """
 
+import dataclasses
 import importlib.util
 import io
 import json
@@ -171,6 +172,50 @@ def test_prediction_keeps_kraken_geometry_and_order_with_pylaia_text():
     assert [line.get("confidence") for line in region["lines"]] == [0.75, 0.75, None]
     with pytest.raises(pl.AdapterError, match="differ in length"):
         pl.result_to_prediction(segmentation, records[:2], "s1", (900, 420))
+
+
+@dataclasses.dataclass
+class FakeSegmentation:
+    lines: list
+    regions: dict
+
+
+class FakeSegmenter:
+    def __init__(self, lines):
+        self.lines = lines
+
+    def predict(self, im, config):
+        return FakeSegmentation(self.lines, NATIVE["segmentation"]["regions"])
+
+
+@pytest.mark.parametrize(
+    ("broken", "status", "message"),
+    [
+        (set(), "ok", None),
+        (
+            {1, 3},
+            "partial",
+            "2 of 5 segmented lines have no usable polygon and were not recognized",
+        ),
+    ],
+)
+def test_uncropped_lines_make_the_page_partial(tmp_path, broken, status, message):
+    Image.new("L", (900, 420), 255).save(tmp_path / "page.png")
+    lines = [
+        line | {"boundary": [[5, 3], [9, 3]]} if n in broken else line
+        for n, line in enumerate(NATIVE["segmentation"]["lines"])
+    ]
+    models = (FakeSegmenter(lines), None, FakeRecognizer())
+    params = pl.DEFAULT_PARAMS | {"segmentation_min_height": 0}
+    out = tmp_path / "out"
+    out.mkdir()
+    result = pl.process(models, params, {"id": "s", "image": "page.png"}, tmp_path, out)
+    assert (result["status"], result.get("message")) == (status, message)
+    assert result["extra"]["uncropped_lines"] == len(broken)
+    # A page with no segmented lines is a genuine empty result, not a partial one.
+    models = (FakeSegmenter([]), None, FakeRecognizer())
+    result = pl.process(models, params, {"id": "s", "image": "page.png"}, tmp_path, out)
+    assert (result["status"], result["extra"]["kraken_lines"]) == ("ok", 0)
 
 
 @pytest.mark.parametrize(
