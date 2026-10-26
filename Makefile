@@ -13,7 +13,7 @@
         docker-olmocr2 olmocr2-model olmocr2-smoke docker-deepseek-ocr2 deepseek-ocr2-model \
         deepseek-ocr2-smoke docker-hunyuanocr hunyuanocr-model hunyuanocr-smoke \
         docker-dots-mocr dots-mocr-model dots-mocr-smoke docker-cu130-vllm docker-surya2 \
-        surya2-model surya2-smoke
+        surya2-model surya2-smoke docker-pylaia pylaia-smoke
 
 UV ?= uv
 BASE_VERSION ?= 1
@@ -26,6 +26,7 @@ PADDLEOCR_IMAGE := ocrbench/engine-paddleocr:3.7.0-v2
 PPSTRUCTUREV3_IMAGE := ocrbench/engine-ppstructurev3:3.7.0-v1
 PADDLEOCR_VL_IMAGE := ocrbench/engine-paddleocr-vl:1.6-v1
 KRAKEN_IMAGE := ocrbench/engine-kraken:7.1.1-v1
+PYLAIA_IMAGE := ocrbench/engine-pylaia:1.1.2-v1
 LIGHTONOCR_IMAGE := ocrbench/engine-lightonocr:2-1B-v1
 FIREREDOCR_IMAGE := ocrbench/engine-fireredocr:2B-v1
 OVISOCR2_IMAGE := ocrbench/engine-ovisocr2:0.8B-v1
@@ -51,6 +52,9 @@ LOCK_FLAGS := --python-platform x86_64-manylinux_2_28 --generate-hashes --no-hea
 LOCK := $(UV) pip compile --python-version 3.12 $(LOCK_FLAGS)
 # The standalone OCR-D/Calamari image runs Python 3.11 (engines/ocrd-calamari/README.md).
 LOCK_PY311 := $(UV) pip compile --python-version 3.11 $(LOCK_FLAGS)
+# The PyLaia image's recognizer venv runs Python 3.10 with packages as of PyLaia 1.1.2's release
+# (engines/pylaia/README.md).
+LOCK_PYLAIA := $(UV) pip compile --python-version 3.10 --exclude-newer 2024-10-17 $(LOCK_FLAGS)
 export CPU_IMAGE CU130_TORCH_IMAGE CU130_PADDLE_IMAGE CU130_VLLM_IMAGE OCRBENCH_CACHE
 
 help:  ## List targets
@@ -151,6 +155,8 @@ docker-lock:  ## Re-lock the hashed requirements of the CUDA bases and the GPU e
 		--extra-index-url https://download.pytorch.org/whl/cu130 --index-strategy unsafe-best-match \
 		-o engines/doctr/requirements.txt
 	$(LOCK_PY311) engines/ocrd-calamari/requirements.in -o engines/ocrd-calamari/requirements.txt
+	$(LOCK_PYLAIA) engines/pylaia/pylaia-requirements.in --index-url https://pypi.org/simple \
+		-o engines/pylaia/pylaia-requirements.txt
 
 docker-smoke:  ## Smoke-test built bases, a derived CPU image and the fake-engine runner (opt-in)
 	$(UV) run --locked pytest -m docker --run-docker tests/test_docker_images.py tests/test_runner.py
@@ -202,6 +208,14 @@ docker-kraken:  ## Build the Kraken engine image (needs the torch base) and prin
 
 kraken-smoke:  ## Build the Kraken image and run, evaluate and report a synthetic dataset on the GPU (opt-in)
 	$(UV) run --locked pytest -m gpu --run-docker --run-gpu tests/test_kraken.py
+
+# The build context is engines/: the image reuses the Kraken engine's lock and adapter.
+docker-pylaia:  ## Build the PyLaia engine image (needs the torch base), with its model, and print its image ID
+	docker build -t $(PYLAIA_IMAGE) -f engines/pylaia/Dockerfile engines
+	@docker image inspect --format '$(PYLAIA_IMAGE) {{.Id}}' $(PYLAIA_IMAGE)
+
+pylaia-smoke:  ## Build the PyLaia image and run, evaluate and report a synthetic dataset on the GPU (opt-in)
+	$(UV) run --locked pytest -m gpu --run-docker --run-gpu tests/test_pylaia.py
 
 docker-lightonocr:  ## Build the LightOnOCR-2 engine image (needs the torch base) and print its image ID
 	docker build -t $(LIGHTONOCR_IMAGE) engines/lightonocr

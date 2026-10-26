@@ -1,0 +1,6 @@
+# PyLaia 1.1.2 and the torch 1.13 it pins, for the separate Python 3.10 venv (README.md); locked
+# with the package versions available on PyLaia's release date (make docker-lock).
+pylaia==1.1.2
+torch==1.13.1
+torchvision==0.14.1
+torchaudio==0.13.1
