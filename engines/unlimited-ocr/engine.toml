@@ -1,0 +1,26 @@
+# Unlimited-OCR: baidu/Unlimited-OCR (1.0) served by vLLM inside the container, the model card's
+# document prompt, one greedy full-page request per page in crop ("gundam") mode with the official
+# no-repeat n-gram processor, generating up to the end of the 32,768-token context; layout blocks
+# with boxes, labels and Markdown in model order (README.md next to this file; format:
+# docs/RUNNER.md). Run with --cache <dir> holding the weights from make unlimited-ocr-model.
+name = "unlimited-ocr"
+engine_version = "1"
+image = "ocrbench/engine-unlimited-ocr:1.0-v1"
+model = "baidu/Unlimited-OCR@07dea832e22aefee32ad281d4b80551282e1c168"
+
+[params]
+device = "cuda:0"
+# max_tokens is left out: generation runs to the end token or the end of the context, as the
+# model card's infer(max_length=32768); other parameters: README.md
+# Share of GPU memory for vLLM (weights, CUDA graphs and KV cache), at most 0.6 (ADR 0012).
+gpu_memory_utilization = 0.6
+
+[resources]
+cpus = 4
+memory = "24g"
+gpus = "all"
+shm_size = "4g"
+
+[timeouts]
+sample = 1800
+startup = 1200
