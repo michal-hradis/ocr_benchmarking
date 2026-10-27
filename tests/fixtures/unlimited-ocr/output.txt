@@ -1,0 +1,10 @@
+<|det|>page_number [463, 50, 586, 66]<|/det|>-12-
+<|det|>title [100, 80, 900, 120]<|/det|>The **Daily** Chronicle
+<|det|>text [100, 130, 900, 300]<|/det|>The quick brown fox jumps over
+the lazy dog &amp; the river.
+<|det|>image [100, 310, 500, 600]<|/det|>
+<|det|>image_caption [100, 610, 500, 640]<|/det|>Figure 1: A *fox*.
+<|det|>table [100, 650, 900, 800]<|/det|><table><tr><td>Year</td><td>Copies</td></tr><tr><td>1923</td><td>2O26</td></tr></table>
+<|det|>equation [100, 810, 900, 850]<|/det|>\[E = mc^2\]
+<|det|>footer [0, 990, 999, 1010]<|/det|>Footer
+<|det|>text [12, 30]<|/det|>A block without a valid box.

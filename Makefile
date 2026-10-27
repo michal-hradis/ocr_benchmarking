@@ -14,7 +14,8 @@
         deepseek-ocr2-smoke docker-hunyuanocr hunyuanocr-model hunyuanocr-smoke \
         docker-dots-mocr dots-mocr-model dots-mocr-smoke docker-cu130-vllm docker-surya2 \
         surya2-model surya2-smoke docker-pylaia pylaia-smoke docker-cu130-vllm026 \
-        docker-nemotron-parse nemotron-parse-model nemotron-parse-smoke
+        docker-nemotron-parse nemotron-parse-model nemotron-parse-smoke docker-unlimited-ocr \
+        unlimited-ocr-model unlimited-ocr-smoke
 
 UV ?= uv
 BASE_VERSION ?= 1
@@ -46,6 +47,7 @@ HUNYUANOCR_IMAGE := ocrbench/engine-hunyuanocr:1.5-v1
 DOTS_MOCR_IMAGE := ocrbench/engine-dots-mocr:3B-v1
 SURYA2_IMAGE := ocrbench/engine-surya2:0.22.1-v1
 NEMOTRON_PARSE_IMAGE := ocrbench/engine-nemotron-parse:3.5-v1
+UNLIMITED_OCR_IMAGE := ocrbench/engine-unlimited-ocr:1.0-v1
 # Host directory with the user-supplied PERO OCR model bundles (engines/pero/README.md).
 PERO_BUNDLES ?= dev_data/pero_ocr_models
 # Host directory mounted as /cache for engines whose weights are not in the image.
@@ -348,6 +350,16 @@ nemotron-parse-model:  ## Download the pinned Nemotron 3.5 Parse weights (2.5 GB
 
 nemotron-parse-smoke:  ## Build the Nemotron 3.5 Parse image and run, evaluate and report a synthetic dataset on the GPU (opt-in; needs nemotron-parse-model)
 	$(UV) run --locked pytest -m gpu --run-docker --run-gpu tests/test_nemotron_parse.py
+
+docker-unlimited-ocr:  ## Build the Unlimited-OCR engine image (needs the vLLM 0.26 base) and print its image ID
+	docker build -t $(UNLIMITED_OCR_IMAGE) engines/unlimited-ocr
+	@docker image inspect --format '$(UNLIMITED_OCR_IMAGE) {{.Id}}' $(UNLIMITED_OCR_IMAGE)
+
+unlimited-ocr-model:  ## Download the pinned Unlimited-OCR weights (6.7 GB) into $(OCRBENCH_CACHE) (opt-in)
+	python3 engines/unlimited-ocr/fetch_model.py $(OCRBENCH_CACHE)
+
+unlimited-ocr-smoke:  ## Build the Unlimited-OCR image and run, evaluate and report a synthetic dataset on the GPU (opt-in; needs unlimited-ocr-model)
+	$(UV) run --locked pytest -m gpu --run-docker --run-gpu tests/test_unlimited_ocr.py
 
 docker-infinityparser2:  ## Build the Infinity-Parser2-Flash engine image (needs the torch base) and print its image ID
 	docker build -t $(INFINITYPARSER2_IMAGE) engines/infinityparser2
