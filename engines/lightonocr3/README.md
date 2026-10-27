@@ -83,7 +83,7 @@ The container runs with `--gpus all` (`[resources]` in the configurations), and 
    The adapter waits until `/health` answers (at most `startup_seconds`). The full command, the environment it sets, the GPU and its compute capability are recorded per sample (`extra.environment`).
 2. **Image.** The image is decoded as stored (EXIF orientation is not applied; other modes are converted to RGB) and, as LightOn's client does (`render.fit`), scaled down with Lanczos so that its longest side is at most **2048** pixels for 0.8B and 4B and **1540** for 1B, keeping the aspect ratio; a smaller image is not enlarged. The size sent is recorded as `extra.sent_image`. A 4194 × 6192 newspaper page becomes 1387 × 2048 for 0.8B and 4B and 1043 × 1540 for 1B.
    - **0.8B and 4B** (Qwen3.5 image processor, 16-pixel patches merged 2 × 2): the image is rounded to multiples of 32 pixels and each 32 × 32 block is one image token, so a 2048-pixel page has about 2,000–4,000 image tokens. The checkpoint's processor accepts up to 16.7 million pixels; the 2048-pixel limit is the client's, and the training resolution according to LightOn. LightOn's best olmOCR-bench scores used 400 DPI renderings capped at 5 megapixels (about 4,800 image tokens); this engine keeps the client default, not a benchmark-specific resolution.
-   - **1B** (Pixtral, 14-pixel patches merged 2 × 2): the processor would also scale to 1540 pixels; each 28 × 28 block is one image token, about 2,000–2,300 on the dev-01 pages.
+   - **1B** (Pixtral, 14-pixel patches merged 2 × 2): the processor would also scale to 1540 pixels; each 28 × 28 block is one image token, about 1,800–2,300 on the dev-01 pages.
    - **Tall images** keep their aspect ratio: a 1600 × 6975 strip of three book pages becomes 470 × 2048 (or 353 × 1540), so its text gets small. Pages are not tiled.
 3. **Request.** One chat request per page, as `lightonocr.client.LightOnOCR.ocr` sends it: a user message with the image as a PNG data URL and, in grounding mode, a text part `grounding`; `chat_template_kwargs` `{"enable_thinking": false}`. The prompts are the model cards' only two: "Other instructions are out of distribution". The sample `language` is not used.
    - **Sampling** is the client's for LightOnOCR-3: temperature **0.2** and top_p **1.0**, with a fixed `seed` (0) per request so that a sample does not depend on the samples before it. LightOn's README advises temperature 0.1 rather than greedy decoding and the model cards' examples use 0.2 with top_p 0.9; the client's values were chosen for #92 because they are what LightOn's own tool sends. The 1B checkpoint's `generation_config.json` (temperature 0.2, top_p 0.9) is overridden by the request.
@@ -127,7 +127,17 @@ The container runs with `--gpus all` (`[resources]` in the configurations), and 
 - A failed request (for example an out-of-memory error in the server) fails only that sample. If the server exits, that sample and every later one fail with its log tail.
 - Every sample fails when the GPU is unusable, the parameters are invalid, the checkpoint's model directory is missing or does not match its checksums, or the server does not start (the message has the end of its log).
 
-MEMORY_AND_TIME
+**Memory.** vLLM reserves `gpu_memory_utilization` of the GPU's memory up front: 0.6 × 24 GB = 14.1 GiB on an RTX 4090. Measured at start-up (vLLM's log):
+
+| Checkpoint | Weights | Key/value cache | Cache in tokens |
+| --- | ---: | ---: | ---: |
+| 0.8B | 1.7 GiB | 10.8 GiB | 846,000 (most layers keep a fixed-size linear-attention state instead) |
+| 1B | 1.9 GiB | 11.5 GiB | 108,000 |
+| 4B | 8.6 GiB | 3.6 GiB | 104,700 |
+
+Each holds more than five full contexts, so all three checkpoints fit an RTX 4090 at the benchmark's share. The peak memory actually used per page is not measured.
+
+**Time.** See the dev-01 results below. `extra.request_seconds` is the time of the request (inference), `extra.tokens_per_second` the generated tokens per second of it, and the sample's `seconds` the whole page including image encoding and parsing. Start-up (server and model load, compilation, CUDA graph capture) took 66–98 s with the compile caches of earlier runs, and 208 s for the 4B checkpoint's first start; it is not part of the per-sample engine time.
 
 ## Outputs
 
@@ -139,7 +149,16 @@ MEMORY_AND_TIME
 | `prediction.json` | grounding | The positioned prediction with region markup (above): the primary output |
 | `result.json` | both | Status, processing time and, in `extra`: `finish_reason`, `tail_repetition`, `prompt_tokens`, `generated_tokens`, `max_tokens`, `request_seconds`, `tokens_per_second`, `source_image`, `sent_image`; in grounding mode `blocks`, `labels`, `blocks_without_box`, `continuation_blocks`, `unscored_blocks`; the vLLM, transformers, huggingface-hub, torch and CUDA versions, the GPU and its compute capability, the server command and environment, the start-up time, the model (repository, revision, file checksums, the configured `model`, the mode, the prompt, the chat template arguments, the context and the longest edge) and the parameters |
 
-RESULTS
+## Results on dev-01
+
+Measured in runs `dev01-lightonocr3-<preset>-v1` (image `sha256:4e6cbd21…`) on an RTX 4090; the scores are in the pull request for [#92](https://github.com/michal-hradis/ocr_benchmarking/issues/92). The development set is seven pages and not representative.
+
+- **Book pages.** The four 1600-pixel German and Latin prints ended normally with every preset, at 0.6–12.3 % CER; the checkpoints differ little there. In grounding mode the three checkpoints give nearly the same boxes for the same page, mostly with running heads, page numbers and library stamps as their own blocks. No model writes a long s (ſ) in Fraktur.
+- **Newspapers.** The two Czech newspaper pages (4194 × 6192 and 3509 × 5239) are sent at 1387 × 2048 (1043 × 1540 for 1B), so their text is small. On `bd497a62` every preset except 4B plain ends in a loop that repeats a sentence or paragraph until the end of the context (`truncated`), after reading part of the page; on `3e6309d0` only 1B grounding does. **4B in plain mode returns an empty page (an immediate end token) on both newspapers.** The same happened with seeds 1 and 2 and with greedy decoding, while 4B in grounding mode reads them.
+- **Glagolitic page.** No checkpoint reads the script: 1B and 4B write Ethiopic and 0.8B Devanagari syllables until the end of the context (CER far above 100 %, which dominates the micro-averaged CER). The one exception is 1B in grounding mode, which returns an empty page.
+- **Repetition.** No preset has a repetition guard upstream; every truncated page ends in a loop (`extra.tail_repetition`).
+- **Time.** At about 100 generated tokens/s for 4B, 300 for 1B and 400 for 0.8B, a book page took 4–11 s (4B) or 1.4–3.3 s (0.8B, 1B). A newspaper page that runs to the end of the context took 157 s (4B) or 39–47 s.
+- **Tall images.** A test image of one 1600 × 2325 book page repeated three times (1600 × 6975, not committed) is sent as 470 × 2048 (353 × 1540 for 1B). 4B in grounding mode read only the first two copies, in order, and its boxes covered x 488–910 instead of the text's 100–930, which it gets right on the single page. 1B read all three copies in order, with more misreadings and one paragraph it made up. The image path works for tall pages, but very narrow images are outside what the models handle well.
 
 ## Tests
 
