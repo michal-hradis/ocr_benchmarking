@@ -1,0 +1,120 @@
+#!/usr/bin/env python3
+"""Fake `vllm serve`: an OpenAI-compatible chat completions server on the loopback interface that
+"generates" a fixed output chosen by the gray level of the page image's top-left corner and the
+mode of the request (../README.md). It checks the command line and every request as the adapter
+must send them."""
+
+import base64
+import io
+import json
+import os
+import sys
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
+
+from PIL import Image
+
+HERE = Path(__file__).resolve().parent
+# Pinned revision: (context, longest edge, pixels per image token side, thinking flag).
+CHECKPOINTS = {
+    "36d8636925327c671bd8e479c517a004f7566bd9": (18000, 2048, 32, True),
+    "23d544085c886bbdace647bcfab91203299417e2": (16384, 1540, 28, False),
+    "b71010f095dc3735de7ee6b9969bff8f8f50b39a": (18000, 2048, 32, True),
+}
+CONTEXT, EDGE, TOKEN, THINKING = 0, 0, 0, False
+
+
+def news(limit, grounding):
+    if grounding:
+        blocks = [
+            f"![text]({50},{n * 9},{950},{n * 9 + 8}) Line {n} of a very long newspaper page.\n\n"
+            for n in range(1, 101)
+        ]
+    else:
+        blocks = [f"Line {n} of a very long newspaper page.\n\n" for n in range(1, 101)]
+    text = "".join(blocks)
+    while len(text) < limit:
+        text += "Line 100 of a very long newspaper page.\n"
+    return text[:limit], "length"
+
+
+def output(gray, limit, grounding):
+    if gray > 190:  # 200
+        name = "output.md" if grounding else "page.md"
+        return (HERE.parent.parent / name).read_text(encoding="utf-8"), "stop"
+    if gray > 125:  # 150
+        return "This page has no layout markers.", "stop"
+    if gray > 90:  # 100
+        return news(limit, grounding)
+    if gray > 75:  # 80
+        return "![text](0,0,1000,1000) Cut off", "abort"
+    return "", "stop"
+
+
+class Handler(BaseHTTPRequestHandler):
+    def log_message(self, *args):
+        pass
+
+    def reply(self, status, body):
+        data = json.dumps(body).encode()
+        self.send_response(status)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(data)))
+        self.end_headers()
+        self.wfile.write(data)
+
+    def do_GET(self):
+        self.reply(200 if self.path == "/health" else 404, {})
+
+    def do_POST(self):
+        assert self.path == "/v1/chat/completions"
+        request = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
+        (message,) = request["messages"]
+        image_part, *text_part = message["content"]
+        assert message["role"] == "user"
+        assert text_part in ([], [{"type": "text", "text": "grounding"}])
+        assert request["model"] == "lightonocr3"
+        assert request["chat_template_kwargs"] == {"enable_thinking": False}
+        assert (request["temperature"], request["top_p"], request["seed"]) == (0.2, 1.0, 0)
+        url = image_part["image_url"]["url"]
+        assert image_part["type"] == "image_url" and url.startswith("data:image/png;base64,")
+        image = Image.open(io.BytesIO(base64.b64decode(url.split(",", 1)[1]))).convert("L")
+        assert max(image.size) <= EDGE  # scaled down by the adapter
+        gray = image.getpixel((image.width // 40, image.height // 40))
+        if 35 < gray < 65:  # 50: a request error
+            return self.reply(500, {"error": {"message": "fake CUDA out of memory"}})
+        if gray < 35:  # 20: the server dies
+            os._exit(1)
+        prompt = (image.width // TOKEN) * (image.height // TOKEN) + 10
+        # vLLM generates up to max_tokens, at most to the end of the context (its default).
+        limit = min(request.get("max_tokens") or CONTEXT, CONTEXT - prompt)
+        text, reason = output(gray, limit, bool(text_part))
+        self.reply(
+            200,
+            {
+                "choices": [{"message": {"content": text}, "finish_reason": reason}],
+                "usage": {"prompt_tokens": prompt, "completion_tokens": len(text)},
+            },
+        )
+
+
+def main():
+    global CONTEXT, EDGE, TOKEN, THINKING
+    args = sys.argv[1:]
+    assert args[0] == "serve"
+    CONTEXT, EDGE, TOKEN, THINKING = CHECKPOINTS[Path(args[1]).name]
+    assert args[args.index("--host") + 1] == "127.0.0.1"
+    assert args[args.index("--max-model-len") + 1] == str(CONTEXT)
+    assert args[args.index("--limit-mm-per-prompt") + 1] == '{"image": 1}'
+    assert "--no-enable-prefix-caching" in args
+    kwargs = '{"enable_thinking": false}'
+    assert (kwargs in args) == THINKING
+    if os.environ.get("FAKE_VLLM_EXIT"):
+        print("fake vLLM start-up failure", flush=True)
+        sys.exit(3)
+    port = int(args[args.index("--port") + 1])
+    ThreadingHTTPServer(("127.0.0.1", port), Handler).serve_forever()
+
+
+if __name__ == "__main__":
+    main()

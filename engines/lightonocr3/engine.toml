@@ -1,0 +1,27 @@
+# LightOnOCR-3 engine. This preset: LightOnOCR-3-4B, grounding mode: the image and the prompt "grounding", one labeled box (0-1000) per layout block before its Markdown; positioned layout output.
+# Other checkpoints and modes are presets/*.toml.
+# One request per page as LightOn's client sends it (README.md next to this file; format: docs/RUNNER.md).
+# Run with --cache <dir> holding the weights from make lightonocr3-model.
+name = "lightonocr3-4b-grounding"
+engine_version = "1"
+image = "ocrbench/engine-lightonocr3:3-v1"
+model = "lightonai/LightOnOCR-3-4B@b71010f095dc3735de7ee6b9969bff8f8f50b39a"
+
+[params]
+checkpoint = "4B"
+mode = "grounding"
+device = "cuda:0"
+# max_tokens is left out: generation runs to the end token or the end of the context, as LightOn's
+# client; other parameters: README.md
+# Share of GPU memory for vLLM (weights, CUDA graphs and KV cache), at most 0.6 (ADR 0012).
+gpu_memory_utilization = 0.6
+
+[resources]
+cpus = 4
+memory = "24g"
+gpus = "all"
+shm_size = "4g"
+
+[timeouts]
+sample = 1200
+startup = 1200
