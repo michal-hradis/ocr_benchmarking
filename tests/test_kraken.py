@@ -403,7 +403,7 @@ def test_tiled_segmentation_keeps_every_line_once_in_kraken_reading_order(monkey
     assert line.regions == ["c1@750"]
     # Each band's column regions are cut to the rows the band owns.
     boundaries = {r.id: r.boundary for r in segmentation.regions["text"]}
-    assert seen["regions"] == segmentation.regions["text"]
+    assert seen["regions"] is None  # band regions would make the order read band by band
     assert same_polygon(boundaries["c0@0"], [[0, 0], [250, 0], [250, 875], [0, 875]])
     assert same_polygon(boundaries["c0@750"], [[0, 875], [250, 875], [250, 1625], [0, 1625]])
     assert same_polygon(boundaries["c2@1500"], [[600, 1625], [850, 1625], [850, 2500], [600, 2500]])
