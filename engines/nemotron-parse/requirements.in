@@ -1,0 +1,8 @@
+# The dependencies of the nemotron-parse 3.5.0.post7 package (pyproject.toml of the pinned model
+# revision, README.md) not already in the vLLM 0.26 base. The package itself is built from the
+# pinned source (source.sha256) without dependencies and without build isolation, with the
+# base's setuptools 80.10.2 instead of the 80.9.0 its pyproject.toml names for building.
+accelerate==1.12.0
+timm==1.0.22
+beautifulsoup4==4.13.3
+packaging>=24.2
