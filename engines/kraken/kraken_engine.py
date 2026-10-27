@@ -304,7 +304,8 @@ def segment(segmenter: Any, config: Any, image: Any, params: dict) -> tuple[Any,
     (``segmentation_tiles``), each scaled to the model's input height on its own (on a canvas
     like a short image), so small text is seen at a higher resolution. A band keeps the lines
     whose baseline middle lies in its own rows and its regions cut to those rows; the lines of
-    all bands are then put into Kraken's polygonal reading order over the whole page. Reading
+    all bands are then put into Kraken's polygonal reading order over the whole page, from the
+    lines alone: with the cut regions, the order would read the page band by band. Reading
     orders from a reading order model of a custom segmentation model are not used, as they
     cover only one band.
     """
@@ -329,8 +330,7 @@ def segment(segmenter: Any, config: Any, image: Any, params: dict) -> tuple[Any,
                 if len(boundary) >= 3:
                     region = dataclasses.replace(region, boundary=boundary)
                     regions.setdefault(kind, []).append(region)
-    flat = [region for found in regions.values() for region in found]
-    order = polygonal_reading_order(lines, first.text_direction[-2:], flat) if lines else []
+    order = polygonal_reading_order(lines, first.text_direction[-2:], None) if lines else []
     segmentation = dataclasses.replace(
         first, lines=[lines[i] for i in order], regions=regions, line_orders=[]
     )
