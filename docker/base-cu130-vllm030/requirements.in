@@ -1,0 +1,7 @@
+# vLLM 0.30.0 with the torch 2.13.0 it pins (CUDA 13.0 wheels) and transformers 5.16.1: the serving
+# path LightOn tests for LightOnOCR-3 (engines/lightonocr3). transformers 5.17 renamed
+# PixtralRotaryEmbedding, which vLLM 0.30.0 imports for the LightOnOCR 1B architecture. A separate
+# family from base-cu130-vllm (0.20.1) and base-cu130-vllm026 (0.26.0), which stay unchanged
+# (docs/DOCKER.md).
+vllm==0.30.0
+transformers==5.16.1

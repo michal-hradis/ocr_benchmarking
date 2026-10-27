@@ -15,7 +15,8 @@
         docker-dots-mocr dots-mocr-model dots-mocr-smoke docker-cu130-vllm docker-surya2 \
         surya2-model surya2-smoke docker-pylaia pylaia-smoke docker-cu130-vllm026 \
         docker-nemotron-parse nemotron-parse-model nemotron-parse-smoke docker-unlimited-ocr \
-        unlimited-ocr-model unlimited-ocr-smoke
+        unlimited-ocr-model unlimited-ocr-smoke docker-cu130-vllm030 docker-lightonocr3 \
+        lightonocr3-model lightonocr3-smoke
 
 UV ?= uv
 BASE_VERSION ?= 1
@@ -24,6 +25,7 @@ CU130_TORCH_IMAGE ?= ocrbench/base-cu130-torch:torch2.14.1-py3.12-v$(BASE_VERSIO
 CU130_PADDLE_IMAGE ?= ocrbench/base-cu130-paddle:paddle3.4.0-py3.12-v$(BASE_VERSION)
 CU130_VLLM_IMAGE ?= ocrbench/base-cu130-vllm:vllm0.20.1-py3.12-v$(BASE_VERSION)
 CU130_VLLM026_IMAGE ?= ocrbench/base-cu130-vllm026:vllm0.26.0-py3.12-v$(BASE_VERSION)
+CU130_VLLM030_IMAGE ?= ocrbench/base-cu130-vllm030:vllm0.30.0-py3.12-v$(BASE_VERSION)
 TESSERACT_IMAGE := ocrbench/engine-tesseract:5.3.0-v2
 PADDLEOCR_IMAGE := ocrbench/engine-paddleocr:3.7.0-v2
 PPSTRUCTUREV3_IMAGE := ocrbench/engine-ppstructurev3:3.7.0-v1
@@ -48,6 +50,7 @@ DOTS_MOCR_IMAGE := ocrbench/engine-dots-mocr:3B-v1
 SURYA2_IMAGE := ocrbench/engine-surya2:0.22.1-v1
 NEMOTRON_PARSE_IMAGE := ocrbench/engine-nemotron-parse:3.5-v1
 UNLIMITED_OCR_IMAGE := ocrbench/engine-unlimited-ocr:1.0-v1
+LIGHTONOCR3_IMAGE := ocrbench/engine-lightonocr3:3-v1
 # Host directory with the user-supplied PERO OCR model bundles (engines/pero/README.md).
 PERO_BUNDLES ?= dev_data/pero_ocr_models
 # Host directory mounted as /cache for engines whose weights are not in the image.
@@ -61,7 +64,7 @@ LOCK_PY311 := $(UV) pip compile --python-version 3.11 $(LOCK_FLAGS)
 # (engines/pylaia/README.md).
 LOCK_PYLAIA := $(UV) pip compile --python-version 3.10 --exclude-newer 2024-10-17 $(LOCK_FLAGS)
 export CPU_IMAGE CU130_TORCH_IMAGE CU130_PADDLE_IMAGE CU130_VLLM_IMAGE CU130_VLLM026_IMAGE \
-	OCRBENCH_CACHE
+	CU130_VLLM030_IMAGE OCRBENCH_CACHE
 
 help:  ## List targets
 	@grep -E '^[a-z0-9-]+:.*## ' $(MAKEFILE_LIST) | awk -F':.*## ' '{printf "  %-20s %s\n", $$1, $$2}'
@@ -102,6 +105,10 @@ docker-cu130-vllm026:  ## Build the CUDA 13.0 + vLLM 0.26.0 base image (multi-GB
 	docker build -t $(CU130_VLLM026_IMAGE) docker/base-cu130-vllm026
 	@docker image inspect --format '$(CU130_VLLM026_IMAGE) {{.Id}}' $(CU130_VLLM026_IMAGE)
 
+docker-cu130-vllm030:  ## Build the CUDA 13.0 + vLLM 0.30.0 base image (multi-GB download)
+	docker build -t $(CU130_VLLM030_IMAGE) docker/base-cu130-vllm030
+	@docker image inspect --format '$(CU130_VLLM030_IMAGE) {{.Id}}' $(CU130_VLLM030_IMAGE)
+
 docker-lock:  ## Re-lock the hashed requirements of the CUDA bases and the GPU engines
 	$(LOCK) docker/base-cu130-torch/requirements.in \
 		--index-url https://download.pytorch.org/whl/cu130 \
@@ -116,6 +123,8 @@ docker-lock:  ## Re-lock the hashed requirements of the CUDA bases and the GPU e
 		-o docker/base-cu130-vllm026/requirements.txt
 	$(LOCK) engines/nemotron-parse/requirements.in -c docker/base-cu130-vllm026/requirements.txt \
 		--index-url https://pypi.org/simple -o engines/nemotron-parse/requirements.txt
+	$(LOCK) docker/base-cu130-vllm030/requirements.in --index-url https://pypi.org/simple \
+		-o docker/base-cu130-vllm030/requirements.txt
 	$(LOCK) engines/paddleocr/requirements.in -c docker/base-cu130-paddle/requirements.txt \
 		-o engines/paddleocr/requirements.txt
 	$(LOCK) engines/ppstructurev3/requirements.in -c docker/base-cu130-paddle/requirements.txt \
@@ -360,6 +369,16 @@ unlimited-ocr-model:  ## Download the pinned Unlimited-OCR weights (6.7 GB) into
 
 unlimited-ocr-smoke:  ## Build the Unlimited-OCR image and run, evaluate and report a synthetic dataset on the GPU (opt-in; needs unlimited-ocr-model)
 	$(UV) run --locked pytest -m gpu --run-docker --run-gpu tests/test_unlimited_ocr.py
+
+docker-lightonocr3:  ## Build the LightOnOCR-3 engine image (needs the vLLM 0.30 base) and print its image ID
+	docker build -t $(LIGHTONOCR3_IMAGE) engines/lightonocr3
+	@docker image inspect --format '$(LIGHTONOCR3_IMAGE) {{.Id}}' $(LIGHTONOCR3_IMAGE)
+
+lightonocr3-model:  ## Download pinned LightOnOCR-3 weights (all 12.8 GB, or CHECKPOINT=0.8B|1B|4B) into $(OCRBENCH_CACHE) (opt-in)
+	python3 engines/lightonocr3/fetch_model.py $(OCRBENCH_CACHE) $(CHECKPOINT)
+
+lightonocr3-smoke:  ## Build the LightOnOCR-3 image and run, evaluate and report a synthetic dataset with every preset on the GPU (opt-in; needs lightonocr3-model)
+	$(UV) run --locked pytest -m gpu --run-docker --run-gpu tests/test_lightonocr3.py
 
 docker-infinityparser2:  ## Build the Infinity-Parser2-Flash engine image (needs the torch base) and print its image ID
 	docker build -t $(INFINITYPARSER2_IMAGE) engines/infinityparser2
