@@ -4,11 +4,12 @@ Historical OCR/HTR pipeline baseline ([#13](https://github.com/michal-hradis/ocr
 
 | File | Purpose |
 | --- | --- |
-| `Dockerfile` | Engine image `ocrbench/engine-kraken:7.1.1-v1` from `ocrbench/base-cu130-torch:torch2.14.1-py3.12-v1` |
+| `Dockerfile` | Engine image `ocrbench/engine-kraken:7.1.1-v2` from `ocrbench/base-cu130-torch:torch2.14.1-py3.12-v1` |
 | `requirements.in`, `overrides.txt`, `requirements.txt` | Kraken and its dependencies, hash-locked against the base (`make docker-lock`) |
 | `models.sha256` | Checksums of the recognition models; the build fails if they differ |
 | `kraken_engine.py` | The adapter |
-| `engine.toml` | Engine configuration for `ocrbench run start` |
+| `engine.toml` | Engine configuration for `ocrbench run start`, preset `kraken` (CATMuS-Print) |
+| `presets/german-print.toml`, `presets/mccatmus.toml`, `presets/catmus-print-tiled.toml` | The other presets ([Presets](#presets)) |
 
 ## Versions
 
@@ -20,9 +21,9 @@ Historical OCR/HTR pipeline baseline ([#13](https://github.com/michal-hradis/ocr
   | --- | --- | --- |
   | `catmus-print-fondue-large.mlmodel` (default, 23 MB) | [CATMuS-Print (Large)](https://doi.org/10.5281/zenodo.10592716), S. Gabay, 2024-01-30 | Printed books and newspapers, 16th–21st c., French, Spanish, German, English, Latin, Italian and other Latin-script languages |
   | `McCATMuS_nfd_nofix_V1.mlmodel` (16 MB) | [McCATMuS](https://doi.org/10.5281/zenodo.13788177), 2024-09-19 | Handwritten, printed and typewritten documents, 16th–21st c., the same languages; for handwriting crops |
-| `german_print.mlmodel` (16 MB) | [german_print](https://doi.org/10.5281/zenodo.10519596), UB Mannheim, 2023-05-16 | German and Latin prints from incunabula to the 20th c., Fraktur (`Latf`); for German Fraktur pages |
+  | `german_print.mlmodel` (16 MB) | [german_print](https://doi.org/10.5281/zenodo.10519596), UB Mannheim, 2023-05-16 | German and Latin prints from incunabula to the 20th c., Fraktur (`Latf`); for German Fraktur pages |
 
-  They are downloaded **when the image is built** and checked against `models.sha256` (the "small weights" case of the image conventions), so inference needs no `--cache` and no network.
+  They are downloaded **when the image is built** and checked against `models.sha256` (the "small weights" case of the image conventions), so inference needs no `--cache` and no network. With every sample the adapter records the loaded file's SHA-256 and, for these models, their record, license, scripts (ISO 15924), material and intended use. The models are **not interchangeable**: they follow different training data and transcription conventions, and each suits only its material.
 
 **Transcription conventions.** The CATMuS models follow the [CATMuS guidelines](https://catmus-guidelines.github.io/): graphematic transcription that keeps the long s `ſ`, historical u/v and i/j and some abbreviation marks, and outputs decomposed characters (NFD). `german_print` also keeps `ſ`. The evaluator applies NFC by default, so decomposition alone does not count as an error; `ſ` versus `s` does unless the evaluation config uses NFKC ([EVALUATION.md](../../docs/EVALUATION.md)). The CATMuS character sets contain no háček (no `č`, `ř`, `ž`), so they cannot transcribe Czech correctly; `german_print` has these letters but was trained on German and Latin. CATMuS-Print is the default because it covers the widest range of Latin-script prints; it confuses many Fraktur letters (for example `h` and `b`), for which `german_print` is much better.
 
@@ -43,9 +44,10 @@ make gpu-preflight                  # host driver and NVIDIA Container Toolkit
 make docker-cu130-torch             # shared torch base, once (about 6 GB)
 make docker-kraken                  # this image (Kraken and the three recognition models)
 uv run ocrbench run start --engine engines/kraken/engine.toml --dataset datasets/dev-01.json
+uv run ocrbench run start --engine engines/kraken/presets/german-print.toml --dataset datasets/dev-01.json
 uv run ocrbench evaluate runs/<run-id>
 uv run ocrbench report runs/<run-id> -o reports/kraken --inspect
-make kraken-smoke                   # opt-in: build the image, run it on synthetic samples on the GPU
+make kraken-smoke                   # opt-in: build the image, run it and every preset on synthetic samples on the GPU
 ```
 
 The container runs with `--gpus all` (`[resources]` in `engine.toml`) and uses `device`. If the requested GPU is not visible, every sample fails with `engine-error` (`cuda:0 requested but 0 CUDA devices are visible`); there is no silent CPU fallback. Kraken also runs on the CPU when `device = "cpu"` is set explicitly; that is much slower and not the configuration recorded here.
@@ -61,10 +63,48 @@ The container runs with `--gpus all` (`[resources]` in `engine.toml`) and uses `
 | `segmentation_model` | `null` | `null` for Kraken's default `blla.mlmodel`, or a path under `/cache/` |
 | `batch_size` | 1 | Lines recognized per batch (Kraken's default) |
 | `segmentation_min_height` | 1200 | Images less than this many pixels high are segmented on a taller canvas (below); `0` turns this off |
+| `segmentation_tile_height` | 0 | Pages higher than this are segmented in overlapping full-width bands of this height ([Tiled segmentation](#tiled-segmentation)); `0` (or a value of at least 600) |
 
 Kraken's other inference settings keep their defaults: 32-bit precision, horizontal left-to-right page direction, Unicode BiDi reordering of the output, and the polygonal reading order heuristic. The sample `language` is not used; the model decides the script.
 
 **Segmentation canvas.** The default segmentation model scales every input to a fixed height. A short image, such as a paragraph crop of a few lines, is then enlarged until the text no longer looks like page text, and Kraken finds only fragments with empty text. The adapter therefore centres an image less than `segmentation_min_height` pixels high on a canvas of that height, filled with the median colour of the image's top and bottom rows, and segments the canvas. It moves the segmentation back by the vertical offset (clipped to the image) **before** recognition, which runs on the original image. Every output therefore refers to input-image pixels. The offset is recorded as `canvas_offset`. On the synthetic samples this turns a two-line paragraph crop from seven empty lines into the correct transcription, and taller pages are not changed.
+
+## Presets
+
+A preset is a frozen engine configuration; its `name` identifies it as a separate system in reports. All presets use the same image, segmentation model (`blla.mlmodel`) and resources, and each differs from `engine.toml` in one setting. A changed setting is a new preset, not an edit of an existing one. The recognition presets are for the material their model was trained on; on other material their results say little about the model.
+
+| Preset (file) | `name` | Differs in | Use on |
+| --- | --- | --- | --- |
+| `engine.toml` | `kraken` | — (CATMuS-Print (Large)) | Latin-script printed books and newspapers, Antiqua |
+| `presets/german-print.toml` | `kraken-german-print` | `recognition_model = "german_print.mlmodel"` | German and Latin Fraktur prints |
+| `presets/mccatmus.toml` | `kraken-mccatmus` | `recognition_model = "McCATMuS_nfd_nofix_V1.mlmodel"` | Handwritten documents (HTR); it also covers print and typewriting, but `kraken` is the print model |
+| `presets/catmus-print-tiled.toml` | `kraken-catmus-print-tiled` | `segmentation_tile_height = 1800`, the model's input height (sample timeout 1800 s) | Large, dense pages with small text such as newspapers, where `kraken` misses lines; a segmentation variant of `kraken` with the same recognition model |
+
+None of the bundled models has the Czech háček letters except `german_print`, which was trained on German and Latin, so no preset is suitable for Czech text.
+
+### Tiled segmentation
+
+The default segmentation model scales every page to 1800 pixels high. On a newspaper scan of about 6000 pixels with five columns, text lines become a few pixels high and many are missed or merged. With `segmentation_tile_height` set, a higher page is cut into full-width bands of that height, evenly spaced and overlapping by at least a quarter of the height, and each band is segmented on its own, so the model sees the text about `page height / tile height` times larger. A band shorter than `segmentation_min_height` is segmented on a canvas like a short image. This is engine-owned preprocessing: the evaluator and its input are unchanged.
+
+Every band owns the rows between the middles of its overlaps with its neighbours. It keeps the lines whose baseline middle (the point where Kraken assigns a line to a region) lies in its rows, so every line comes from exactly one band, and a line cut by a band edge is taken from the band that sees it whole (lines lower than half the overlap). Each band's regions are cut to its rows: a Kraken region crossing a band border becomes one region per band. All coordinates are moved back to input-image pixels before recognition, which runs on the original image. The lines of all bands are then put into Kraken's polygonal reading order over the whole page, with the cut regions. A reading order model in a custom segmentation model is not used with tiling, as it sees only one band. Pages no higher than the tile height are segmented whole, exactly as without tiling; `segmentation_tiles` in `result.json` gives the number of bands.
+
+Tiling multiplies the segmentation time (mostly Kraken's polygon extraction on the CPU) and, as more lines are found, the recognition time.
+
+### Measured on dev-01
+
+All four presets on the seven pages of dev-01 (runs `kraken-dev01-final` with image `7.1.1-v1`, whose `kraken` configuration is unchanged in `-v2`, and `kraken-german-print-dev01`, `kraken-mccatmus-dev01`, `kraken-catmus-print-tiled-dev01` with image `sha256:6300984b…`; not in Git; RTX 4090). All 28 samples were `success`. Rates are micro averages over the pages with the default evaluation configuration; fCER and fWER are the flexible, order-independent rates ([EVALUATION.md](../../docs/EVALUATION.md)). Engine time is the sum of the per-sample times, without model loading (about 13 s per run).
+
+| Preset | CER | WER | fCER | fWER | BoW F1 | ROUGE-2 F1 | Engine time |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| `kraken` | 66.7 % | 85.5 % | 61.9 % | 82.9 % | 27.9 | 16.1 | 189 s |
+| `kraken-german-print` | 69.5 % | 84.4 % | 67.0 % | 83.4 % | 25.6 | 17.5 | 187 s |
+| `kraken-mccatmus` | 68.5 % | 89.2 % | 65.8 % | 88.1 % | 18.9 | 8.4 | 181 s |
+| `kraken-catmus-print-tiled` | 65.8 % | 87.7 % | 23.6 % | 59.1 % | 53.2 | 30.6 | 723 s |
+
+- **`german_print` on Fraktur:** CER 4.9 % and 3.9 % on the two German Fraktur pages, against 24.6 % and 22.7 % with `kraken`; it is worse on the Antiqua pages. The overall rate is dominated by the two newspapers.
+- **`McCATMuS` is an HTR model;** dev-01 has no handwriting, and on these printed pages it is worse than `kraken` on every page except one Fraktur page. Its numbers here are not a measure of its intended use.
+- **Tiling finds the missing newspaper lines:** 408 and 424 lines against 419 and 484 in the GT (`kraken`: 199 and 185), and fCER 21.3 % and 28.4 % instead of 62.4 % and 76.5 %. The strict CER barely changes (81.0 % and 71.1 %): Kraken's polygonal reading order does not read the columns of these pages one after another, so the gain shows only in the order-independent scores. The remaining errors include every háček letter, which CATMuS-Print cannot write. The five smaller pages (1878–2823 pixels high) are also split into two bands; their results stay within 1.6 points of `kraken`. Segmentation of the newspapers takes four to five times longer (276 s and 326 s per page).
+- The development set is small and not representative; these numbers are not general model rankings.
 
 ## Outputs
 
@@ -75,7 +115,7 @@ For every sample the adapter decodes the image as stored with Pillow (EXIF orien
 | `kraken.xml` | Kraken's own PAGE XML serialization (2019 schema): regions with their type in `custom`, lines with boundary polygons, baselines and recognized text, words and glyphs with confidences |
 | `kraken.json` | Kraken's segmentation container (`Segmentation`, loadable with `kraken.containers.Segmentation(**data["segmentation"])`) with each line's recognized text in `text`, and per-character `confidences` per line; the source of the prediction |
 | `prediction.json` | Standardized prediction ([PREDICTIONS.md](../../docs/PREDICTIONS.md)), the primary output |
-| `result.json` | Status, processing time and, in `extra`, `canvas_offset`, the numbers of Kraken lines and regions and of predicted lines and regions, the Kraken/torch/CUDA versions, the GPU name, the model loading time, the model files with SHA-256 and the parameters |
+| `result.json` | Status, processing time and, in `extra`, `canvas_offset`, `segmentation_tiles` (1 without tiling), the numbers of Kraken lines and regions and of predicted lines and regions, the Kraken/torch/CUDA versions, the GPU name, the model loading time, the model files with SHA-256 (and, for a bundled recognition model, its record, license and suitability) and the parameters |
 
 **Mapping.** The prediction is built from `kraken.json`, not by parsing `kraken.xml`: Kraken's PAGE template writes lines outside any region into an invented full-page region.
 
@@ -90,4 +130,4 @@ For every sample the adapter decodes the image as stored with Pillow (EXIF orien
 
 ## Tests
 
-`tests/test_kraken.py` checks the mapping on a committed native result (`tests/fixtures/kraken/page.json` and `page.xml`, Kraken 7.1.1 output for a synthetic page; the PAGE XML is read with the benchmark's own PAGE reader and must contain the same lines), grouping, region types and reading order on hand-written results, parameter validation, the segmentation canvas, and the engine protocol through the runner with fake `torch` and `kraken` modules (`tests/fixtures/kraken/fake`), all offline in `make test`. `make kraken-smoke` builds the image and runs real Kraken on the GPU through `ocrbench run start`, `evaluate` (twice, without rerunning OCR) and `report` on a synthetic full page, a paragraph crop and a blank page (an empty `success`), plus a run with a GPU that is not visible, which must fail explicitly.
+`tests/test_kraken.py` checks the mapping on a committed native result (`tests/fixtures/kraken/page.json` and `page.xml`, Kraken 7.1.1 output for a synthetic page; the PAGE XML is read with the benchmark's own PAGE reader and must contain the same lines), grouping, region types and reading order on hand-written results, parameter validation, the segmentation canvas, the band layout of tiled segmentation, band clipping and the assignment of every line of a dense three-column page to exactly one band in input-image pixels, the presets against `engine.toml` and `models.sha256`, and the engine protocol through the runner with fake `torch` and `kraken` modules (`tests/fixtures/kraken/fake`), all offline in `make test`. `make kraken-smoke` builds the image and runs real Kraken on the GPU through `ocrbench run start`, `evaluate` (twice, without rerunning OCR) and `report` on a synthetic full page, a paragraph crop, a blank page (an empty `success`), a two-column and a three-column newspaper page, plus a run with a GPU that is not visible, which must fail explicitly. It then runs every preset on these pages and on a 2700-pixel-high synthetic page with three dense columns, which the tiled preset segments in two bands of 1800 pixels; its strict, order-dependent CER checks that the columns are read one after another across the band border.

@@ -1,0 +1,22 @@
+# Kraken preset catmus-print-tiled: differs from engine.toml only in segmenting pages higher than
+# segmentation_tile_height in overlapping full-width bands, for small text on dense newspapers
+# (README.md next to engine.toml). Same models: blla and CATMuS-Print (Large).
+name = "kraken-catmus-print-tiled"
+engine_version = "2"
+image = "ocrbench/engine-kraken:7.1.1-v2"
+model = "blla+catmus-print-fondue-large@zenodo.10592716"  # segmentation + recognition model
+
+[params]
+device = "cuda:0"
+recognition_model = "catmus-print-fondue-large.mlmodel"
+segmentation_tile_height = 1800  # the model's input height: bands at about full resolution (README.md)
+
+[resources]
+cpus = 4
+memory = "16g"
+gpus = "all"
+shm_size = "2g"
+
+[timeouts]
+sample = 1800
+startup = 300

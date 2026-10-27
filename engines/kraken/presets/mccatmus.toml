@@ -1,0 +1,20 @@
+# Kraken preset mccatmus: differs from engine.toml (CATMuS-Print) only in the recognition model,
+# McCATMuS for handwritten (HTR), printed and typewritten documents (README.md next to engine.toml).
+name = "kraken-mccatmus"
+engine_version = "2"
+image = "ocrbench/engine-kraken:7.1.1-v2"
+model = "blla+McCATMuS_nfd_nofix_V1@zenodo.13788177"  # segmentation + recognition model; SHA-256 in models.sha256
+
+[params]
+device = "cuda:0"
+recognition_model = "McCATMuS_nfd_nofix_V1.mlmodel"
+
+[resources]
+cpus = 4
+memory = "16g"
+gpus = "all"
+shm_size = "2g"
+
+[timeouts]
+sample = 600
+startup = 300

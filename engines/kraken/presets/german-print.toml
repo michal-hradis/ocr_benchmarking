@@ -1,0 +1,20 @@
+# Kraken preset german-print: differs from engine.toml (CATMuS-Print) only in the recognition model,
+# UB Mannheim's german_print for German and Latin Fraktur prints (README.md next to engine.toml).
+name = "kraken-german-print"
+engine_version = "2"
+image = "ocrbench/engine-kraken:7.1.1-v2"
+model = "blla+german_print@zenodo.10519596"  # segmentation + recognition model; SHA-256 in models.sha256
+
+[params]
+device = "cuda:0"
+recognition_model = "german_print.mlmodel"
+
+[resources]
+cpus = 4
+memory = "16g"
+gpus = "all"
+shm_size = "2g"
+
+[timeouts]
+sample = 600
+startup = 300

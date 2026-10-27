@@ -24,7 +24,7 @@ from ocrbench.issues import Severity
 from ocrbench.pagexml import read_page_xml
 from ocrbench.prediction import validate_prediction
 from ocrbench.runner import ProcessLauncher, create_run, execute, latest_record, load_run
-from synthetic import smoke_dataset, write_manifest
+from synthetic import page_xml, render_columns, smoke_dataset_with_columns, write_manifest
 
 ROOT = Path(__file__).resolve().parents[1]
 ENGINE_DIR = ROOT / "engines" / "kraken"
@@ -45,6 +45,7 @@ FIXTURE_LINES = [
     "with numbers 1923 and 2026.",
 ]
 BOX = [[0, 0], [10, 0], [10, 5], [0, 5]]
+TILE_HEIGHT = 1800  # presets/catmus-print-tiled.toml
 
 
 def errors(prediction):
@@ -263,6 +264,195 @@ def test_short_images_are_segmented_on_a_canvas_and_moved_back():
     assert kr.shift_segmentation(found, 0, 120) is found
 
 
+@pytest.mark.parametrize(
+    ("height", "tile_height", "expected"),
+    [
+        (5000, 0, [(0, 5000, 0, 5000)]),
+        (2400, 2400, [(0, 2400, 0, 2400)]),  # not higher than a tile: the whole page
+        (4000, 2400, [(0, 2400, 0, 2000), (1600, 4000, 2000, 4000)]),
+        (
+            6192,
+            2400,
+            [
+                (0, 2400, 0, 1832),
+                (1264, 3664, 1832, 3096),
+                (2528, 4928, 3096, 4360),
+                (3792, 6192, 4360, 6192),
+            ],
+        ),
+    ],
+)
+def test_segmentation_tiles_cover_the_page_once(height, tile_height, expected):
+    tiles = kr.segmentation_tiles(height, tile_height)
+    assert tiles == expected
+    assert [start for *_, start, _ in tiles][0] == 0
+    assert [end for *_, end in tiles][-1] == height
+    for (top, bottom, start, end), following in zip(tiles, [*tiles[1:], None], strict=True):
+        assert top <= start < end <= bottom
+        if following:
+            assert end == following[2]  # the bands own adjacent rows
+            assert bottom - following[0] >= tile_height // 4  # and overlap
+
+
+def test_baseline_middle_and_band_clipping():
+    assert kr.baseline_middle([[0, 10], [10, 10]]) == 10
+    assert kr.baseline_middle([[0, 0], [0, 30], [10, 30]]) == 20  # halfway along the length
+    assert kr.baseline_middle([[5, 7], [5, 7]]) == 7
+    square = [[0, 0], [10, 0], [10, 10], [0, 10]]
+    assert same_polygon(kr.clip_rows(square, 4, 6), [[0, 4], [10, 4], [10, 6], [0, 6]])
+    assert same_polygon(kr.clip_rows(square, 0, 10), square)
+    assert kr.clip_rows(square, 20, 30) == []
+    triangle = kr.clip_rows([[0, 0], [10, 10], [0, 10]], 5, 10)
+    assert same_polygon(triangle, [[0, 5], [5, 5], [10, 10], [0, 10]])
+
+
+def same_polygon(points, expected):
+    """The same polygon, starting at any of its points."""
+    return any(points[i:] + points[:i] == expected for i in range(len(points)))
+
+
+@dataclass
+class _TagLine:
+    id: str
+    baseline: list
+    boundary: list
+    regions: list
+
+
+@dataclass
+class _BandSegmentation:
+    text_direction: str
+    lines: list
+    regions: dict
+    line_orders: list
+
+
+@dataclass
+class _IdRegion:
+    id: str
+    boundary: list
+
+
+class _DenseColumns:
+    """A fake segmenter for a page of three columns of 30-pixel lines whose rows line up.
+
+    It finds every line whose baseline lies in the image it is given (a band of the page, which it
+    recognizes by the row it starts at), including lines cut by the band's edges, and one region
+    per column cut to the band, in band coordinates.
+    """
+
+    def __init__(self, page_height):
+        self.page_height = page_height
+        self.calls = []
+
+    def predict(self, im, config):
+        top = im.getpixel((0, 0)) * 10  # the test image encodes its row in its grey value
+        self.calls.append((top, im.size))
+        lines, regions = [], {"text": []}
+        for column in range(3):
+            x0, x1 = column * 300, column * 300 + 250
+            regions["text"].append(
+                _IdRegion(
+                    f"c{column}@{top}",
+                    [[x0, 0], [x1, 0], [x1, im.size[1]], [x0, im.size[1]]],
+                )
+            )
+            for y in range(40, self.page_height, 30):
+                if top <= y < top + im.size[1]:
+                    baseline = [[x0, y - top], [x1, y - top]]
+                    boundary = [[x0, y - top - 20], [x1, y - top - 20], [x1, y - top + 5]]
+                    lines.append(
+                        _TagLine(f"{column}:{y}", baseline, boundary, [f"c{column}@{top}"])
+                    )
+        return _BandSegmentation("horizontal-lr", lines, regions, [["band order"]])
+
+
+def banded_image(height):
+    image = Image.new("L", (900, height))
+    for y in range(height):
+        image.paste(y // 10 % 256, (0, y, 900, y + 1))
+    return image
+
+
+def test_tiled_segmentation_keeps_every_line_once_in_kraken_reading_order(monkeypatch):
+    seen = {}
+
+    def reading_order(lines, text_direction, regions):
+        seen.update(lines=lines, direction=text_direction, regions=regions)
+        # Kraken's polygonal order of these columns: left to right, each top to bottom.
+        return sorted(range(len(lines)), key=lambda i: (lines[i].id.split(":")[0], i))
+
+    fake = type(sys)("kraken.lib.segmentation")
+    fake.polygonal_reading_order = reading_order
+    monkeypatch.setitem(sys.modules, "kraken.lib.segmentation", fake)
+    image = banded_image(2500)
+    segmenter = _DenseColumns(2500)
+    params = kr.parse_params({"segmentation_tile_height": 1000, "segmentation_min_height": 0})
+    segmentation, offset, tiles = kr.segment(segmenter, None, image, params)
+    assert (offset, tiles) == (0, 3)
+    assert segmenter.calls == [(0, (900, 1000)), (750, (900, 1000)), (1500, (900, 1000))]
+    expected = [f"{c}:{y}" for c in range(3) for y in range(40, 2500, 30)]
+    assert [line.id for line in segmentation.lines] == expected  # each line exactly once
+    assert seen["direction"] == "lr"
+    assert len(seen["lines"]) == len(expected)
+    assert segmentation.line_orders == []  # a band's own orders cover only that band
+    # Lines in page pixels, from the band that owns their baseline's middle.
+    line = next(line for line in segmentation.lines if line.id == "1:880")
+    assert line.baseline == [[300, 880], [550, 880]]
+    assert line.boundary == [[300, 860], [550, 860], [550, 885]]
+    assert line.regions == ["c1@750"]
+    # Each band's column regions are cut to the rows the band owns.
+    boundaries = {r.id: r.boundary for r in segmentation.regions["text"]}
+    assert seen["regions"] == segmentation.regions["text"]
+    assert same_polygon(boundaries["c0@0"], [[0, 0], [250, 0], [250, 875], [0, 875]])
+    assert same_polygon(boundaries["c0@750"], [[0, 875], [250, 875], [250, 1625], [0, 1625]])
+    assert same_polygon(boundaries["c2@1500"], [[600, 1625], [850, 1625], [850, 2500], [600, 2500]])
+
+
+def test_tiles_shorter_than_the_canvas_are_segmented_on_one(monkeypatch):
+    fake = type(sys)("kraken.lib.segmentation")
+    fake.polygonal_reading_order = lambda lines, text_direction, regions: range(len(lines))
+    monkeypatch.setitem(sys.modules, "kraken.lib.segmentation", fake)
+    calls = []
+
+    class Segmenter:
+        def predict(self, im, config):
+            calls.append(im.size)
+            return _BandSegmentation("horizontal-lr", [], {}, [])
+
+    params = kr.parse_params({"segmentation_tile_height": 800})  # canvas: 1200 pixels
+    segmentation, offset, tiles = kr.segment(Segmenter(), None, banded_image(1500), params)
+    assert (offset, tiles, calls) == (0, 3, [(900, 1200)] * 3)
+    assert segmentation.lines == []
+    assert segmentation.regions == {}
+    calls.clear()  # a page no higher than a tile is segmented whole, as without tiles
+    _, offset, tiles = kr.segment(Segmenter(), None, banded_image(700), params)
+    assert (offset, tiles, calls) == (250, 1, [(900, 1200)])
+
+
+def test_presets_differ_from_engine_toml_only_in_their_settings():
+    presets = {p.stem: tomllib.loads(p.read_text()) for p in (ENGINE_DIR / "presets").iterdir()}
+    changed = {
+        "german-print": {"recognition_model": "german_print.mlmodel"},
+        "mccatmus": {"recognition_model": "McCATMuS_nfd_nofix_V1.mlmodel"},
+        "catmus-print-tiled": {"segmentation_tile_height": TILE_HEIGHT},
+    }
+    assert set(presets) == set(changed)
+    for stem, preset in presets.items():
+        parse_engine_config(preset)
+        assert preset["name"] == f"kraken-{stem}"
+        assert preset["params"] == CONFIG["params"] | changed[stem]
+        kr.parse_params(preset["params"])
+        same = ("engine_version", "image", "resources")
+        assert {key: preset[key] for key in same} == {key: CONFIG[key] for key in same}
+        recognition = preset["params"]["recognition_model"]
+        record = kr.BUNDLED_MODELS[recognition]["record"].rsplit(".", 1)[1]
+        assert preset["model"].startswith(f"blla+{recognition.removesuffix('.mlmodel')}@zenodo.")
+        assert preset["model"].endswith(record)
+    checksums = (ENGINE_DIR / "models.sha256").read_text().split()[1::2]
+    assert checksums == list(kr.BUNDLED_MODELS)  # every bundled model is checked by the build
+
+
 def test_undecodable_image_is_an_adapter_error(tmp_path):
     (tmp_path / "x.png").write_bytes(b"not an image")
     with pytest.raises(kr.AdapterError, match="cannot decode image x.png"):
@@ -385,10 +575,26 @@ def kraken_image():
     return CONFIG["image"]
 
 
+def dense_newspaper(root):
+    """A page higher than a tile of the tiled preset: three columns of 60 short lines each."""
+    words = ["harbour", "council", "market", "river", "bridge", "evening", "letters", "station"]
+    columns = [
+        [
+            [f"{words[(c + p + n) % 8]} report {p + 1} line {n + 1} col {c + 1}" for n in range(15)]
+            for p in range(4)
+        ]
+        for c in range(3)
+    ]
+    size = (1500, 2700)
+    regions = render_columns(root / "dense-1.png", "Morning Herald", columns, size, 22)
+    page_xml(root / "dense-1.xml", regions, size)
+    return {"id": "dense-1", "image": "dense-1.png", "gt": "dense-1.xml", "unit": "page"}
+
+
 @pytest.mark.docker
 @pytest.mark.gpu
 def test_gpu_smoke_benchmark(tmp_path, kraken_image):
-    manifest = smoke_dataset(tmp_path / "data")
+    manifest = smoke_dataset_with_columns(tmp_path / "data")
     assert main(["dataset", "validate", str(manifest)]) == 0
     engine = str(ENGINE_DIR / "engine.toml")
     runs = str(tmp_path / "runs")
@@ -396,11 +602,9 @@ def test_gpu_smoke_benchmark(tmp_path, kraken_image):
     assert main([*args, "--run-id", "kraken"]) == 0
     run = load_run(tmp_path / "runs" / "kraken")
     records = {s.id: latest_record(run, s.id) for s in run.samples}
-    assert {sid: r["status"] for sid, r in records.items()} == {
-        "page-1": "success",
-        "para-1": "success",
-        "blank-1": "success",
-    }
+    assert {sid: r["status"] for sid, r in records.items()} == dict.fromkeys(
+        ("page-1", "para-1", "blank-1", "columns-1", "news-1"), "success"
+    )
     environment = records["page-1"]["engine_extra"]["environment"]
     assert environment["kraken"] == "7.1.1"
     assert environment["torch"] == "2.14.1+cu130"
@@ -425,6 +629,8 @@ def test_gpu_smoke_benchmark(tmp_path, kraken_image):
     rates = {s["sample_id"]: s["chars"]["rate"] for s in scores["samples"]}
     assert rates["page-1"] < 0.1
     assert rates["para-1"] < 0.1  # the paragraph crop is segmented on a page-sized canvas
+    assert rates["columns-1"] < 0.1  # strict CER: the columns are read one after another
+    assert rates["news-1"] < 0.1
     report = tmp_path / "report"
     assert main(["report", str(run.path), "-o", str(report), "--inspect"]) == 0
     assert (report / "index.html").is_file()
@@ -440,3 +646,39 @@ def test_gpu_smoke_benchmark(tmp_path, kraken_image):
     records = [latest_record(run, s.id) for s in run.samples]
     assert {(r["status"], r["reason"]) for r in records} == {("failure", "engine-error")}
     assert all("cuda:7" in r["message"] for r in records)
+
+
+@pytest.mark.docker
+@pytest.mark.gpu
+def test_gpu_smoke_presets(tmp_path, kraken_image):
+    """Every preset on the smoke pages; the tiled one also on a page higher than its tiles."""
+    manifest = smoke_dataset_with_columns(tmp_path / "data")
+    data = json.loads(manifest.read_text(encoding="utf-8"))
+    data["samples"].append(dense_newspaper(tmp_path / "data"))
+    manifest.write_text(json.dumps(data), encoding="utf-8")
+    sids = [sample["id"] for sample in data["samples"]]
+    for preset in sorted((ENGINE_DIR / "presets").iterdir()):
+        run_id = preset.stem
+        args = ["run", "start", "--engine", str(preset), "--dataset", str(manifest)]
+        assert main([*args, "--runs-dir", str(tmp_path / "runs"), "--run-id", run_id]) == 0
+        run = load_run(tmp_path / "runs" / run_id)
+        records = {s.id: latest_record(run, s.id) for s in run.samples}
+        assert {sid: r["status"] for sid, r in records.items()} == dict.fromkeys(sids, "success")
+        recognition = records["page-1"]["engine_extra"]["models"]["files"]["recognition"]
+        name = Path(recognition["path"]).name
+        assert (
+            recognition
+            == {"path": recognition["path"], "sha256": recognition["sha256"]}
+            | (kr.BUNDLED_MODELS[name])
+        )
+        assert main(["evaluate", str(run.path)]) == 0
+        scores = json.loads((run.path / "evaluations" / "1" / "scores.json").read_text())
+        rates = {s["sample_id"]: s["chars"]["rate"] for s in scores["samples"]}
+        tiles = {sid: r["engine_extra"]["segmentation_tiles"] for sid, r in records.items()}
+        if run_id == "catmus-print-tiled":
+            assert tiles == dict.fromkeys(sids, 1) | {"dense-1": 2}
+            # Strict CER: the three columns are read one after another across the band cut.
+            assert rates["dense-1"] < 0.05
+            assert rates["news-1"] < 0.1
+        else:
+            assert set(tiles.values()) == {1}
