@@ -74,7 +74,8 @@ class Handler(BaseHTTPRequestHandler):
         if gray < 35:  # 20: the server dies
             os._exit(1)
         prompt = (image.width // 16) * (image.height // 16) + len(PROMPT)
-        limit = request.get("max_tokens") or CONTEXT - prompt  # vLLM's default: the context
+        # vLLM 0.26 generates up to max_tokens, at most to the end of the context (its default).
+        limit = min(request.get("max_tokens") or CONTEXT, CONTEXT - prompt)
         text, reason = output(gray, limit)
         self.reply(
             200,
