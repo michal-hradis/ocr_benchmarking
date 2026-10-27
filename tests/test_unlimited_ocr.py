@@ -164,6 +164,54 @@ def test_layout_blocks_keep_boxes_as_written():
     assert block["box_px"] == [0, 0, 999, 999]
 
 
+def test_reference_wrappers_are_not_transcribed():
+    text = (
+        "<|ref|>Running head<|/ref|>\n"
+        "<|ref|>title<|/ref|><|det|>[[10, 20, 30, 40]]<|/det|>## Head\n"
+        "<|ref|>text<|/ref|> <|det|>[100, 200, 300, 400]<|/det|>See <|ref|>Fig. 2<|/ref|> here.\n"
+        "<|ref|>the fox<|/ref|><|det|>[[1, 2, 3, 4], [5, 6, 7, 8]]<|/det|>\n"
+        "<|det|>text [0, 0, 999, 999]<|/det|>Stray <|/ref|>end<|grounding|>"
+    )
+    blocks = uoe.layout_blocks(text, 999, 999)
+    assert [(b.get("ref"), b["label"], b["box"], b["content"]) for b in blocks] == [
+        (None, None, None, "Running head"),
+        ("title", "title", [10, 20, 30, 40], "## Head"),
+        ("text", "text", [100, 200, 300, 400], "See Fig. 2 here."),
+        ("the fox", None, None, "the fox"),  # referenced text is kept; no box from two boxes
+        (None, "text", [0, 0, 999, 999], "Stray end"),
+    ]
+    start, end = blocks[1]["span"]
+    assert text[start:end] == "<|ref|>title<|/ref|><|det|>[[10, 20, 30, 40]]<|/det|>"
+    image = Image.new("RGB", (999, 999), "white")
+    prediction = uoe.blocks_to_prediction(blocks, "s", image)
+    standardized, issues = validate_prediction(prediction, sample_id="s", image_size=(999, 999))
+    assert issues == []
+    assert "<|" not in standardized.text
+    assert [r.text for r in standardized.regions] == [
+        "Running head", "Head", "See Fig. 2 here.", "the fox", "Stray end"
+    ]  # fmt: skip
+
+
+def test_unterminated_tags_end_at_the_line_or_the_next_tag():
+    text = "<|det|>broken\n<|det|>text [0, 0, 999, 999]<|/det|>Hello"
+    blocks = uoe.layout_blocks(text, 999, 999)
+    assert [(b["det"], b["label"], b["box"], b["content"]) for b in blocks] == [
+        ("broken", "broken", None, ""),
+        ("text [0, 0, 999, 999]", "text", [0, 0, 999, 999], "Hello"),
+    ]
+    assert blocks[0]["unterminated"] is True
+    assert "unterminated" not in blocks[1]
+    # A header without its closing delimiter, then the block's text on the next lines.
+    text = "<|det|>title [10, 20, 30, 40]\nHead\nmore<|det|>text [1, 2"
+    blocks = uoe.layout_blocks(text, 999, 999)
+    assert [(b["label"], b["box"], b["content"]) for b in blocks] == [
+        ("title", [10, 20, 30, 40], "Head\nmore"),
+        (None, None, ""),  # a header cut off at the end of the output: no label or text
+    ]
+    assert text[slice(*blocks[1]["span"])] == "<|det|>text [1, 2"
+    assert [b["unterminated"] for b in blocks] == [True, True]
+
+
 def test_blocks_become_positioned_regions_with_markup():
     image = Image.new("RGB", (1000, 700), "white")
     raw = (FIXTURES / "output.txt").read_text(encoding="utf-8")
@@ -396,6 +444,13 @@ def test_adapter_follows_the_engine_protocol(tmp_path):
     assert region["type"] == "other"
     abort = run.path / "samples" / "abort" / "attempt-1" / "output" / "output.txt"
     assert abort.read_text(encoding="utf-8").endswith("Cut off")  # kept on failure
+    abort_extra = records["abort"]["engine_extra"]  # the diagnostics are kept on failure
+    assert (abort_extra["finish_reason"], abort_extra["tail_repetition"]) == ("abort", False)
+    assert abort_extra["generated_tokens"] == len(abort.read_text(encoding="utf-8"))
+    assert abort_extra["prompt_tokens"] == (300 // 16) * (200 // 16) + len(uoe.PROMPT)
+    assert abort_extra["request_seconds"] >= 0
+    assert abort_extra["blocks"] == 1
+    assert extra["unterminated_tags"] == 0
 
     news = records["news"]
     prompt = (2000 // 16) * (3000 // 16) + len(uoe.PROMPT)
@@ -431,6 +486,20 @@ def test_max_tokens_truncation(tmp_path):
     assert news["message"] == "generation stopped at max_tokens (500 tokens)"
     assert news["engine_extra"]["tail_repetition"] is False
     assert news["engine_extra"]["max_tokens"] == 500
+
+
+def test_max_tokens_beyond_the_context_left_by_the_image(tmp_path):
+    # The 2000 x 3000 image takes 23,399 of the 32,768 tokens; vLLM generates the rest.
+    params = dict(CONFIG["params"], max_tokens=32000)
+    _, records = run_adapter(tmp_path, {"news": ("news", (2000, 3000))}, params)
+    news = records["news"]
+    prompt = (2000 // 16) * (3000 // 16) + len(uoe.PROMPT)
+    assert news["status"] == "truncated"
+    assert news["message"] == (
+        f"generation stopped at the end of the 32768-token context ({CONTEXT - prompt} tokens); "
+        "the output ends in a repetition loop"
+    )
+    assert news["engine_extra"]["max_tokens"] == 32000
 
 
 @pytest.mark.parametrize(

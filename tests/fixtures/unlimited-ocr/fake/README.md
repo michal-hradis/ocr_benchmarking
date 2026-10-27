@@ -5,8 +5,9 @@ host process without vLLM, PyTorch, weights or a GPU.
   loopback host, the 32,768-token context and the n-gram logits processor), serves `/health` and an
   OpenAI-compatible `/v1/chat/completions` on the loopback interface and checks every request (the
   served model name, the prompt before the PNG image, greedy decoding, the n-gram arguments,
-  `skip_special_tokens` false). It "generates" one token per character, up to `max_tokens` or, when
-  the request has none, up to the end of the context, chosen by the gray level near the top-left
+  `skip_special_tokens` false). It "generates" one token per character, up to `max_tokens` and at
+  most, like vLLM 0.26, up to the end of the context (the image counts 1 token per 16 × 16
+  pixels), chosen by the gray level near the top-left
   corner:
 
   | Gray level | Output |

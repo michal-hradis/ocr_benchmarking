@@ -6,7 +6,8 @@ process inside the container, reachable on the loopback interface only. Every sa
 job order by one greedy request with the model card's document prompt, the whole page image in
 vLLM's crop ("gundam") mode and the official no-repeat n-gram logits processor. The model writes
 the page as layout blocks, each a ``<|det|>label [x1, y1, x2, y2]<|/det|>`` tag (box scaled to
-[0, 999] of the image) followed by its Markdown. It writes $OCRBENCH_OUTPUT/<id>/ with the model's
+[0, 999] of the image) followed by its Markdown; grounding references and unterminated tags
+are handled as README.md describes. It writes $OCRBENCH_OUTPUT/<id>/ with the model's
 output unchanged (output.txt), the parsed blocks (layout.json), the model card's Markdown rendering
 (page.md), prediction.json (the primary output: one region per block, its box in input-image
 pixels and its Markdown as region markup, converted to text on the host) and, last, result.json
@@ -64,9 +65,19 @@ PROMPT = "<image>document parsing."
 # The model card's and the recipe's decoding for a single image: greedy, with no repeated 35-token
 # n-gram within the last 128 generated tokens.
 SAMPLING = {"temperature": 0.0, "ngram_size": 35, "window_size": 128}
-# A layout tag: <|det|>label [x1, y1, x2, y2]<|/det|>, the box scaled to [0, 999].
-TAG = re.compile(r"<\|det\|>(.*?)<\|/det\|>", re.DOTALL)
+# A layout tag: <|det|>label [x1, y1, x2, y2]<|/det|>, the box scaled to [0, 999]. A tag ends at
+# its closing delimiter or, when that is missing, at the end of its line (README.md).
+OPEN, CLOSE = "<|det|>", "<|/det|>"
 HEADER = re.compile(r"\s*([A-Za-z_][\w-]*)\s*(?:\[([^\]]*)\])?\s*", re.DOTALL)
+# The recipe's grounding wrapper <|ref|>…<|/ref|>. Directly before a tag, as in DeepSeek-OCR's
+# <|ref|>label<|/ref|><|det|>[[x1, y1, x2, y2]]<|/det|>, it holds the tag's label and the tag only
+# the box; anywhere else it is unwrapped, keeping its text.
+REF = re.compile(r"<\|ref\|>(.*?)<\|/ref\|>", re.DOTALL)
+REF_BEFORE_TAG = re.compile(r"<\|ref\|>((?:(?!<\|).)*)<\|/ref\|>\s*$", re.DOTALL)
+LABEL = re.compile(r"[A-Za-z_][\w-]*")
+BOX_ONLY = re.compile(r"\s*\[\s*(?:\[([^\[\]]*)\]|([^\[\]]*))\s*\]\s*")
+# Grounding delimiters left without a partner are removed from the Markdown.
+STRAY = re.compile(r"<\|/?(?:ref|det)\|>|<\|grounding\|>")
 NUMBER = re.compile(r"-?\d+(?:\.\d+)?")
 BOX_SCALE = 999
 IMAGE_LABEL = "image"
@@ -355,32 +366,81 @@ def parse_box(text: str | None) -> list[int | float] | None:
     return [float(part) if "." in part else int(part) for part in parts]
 
 
+def parse_header(det: str, ref: str | None) -> tuple[str | None, list[int | float] | None]:
+    """The label and box of a tag: ``label [box]`` in the tag, or, after a reference, the label
+    in the reference (when it is a label, not text) and only the box, single or double bracketed,
+    in the tag."""
+    if ref is None:
+        header = HEADER.fullmatch(det)
+        return (header.group(1), parse_box(header.group(2))) if header else (None, None)
+    label = ref.strip() if LABEL.fullmatch(ref.strip()) else None
+    box = BOX_ONLY.fullmatch(det)
+    if box is None:
+        return label, None
+    return label, parse_box(box.group(1) if box.group(1) is not None else box.group(2))
+
+
+def clean(content: str) -> str:
+    """Markdown without grounding delimiters: references unwrapped, stray delimiters removed."""
+    return STRAY.sub("", REF.sub(r"\1", content)).strip()
+
+
 def layout_blocks(text: str, width: int, height: int) -> list[dict[str, Any]]:
-    """The blocks of the output in order: the label and box as written (``det``), the label
-    (``label``, None when the tag has none), the box (``box``, four numbers scaled to [0, 999], or
-    None), the same box in input-image pixels (``box_px``, float pixel edges sorted and clipped to
-    the image), the Markdown up to the next tag (``content``, stripped) and the character offsets
-    of the tag (``span``). Text before the first tag is a block without a tag."""
+    """The blocks of the output in order: the label and box as written (``det``), a reference
+    before the tag (``ref``, only when present), the label (``label``, None when the tag has
+    none), the box (``box``, four numbers scaled to [0, 999], or None), the same box in input-image
+    pixels (``box_px``, float pixel edges sorted and clipped to the image), the Markdown up to the
+    next tag (``content``, stripped, grounding delimiters removed) and the character offsets of the
+    tag with its reference (``span``). A tag without a closing delimiter (``unterminated`` true)
+    ends at the end of its line or at the next tag. Text before the first tag is a block without
+    a tag."""
+    opens = [match.start() for match in re.finditer(re.escape(OPEN), text)]
+    head = text[: opens[0]] if opens else text
+    tags: list[dict[str, Any]] = []
+    for index, start in enumerate(opens):
+        end = opens[index + 1] if index + 1 < len(opens) else len(text)
+        body = text[start + len(OPEN) : end]
+        close = body.find(CLOSE)
+        if close >= 0:
+            det, content = body[:close], body[close + len(CLOSE) :]
+            span = [start, start + len(OPEN) + close + len(CLOSE)]
+        else:
+            det, _, content = body.partition("\n")
+            span = [start, start + len(OPEN) + len(det)]
+        tags.append(
+            {"det": det, "ref": None, "span": span, "content": content, "closed": close >= 0}
+        )
+    # A reference that ends the text before a tag belongs to that tag.
+    for index, tag in enumerate(tags):
+        before = tags[index - 1]["content"] if index else head
+        ref = REF_BEFORE_TAG.search(before)
+        if ref:
+            tag["ref"], tag["span"][0] = ref.group(1), tag["span"][0] - len(before) + ref.start()
+            if index:
+                tags[index - 1]["content"] = before[: ref.start()]
+            else:
+                head = before[: ref.start()]
     blocks: list[dict[str, Any]] = []
-    matches = list(TAG.finditer(text))
-    head = text[: matches[0].start()] if matches else text
-    if head.strip():
-        blocks.append({"det": None, "label": None, "box": None, "content": head.strip()})
-    for index, match in enumerate(matches):
-        end = matches[index + 1].start() if index + 1 < len(matches) else len(text)
-        header = HEADER.fullmatch(match.group(1))
-        block: dict[str, Any] = {
-            "det": match.group(1),
-            "label": header.group(1) if header else None,
-            "box": parse_box(header.group(2)) if header else None,
-        }
-        if block["box"] is not None:
-            x1, y1, x2, y2 = block["box"]
+    if clean(head):
+        blocks.append({"det": None, "label": None, "box": None, "content": clean(head)})
+    for tag in tags:
+        label, box = parse_header(tag["det"], tag["ref"])
+        block: dict[str, Any] = {"det": tag["det"]}
+        if tag["ref"] is not None:
+            block["ref"] = tag["ref"]
+        block |= {"label": label, "box": box}
+        if box is not None:
+            x1, y1, x2, y2 = box
             xs = sorted(min(max(x * width / BOX_SCALE, 0), width) for x in (x1, x2))
             ys = sorted(min(max(y * height / BOX_SCALE, 0), height) for y in (y1, y2))
             block["box_px"] = [xs[0], ys[0], xs[1], ys[1]]
-        block["content"] = text[match.end() : end].strip()
-        block["span"] = list(match.span())
+        content = clean(tag["content"])
+        if tag["ref"] is not None and label is None and clean(tag["ref"]):
+            content = "\n".join(filter(None, [clean(tag["ref"]), content]))  # referenced text
+        block["content"] = content
+        block["span"] = tag["span"]
+        if not tag["closed"]:
+            block["unterminated"] = True
         blocks.append(block)
     return blocks
 
@@ -468,8 +528,8 @@ def process(server_url: str, params: dict, sample: dict, source: Path, out: Path
         result["message"] = f"generation stopped at {limit} ({generated} tokens)" + (
             "; the output ends in a repetition loop" if repeats else ""
         )
-    elif reason != "stop":
-        raise AdapterError(f"generation failed (finish_reason {reason!r})")
+    elif reason != "stop":  # failed, with the request's diagnostics kept
+        result = {"status": "failed", "message": f"generation failed (finish_reason {reason!r})"}
     elif not output.strip():
         result["message"] = "the model returned an empty page"
     seconds = response["seconds"]
@@ -485,6 +545,7 @@ def process(server_url: str, params: dict, sample: dict, source: Path, out: Path
         "blocks": len(blocks),
         "labels": sorted({b["label"] for b in blocks if b["label"] is not None}),
         "blocks_without_box": sum("box_px" not in b for b in blocks),
+        "unterminated_tags": sum(b.get("unterminated", False) for b in blocks),
     }
     return result | {"extra": extra}
 
