@@ -265,6 +265,9 @@ def test_tail_repetition():
     assert loe.tail_repeats("Intro " + "abc " * 8)
     assert not loe.tail_repeats("Intro " + "abc " * 7)
     assert not loe.tail_repeats(" " * 50)
+    sentence = "A long looping sentence of a newspaper column, " * 2  # 94 characters
+    assert loe.tail_repeats("Intro " + sentence * 3 + sentence[:40])
+    assert not loe.tail_repeats("Intro " + sentence * 2 + sentence[:40])
 
 
 def page_image(gray, size):

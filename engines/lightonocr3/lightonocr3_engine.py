@@ -91,9 +91,10 @@ BOX_SCALE = 1000
 # Descriptions of pictures and data read from charts are not text on the page: these blocks keep
 # their box but no text (README.md; the maintainer's decision for Chandra OCR 2 in #53).
 UNSCORED = {"image", "header_image", "footer_image", "chart"}
-# A tail unit of at most REPEAT_UNIT characters repeated REPEAT_TIMES times in a row is reported
-# as a repetition loop.
-REPEAT_TIMES, REPEAT_UNIT = 8, 256
+# The output is reported as ending in a repetition loop when its tail is a unit repeated in a row:
+# SHORT_TIMES times for a unit of fewer than LONG_UNIT characters, LONG_TIMES times for a longer
+# one (a looping sentence or paragraph) of at most LONG_MAX characters.
+SHORT_TIMES, LONG_TIMES, LONG_UNIT, LONG_MAX = 8, 3, 64, 4096
 # LightOnOCR-3 label: region type (docs/PREDICTIONS.md#region-types); others: "other".
 REGION_TYPES = {
     "text": "text",
@@ -406,11 +407,12 @@ def generate(server_url: str, image: Any, params: dict[str, Any]) -> dict[str, A
 
 
 def tail_repeats(text: str) -> bool:
-    """Whether the text ends with a non-blank unit of at most REPEAT_UNIT characters repeated
-    REPEAT_TIMES times in a row."""
-    for length in range(1, min(REPEAT_UNIT, len(text) // REPEAT_TIMES) + 1):
+    """Whether the text ends with a non-blank unit repeated in a row: SHORT_TIMES times for a unit
+    shorter than LONG_UNIT characters, LONG_TIMES times for one of up to LONG_MAX characters."""
+    for length in range(1, min(LONG_MAX, len(text) // LONG_TIMES) + 1):
         unit = text[-length:]
-        if unit.strip() and text.endswith(unit * REPEAT_TIMES):
+        times = SHORT_TIMES if length < LONG_UNIT else LONG_TIMES
+        if unit.strip() and text.endswith(unit * times):
             return True
     return False
 
