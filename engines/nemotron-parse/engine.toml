@@ -1,0 +1,25 @@
+# Nemotron 3.5 Parse, preset single: nvidia/Nemotron-3.5-Parse served by vLLM with NVIDIA's plugin
+# inside the container, the model card's prompt, one greedy full-page request per page; layout
+# blocks with boxes, classes and Markdown in model order (README.md next to this file; format:
+# docs/RUNNER.md). Run with --cache <dir> holding the weights from make nemotron-parse-model.
+name = "nemotron-parse"
+engine_version = "1"
+image = "ocrbench/engine-nemotron-parse:3.5-v1"
+model = "nvidia/Nemotron-3.5-Parse@62cb1e4ba153d113ff64aaf2be6e068c377cf53c"
+
+[params]
+device = "cuda:0"
+mode = "single"
+max_tokens = 8744  # the model card's limit; other parameters: README.md
+# Share of GPU memory for vLLM (weights, CUDA graphs and KV cache), at most 0.6 (ADR 0012).
+gpu_memory_utilization = 0.6
+
+[resources]
+cpus = 4
+memory = "24g"
+gpus = "all"
+shm_size = "4g"
+
+[timeouts]
+sample = 900
+startup = 1200

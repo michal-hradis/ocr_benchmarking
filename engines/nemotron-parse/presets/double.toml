@@ -1,0 +1,24 @@
+# Nemotron 3.5 Parse, preset double: as the single preset (../engine.toml), plus one greedy request
+# per Table or Chart crop predicted on the full page, merged by NVIDIA's guarded policy (../README.md;
+# format: docs/RUNNER.md). Run with --cache <dir> holding the weights from make nemotron-parse-model.
+name = "nemotron-parse-double"
+engine_version = "1"
+image = "ocrbench/engine-nemotron-parse:3.5-v1"
+model = "nvidia/Nemotron-3.5-Parse@62cb1e4ba153d113ff64aaf2be6e068c377cf53c"
+
+[params]
+device = "cuda:0"
+mode = "double"
+max_tokens = 8744  # the model card's limit; other parameters: README.md
+# Share of GPU memory for vLLM (weights, CUDA graphs and KV cache), at most 0.6 (ADR 0012).
+gpu_memory_utilization = 0.6
+
+[resources]
+cpus = 4
+memory = "24g"
+gpus = "all"
+shm_size = "4g"
+
+[timeouts]
+sample = 1800
+startup = 1200

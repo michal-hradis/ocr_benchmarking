@@ -1,0 +1,108 @@
+#!/usr/bin/env python3
+"""Fake `vllm serve`: an OpenAI-compatible chat completions server on the loopback interface that
+"generates" a fixed output chosen by the gray level of the page image's top-left corner
+(../README.md). It checks the command line and every request as the adapter must send them."""
+
+import base64
+import io
+import json
+import os
+import sys
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
+
+from PIL import Image
+
+HERE = Path(__file__).resolve().parent
+PROMPT = "</s><s><predict_bbox><predict_classes><output_markdown><predict_text_in_pic>"
+# The gray level of the last full page: its crops are requested after it.
+last_page = {"gray": None}
+REFINED = "<x_0><y_0><table><tr><th>Year</th><th>Copies</th></tr><tr><td>1923</td><td>2026</td></tr></table><x_1><y_1><class_Table>"
+
+
+def news(limit):
+    lines = [
+        f"<x_0.05><y_{n / 1000}>Line {n} of a very long newspaper page.<x_0.95><y_{(n + 1) / 1000}>"
+        "<class_Text>"
+        for n in range(1, 101)
+    ]
+    text = "".join(lines)
+    while len(text) < limit:
+        text += lines[-1]
+    return text[:limit], "length"
+
+
+def output(gray, max_tokens):
+    if gray > 190 or 110 < gray < 130:  # 200 and 120 (whose crop is cut off)
+        return (HERE.parent.parent / "output.txt").read_text(encoding="utf-8"), "stop"
+    if gray > 125:  # 150
+        return "This page has no layout.", "stop"
+    if gray > 90:  # 100
+        return news(max_tokens)
+    if gray > 75:  # 80: a loop inside the first block
+        return ("<x_0.0><y_0.0>" + "ñ" * max_tokens)[:max_tokens], "length"
+    return "", "stop"
+
+
+class Handler(BaseHTTPRequestHandler):
+    def log_message(self, *args):
+        pass
+
+    def reply(self, status, body):
+        data = json.dumps(body).encode()
+        self.send_response(status)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(data)))
+        self.end_headers()
+        self.wfile.write(data)
+
+    def do_GET(self):
+        self.reply(200 if self.path == "/health" else 404, {})
+
+    def do_POST(self):
+        assert self.path == "/v1/chat/completions"
+        request = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
+        (message,) = request["messages"]
+        text_part, image_part = message["content"]
+        assert message["role"] == "user" and text_part == {"type": "text", "text": PROMPT}
+        assert request["model"] == "nemotron-parse"
+        assert (request["temperature"], request["top_k"]) == (0.0, 1)
+        assert request["skip_special_tokens"] is False
+        url = image_part["image_url"]["url"]
+        assert image_part["type"] == "image_url" and url.startswith("data:image/png;base64,")
+        image = Image.open(io.BytesIO(base64.b64decode(url.split(",", 1)[1]))).convert("L")
+        if request["repetition_penalty"] == 1.0:  # a crop
+            gray = last_page["gray"]
+            text, reason = (REFINED[:40], "length") if 110 < gray < 130 else (REFINED, "stop")
+        else:
+            assert request["repetition_penalty"] == 1.1
+            gray = last_page["gray"] = image.getpixel((image.width // 40, image.height // 40))
+            if 35 < gray < 65:  # 50: a request error
+                return self.reply(500, {"error": {"message": "fake CUDA out of memory"}})
+            if gray < 35:  # 20: the server dies
+                os._exit(1)
+            text, reason = output(gray, request["max_tokens"])
+        tokens = (image.width // 16) * (image.height // 16) + len(PROMPT)
+        self.reply(
+            200,
+            {
+                "choices": [{"message": {"content": text}, "finish_reason": reason}],
+                "usage": {"prompt_tokens": tokens, "completion_tokens": len(text)},
+            },
+        )
+
+
+def main():
+    args = sys.argv[1:]
+    assert args[0] == "serve" and args[1].endswith("62cb1e4ba153d113ff64aaf2be6e068c377cf53c")
+    assert args[args.index("--host") + 1] == "127.0.0.1"
+    assert os.environ["NP_VLLM_MTP"] in ("0", "1")
+    if os.environ.get("FAKE_VLLM_EXIT"):
+        print("fake vLLM start-up failure", flush=True)
+        sys.exit(3)
+    port = int(args[args.index("--port") + 1])
+    ThreadingHTTPServer(("127.0.0.1", port), Handler).serve_forever()
+
+
+if __name__ == "__main__":
+    main()

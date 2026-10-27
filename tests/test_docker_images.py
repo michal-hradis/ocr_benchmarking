@@ -78,6 +78,8 @@ def test_final_user_is_not_root(dockerfile):
         (ROOT / "engines" / "pylaia" / "pylaia-requirements.txt", "pylaia==1.1.2"),
         (ROOT / "engines" / "lightonocr" / "requirements.txt", "transformers==5.19.0"),
         (ROOT / "engines" / "fireredocr" / "requirements.txt", "transformers==5.19.0"),
+        (DOCKER_DIR / "base-cu130-vllm026" / "requirements.txt", "vllm==0.26.0"),
+        (ROOT / "engines" / "nemotron-parse" / "requirements.txt", "timm==1.0.22"),
     ],
     ids=lambda v: v.parent.name if isinstance(v, Path) else None,
 )
