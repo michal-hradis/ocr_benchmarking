@@ -67,7 +67,7 @@ Publishing bases to a registry and pinning them by digest would also work, but w
 | `make doctr-model` | Opt-in: download the pinned docTR checkpoints (129 MB) into `$(OCRBENCH_CACHE)` |
 | `make doctr-smoke` | Opt-in, GPU: build the docTR image and run both presets on synthetic samples, including two-column and newspaper pages, through the runner, evaluation and reports |
 | `make docker-kraken` | Build the Kraken GPU engine image from the torch base ([engines/kraken](../engines/kraken/README.md)) |
-| `make kraken-smoke` | Opt-in, GPU: build the Kraken image and run it on synthetic samples through the runner, evaluation and reports |
+| `make kraken-smoke` | Opt-in, GPU: build the Kraken image and run it and its presets on synthetic samples through the runner, evaluation and reports |
 | `make docker-pylaia` | Build the PyLaia GPU engine image from the torch base, with its model; it adds a second venv with Python 3.10 and torch 1.13.1 for PyLaia, and its build context is `engines/` ([engines/pylaia](../engines/pylaia/README.md)) |
 | `make pylaia-smoke` | Opt-in, GPU: build the PyLaia image and run it on synthetic samples through the runner, evaluation and reports |
 | `make docker-lightonocr` | Build the LightOnOCR-2 GPU engine image from the torch base, without weights ([engines/lightonocr](../engines/lightonocr/README.md)) |

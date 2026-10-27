@@ -1,7 +1,7 @@
 # Kraken historical OCR/HTR pipeline (README.md next to this file; format: docs/RUNNER.md).
 name = "kraken"
-engine_version = "1"
-image = "ocrbench/engine-kraken:7.1.1-v1"
+engine_version = "2"
+image = "ocrbench/engine-kraken:7.1.1-v2"
 model = "blla+catmus-print-fondue-large@zenodo.10592716"  # segmentation + recognition model
 
 [params]

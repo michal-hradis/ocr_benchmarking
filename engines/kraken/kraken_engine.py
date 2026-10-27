@@ -11,7 +11,9 @@ from __future__ import annotations
 
 import dataclasses
 import hashlib
+import itertools
 import json
+import math
 import os
 import re
 import sys
@@ -22,20 +24,42 @@ from typing import Any
 
 MODELS_DIR = Path(os.environ.get("OCRBENCH_KRAKEN_MODELS", "/opt/ocrbench/models"))
 CACHE_DIR = "/cache/"
-BUNDLED_MODELS = (
-    "catmus-print-fondue-large.mlmodel",
-    "McCATMuS_nfd_nofix_V1.mlmodel",
-    "german_print.mlmodel",
-)
+# Recognition models in the image (checked against models.sha256 when it is built): their record,
+# license and the material they suit, recorded with every sample. Not interchangeable (README.md).
+BUNDLED_MODELS: dict[str, dict[str, Any]] = {
+    "catmus-print-fondue-large.mlmodel": {
+        "record": "https://doi.org/10.5281/zenodo.10592716",
+        "license": "CC-BY-4.0",
+        "scripts": ["Latn"],
+        "material": "print",
+        "suitable_for": "Latin-script printed books and newspapers, 16th-21st c.; no háček letters",
+    },
+    "McCATMuS_nfd_nofix_V1.mlmodel": {
+        "record": "https://doi.org/10.5281/zenodo.13788177",
+        "license": "CC-BY-4.0",
+        "scripts": ["Latn"],
+        "material": "handwriting, print, typewriting",
+        "suitable_for": "Latin-script manuscripts (HTR), 16th-21st c.; no háček letters",
+    },
+    "german_print.mlmodel": {
+        "record": "https://doi.org/10.5281/zenodo.10519596",
+        "license": "CC0-1.0",
+        "scripts": ["Latf", "Latn"],
+        "material": "print",
+        "suitable_for": "German and Latin prints, incunabula to 20th c., Fraktur",
+    },
+}
 # Engine parameters (job.json "params"), README.md.
 DEFAULT_PARAMS: dict[str, Any] = {
     "device": "cuda:0",
-    "recognition_model": BUNDLED_MODELS[0],
+    "recognition_model": "catmus-print-fondue-large.mlmodel",
     "segmentation_model": None,  # Kraken's default blla.mlmodel
     "batch_size": 1,
     "segmentation_min_height": 1200,
+    "segmentation_tile_height": 0,  # 0: segment the whole page at once
 }
-INT_PARAMS = {"batch_size": 1, "segmentation_min_height": 0}  # name: minimum
+INT_PARAMS = {"batch_size": 1, "segmentation_min_height": 0, "segmentation_tile_height": 0}
+MIN_TILE_HEIGHT = 600
 # Kraken region class -> standardized region type (docs/PREDICTIONS.md#region-types), by the
 # lower-cased class without a SegmOnto ":subtype"; any other class becomes "other".
 REGION_TYPES = {
@@ -82,6 +106,8 @@ def parse_params(params: dict[str, Any]) -> dict[str, Any]:
         value = merged[key]
         if type(value) is not int or value < low:
             raise AdapterError(f"{key} must be an integer of at least {low}: {value!r}")
+    if 0 < merged["segmentation_tile_height"] < MIN_TILE_HEIGHT:
+        raise AdapterError(f"segmentation_tile_height must be 0 or at least {MIN_TILE_HEIGHT}")
     model = merged["recognition_model"]
     if not isinstance(model, str) or not (model in BUNDLED_MODELS or _cache_path(model)):
         bundled = ", ".join(BUNDLED_MODELS)
@@ -146,6 +172,8 @@ def load_models(params: dict[str, Any]) -> tuple[Any, Any, dict[str, Any]]:
         if not path.is_file():
             raise AdapterError(f"{role} model {path} does not exist (models: README.md)")
     files = {role: {"path": str(path), "sha256": sha256(path)} for role, path in paths.items()}
+    if bundled := BUNDLED_MODELS.get(params["recognition_model"]):
+        files["recognition"] |= bundled
     try:
         segmenter = SegmentationTaskModel.load_model(paths["segmentation"])
         recognizer = RecognitionTaskModel.load_model(paths["recognition"])
@@ -223,6 +251,90 @@ def shift_segmentation(segmentation: Any, offset: int, height: int) -> Any:
         for kind, regions in segmentation.regions.items()
     }
     return dataclasses.replace(segmentation, lines=lines, regions=regions)
+
+
+def segmentation_tiles(height: int, tile_height: int) -> list[tuple[int, int, int, int]]:
+    """Full-width bands ``(top, bottom, start, end)`` covering a page ``height`` pixels high.
+
+    Bands are ``tile_height`` pixels high, evenly spaced and overlapping by at least a quarter of
+    that; each owns the rows from ``start`` to ``end``, split in the middle of every overlap.
+    ``0`` or a page no higher than ``tile_height`` gives the whole page as one band.
+    """
+    if not tile_height or height <= tile_height:
+        return [(0, height, 0, height)]
+    gaps = math.ceil((height - tile_height) / (tile_height - tile_height // 4))
+    tops = [round(index * (height - tile_height) / gaps) for index in range(gaps + 1)]
+    cuts = [0] + [(top + previous + tile_height) // 2 for previous, top in itertools.pairwise(tops)]
+    cuts.append(height)
+    return [(top, top + tile_height, cuts[i], cuts[i + 1]) for i, top in enumerate(tops)]
+
+
+def baseline_middle(points: list) -> float:
+    """The y coordinate halfway along a baseline, where Kraken assigns a line to a region."""
+    remaining = sum(math.dist(p, q) for p, q in itertools.pairwise(points)) / 2
+    for (x0, y0), (x1, y1) in itertools.pairwise(points):
+        length = math.dist((x0, y0), (x1, y1))
+        if length >= remaining and length:
+            return y0 + (y1 - y0) * remaining / length
+        remaining -= length
+    return float(points[-1][1])
+
+
+def clip_rows(points: list, start: int, end: int) -> list[list[int]]:
+    """A polygon cut to the rows from ``start`` to ``end`` (Sutherland-Hodgman clipping)."""
+
+    def clip(points, inside, y):
+        out = []
+        for previous, point in zip(points[-1:] + points[:-1], points, strict=True):
+            if inside(point) != inside(previous):
+                (x0, y0), (x1, y1) = previous, point
+                out.append([round(x0 + (x1 - x0) * (y - y0) / (y1 - y0)), y])
+            if inside(point):
+                out.append(list(point))
+        return out
+
+    points = clip(list(points), lambda p: p[1] >= start, start)
+    return clip(points, lambda p: p[1] <= end, end) if points else []
+
+
+def segment(segmenter: Any, config: Any, image: Any, params: dict) -> tuple[Any, int, int]:
+    """Kraken's segmentation of ``image`` in input-image pixels, the canvas offset and tile count.
+
+    A page higher than ``segmentation_tile_height`` is segmented in overlapping full-width bands
+    (``segmentation_tiles``), each scaled to the model's input height on its own (on a canvas
+    like a short image), so small text is seen at a higher resolution. A band keeps the lines
+    whose baseline middle lies in its own rows and its regions cut to those rows; the lines of
+    all bands are then put into Kraken's polygonal reading order over the whole page. Reading
+    orders from a reading order model of a custom segmentation model are not used, as they
+    cover only one band.
+    """
+    min_height = params["segmentation_min_height"]
+    tiles = segmentation_tiles(image.height, params["segmentation_tile_height"])
+    if len(tiles) == 1:
+        canvas, offset = segmentation_canvas(image, min_height)
+        segmentation = segmenter.predict(canvas, config)
+        return shift_segmentation(segmentation, offset, image.height), offset, 1
+    from kraken.lib.segmentation import polygonal_reading_order
+
+    lines, regions, first = [], {}, None
+    for top, bottom, start, end in tiles:
+        canvas, offset = segmentation_canvas(image.crop((0, top, image.width, bottom)), min_height)
+        band = segmenter.predict(canvas, config)
+        band = shift_segmentation(band, offset - top, image.height)
+        first = first or band
+        lines += [line for line in band.lines if start <= baseline_middle(line.baseline) < end]
+        for kind, found in band.regions.items():
+            for region in found:
+                boundary = clip_rows(region.boundary, start, end)
+                if len(boundary) >= 3:
+                    region = dataclasses.replace(region, boundary=boundary)
+                    regions.setdefault(kind, []).append(region)
+    flat = [region for found in regions.values() for region in found]
+    order = polygonal_reading_order(lines, first.text_direction[-2:], flat) if lines else []
+    segmentation = dataclasses.replace(
+        first, lines=[lines[i] for i in order], regions=regions, line_orders=[]
+    )
+    return segmentation, 0, len(tiles)
 
 
 def native_result(segmentation: Any, records: list[Any]) -> dict[str, Any]:
@@ -332,9 +444,7 @@ def process(models: tuple, params: dict, sample: dict, source: Path, out: Path) 
     """Segment and recognize one sample, write its outputs and return ``result.json`` content."""
     segmenter, recognizer, segmentation_config, recognition_config = models
     image = read_image(source / sample["image"])
-    canvas, offset = segmentation_canvas(image, params["segmentation_min_height"])
-    segmentation = segmenter.predict(canvas, segmentation_config)
-    segmentation = shift_segmentation(segmentation, offset, image.height)
+    segmentation, offset, tiles = segment(segmenter, segmentation_config, image, params)
     records = list(recognizer.predict(image, segmentation, recognition_config))
     if len(records) != len(segmentation.lines):
         raise AdapterError(f"Kraken recognized {len(records)} of {len(segmentation.lines)} lines")
@@ -349,6 +459,7 @@ def process(models: tuple, params: dict, sample: dict, source: Path, out: Path) 
     regions = prediction.get("regions", [])
     counts = {
         "canvas_offset": offset,
+        "segmentation_tiles": tiles,
         "kraken_lines": len(records),
         "kraken_regions": sum(len(r) for r in segmentation.regions.values()),
         "lines": sum(len(region["lines"]) for region in regions),
