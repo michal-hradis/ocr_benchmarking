@@ -83,10 +83,11 @@ SERVER_ARGS = [
 ]  # fmt: skip
 NO_THINKING = {"enable_thinking": False}
 GROUNDING_PROMPT = "grounding"
-# A grounding marker: ![label](x1,y1,x2,y2), a trailing "+" on the label marking a continuation. The
-# parentheses may hold only numbers, so a Markdown image such as ![Fig](a.png) stays text; a marker
-# whose box is not four integers keeps its label and gets no position.
-MARKER = re.compile(r"!\[([A-Za-z_][\w-]*?)(\+?)\]\(([-\d\s,.]*)\)[ \t]*")
+# A grounding marker: ![label](x1,y1,x2,y2), a trailing "+" on the label marking a continuation,
+# the box exactly four integers as in LightOn's format. Anything else, such as a Markdown image
+# ![Fig](a.png) or a box of three numbers, is not a marker and stays text of the block it is in.
+INT = r"\s*(\d+)\s*"
+MARKER = re.compile(rf"!\[([A-Za-z_][\w-]*?)(\+?)\]\({INT},{INT},{INT},{INT}\)[ \t]*")
 BOX_SCALE = 1000
 # Descriptions of pictures and data read from charts are not text on the page: these blocks keep
 # their box but no text (README.md; the maintainer's decision for Chandra OCR 2 in #53).
@@ -417,20 +418,11 @@ def tail_repeats(text: str) -> bool:
     return False
 
 
-def parse_box(text: str) -> list[int] | None:
-    """The four integers of a box as written, or None when it is not exactly four integers. The
-    box is read, never evaluated: no box is invented or computed."""
-    parts = [part.strip() for part in text.split(",")]
-    if len(parts) != 4 or not all(re.fullmatch(r"\d+", part) for part in parts):
-        return None
-    return [int(part) for part in parts]
-
-
 def layout_blocks(text: str, width: int, height: int) -> list[dict[str, Any]]:
     """The blocks of a grounding output in order, as LightOn's lightonocr.grounding.parse_blocks
     splits them (each marker owns the text up to the next marker): the marker as written
     (``marker``), its label without and with the continuation "+" (``label``, ``continues``), the
-    box (``box``, four integers normalized to 0-1000, or None), the same box in input-image pixels
+    box (``box``, four integers normalized to 0-1000), the same box in input-image pixels
     (``box_px``, float pixel edges sorted and clipped to the image), the text (``content``,
     stripped) and the character offsets of the marker (``span``). Text before the first marker is a
     block without a marker."""
@@ -441,18 +433,16 @@ def layout_blocks(text: str, width: int, height: int) -> list[dict[str, Any]]:
         blocks.append({"marker": None, "label": None, "box": None, "content": head.strip()})
     for index, match in enumerate(markers):
         end = markers[index + 1].start() if index + 1 < len(markers) else len(text)
-        box = parse_box(match.group(3))
+        x1, y1, x2, y2 = box = [int(value) for value in match.group(3, 4, 5, 6)]
+        xs = sorted(min(max(x * width / BOX_SCALE, 0), width) for x in (x1, x2))
+        ys = sorted(min(max(y * height / BOX_SCALE, 0), height) for y in (y1, y2))
         block: dict[str, Any] = {
             "marker": match.group(0).rstrip(),
             "label": match.group(1),
             "continues": match.group(2) == "+",
             "box": box,
+            "box_px": [xs[0], ys[0], xs[1], ys[1]],
         }
-        if box is not None:
-            x1, y1, x2, y2 = box
-            xs = sorted(min(max(x * width / BOX_SCALE, 0), width) for x in (x1, x2))
-            ys = sorted(min(max(y * height / BOX_SCALE, 0), height) for y in (y1, y2))
-            block["box_px"] = [xs[0], ys[0], xs[1], ys[1]]
         block["content"] = text[match.end() : end].strip()
         block["span"] = [match.start(), match.start() + len(block["marker"])]
         blocks.append(block)
@@ -461,8 +451,8 @@ def layout_blocks(text: str, width: int, height: int) -> list[dict[str, Any]]:
 
 def blocks_to_prediction(blocks: list[dict[str, Any]], sample_id: str, image: Any) -> dict:
     """Standardized prediction (docs/PREDICTIONS.md): one region per block, in model order, the
-    reading order. A block's box is its polygon in input-image pixels; a block without a valid
-    box has none. Its Markdown (tables as HTML) is region markup, converted on the host; picture
+    reading order. A block's box is its polygon in input-image pixels; text before the first
+    marker has none. Its Markdown (tables as HTML) is region markup, converted on the host; picture
     and chart blocks have no text."""
     regions: list[dict[str, Any]] = []
     for block in blocks:
@@ -548,6 +538,15 @@ def process(server_url: str, params: dict, sample: dict, source: Path, out: Path
     return result | {"extra": extra}
 
 
+def check_job_model(model: Any, checkpoint: str) -> None:
+    """A configured model must be the checkpoint's pinned repository@revision, so that a preset
+    naming one checkpoint never runs another."""
+    spec = CHECKPOINTS[checkpoint]
+    expected = f"{spec['repository']}@{spec['revision']}"
+    if model is not None and model != expected:
+        raise AdapterError(f"model {model!r} does not match checkpoint {checkpoint} ({expected})")
+
+
 def write_result(directory: Path, result: dict[str, Any]) -> None:
     tmp = directory / ".result.json.tmp"
     tmp.write_text(json.dumps(result, ensure_ascii=False), encoding="utf-8")
@@ -562,6 +561,7 @@ def main() -> None:
     server, params, info, files, init_error = None, None, {}, None, None
     try:
         params = parse_params(job.get("params") or {})
+        check_job_model(job.get("model"), params["checkpoint"])
         info = environment(params["device"])
         files = check_model(params["checkpoint"])
         server = Server(params)

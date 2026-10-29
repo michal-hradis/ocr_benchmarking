@@ -55,7 +55,7 @@ FIXTURE_TEXTS = [
     "First item\nSecond item",
     "E = mc^2",
     "Footer",
-    "A block without a valid box, see .",
+    "A block that goes on after an invalid marker, see .",
 ]
 # tests/fixtures/lightonocr3/page.md after host conversion.
 PAGE_TEXTS = [
@@ -210,24 +210,35 @@ def test_layout_blocks_keep_boxes_as_written():
         "![section+](0, 0, 10, 10) Next\nSee ![Fig](fig.png) and ![image](1,2,3,4,5)."
     )
     blocks = loe.layout_blocks(text, 1000, 2000)
+    # Only a box of four integers makes a marker; anything else is text of the block it is in.
     assert [(b["label"], b.get("continues"), b["box"], b["content"]) for b in blocks] == [
         (None, None, None, "Loose text"),
         ("title", False, [10, 20, 30, 40], "## Head"),
-        ("text", False, [1000, 1000, 500, 0], "Body\nmore"),
-        ("text", False, None, "Bad box"),
-        ("text", False, None, "Float box"),
-        ("section", True, [0, 0, 10, 10], "Next\nSee ![Fig](fig.png) and"),
-        ("image", False, None, "."),
-    ]
+        ("text", False, [1000, 1000, 500, 0], "Body\nmore\n\n![text](1,2,3) Bad box\n"
+         "![text](1.5,2,3,4) Float box"),
+        ("section", True, [0, 0, 10, 10], "Next\nSee ![Fig](fig.png) and ![image](1,2,3,4,5)."),
+    ]  # fmt: skip
     assert blocks[1]["box_px"] == [10, 40, 30, 80]
     assert blocks[2]["box_px"] == [500, 0, 1000, 2000]  # corners sorted
-    assert all("box_px" not in b for b in blocks[3:5])
+    assert "box_px" not in blocks[0]
     start, end = blocks[1]["span"]
     assert text[start:end] == "![title](10,20,30,40)"
     # Clipped to the image.
     (block,) = loe.layout_blocks("![text](0,0,1200,1000) x", 999, 999)
     assert block["box_px"] == [0, 0, 999, 999]
     assert loe.layout_blocks("", 10, 10) == []
+
+
+def test_invalid_image_marker_keeps_the_text_scored():
+    """Regression (PR #123 review): an image marker with a wrong number of coordinates used to
+    split the text block and become an unscored picture block taking the rest of the text."""
+    image = Image.new("RGB", (1000, 1000))
+    for box in ("1,2,3", "1,2,3,4,5", "-1,2,3,4", "1.0,2,3,4", ""):
+        raw = f"![text](0,0,500,500) First half ![image]({box}) second half."
+        prediction = loe.blocks_to_prediction(loe.layout_blocks(raw, 1000, 1000), "s", image)
+        (region,) = prediction["regions"]
+        assert region["native_type"] == "text"
+        assert region["markup"]["content"] == f"First half ![image]({box}) second half."
 
 
 def test_blocks_become_positioned_regions_with_markup():
@@ -252,7 +263,9 @@ def test_blocks_become_positioned_regions_with_markup():
     assert "polygon" in regions[4]
     assert "markup" not in regions[7]
     assert "polygon" in regions[7]
-    assert "polygon" not in regions[11]  # no valid box: no position is invented
+    # An invalid marker inside a block is its text, not a picture block without text.
+    assert regions[11]["native_type"] == "text"
+    assert "![image](1,2,3)" in regions[11]["markup"]["content"]
     assert prediction["text"] == ""
     standardized, issues = validate_prediction(prediction, sample_id="s", image_size=(1000, 700))
     assert issues == []
@@ -416,7 +429,7 @@ def test_grounding_follows_the_engine_protocol(tmp_path):
     assert extra["generated_tokens"] == len(native)
     assert extra["prompt_tokens"] == (1000 // 32) * (700 // 32) + 10
     assert extra["max_tokens"] is None
-    assert (extra["blocks"], extra["blocks_without_box"]) == (12, 1)
+    assert (extra["blocks"], extra["blocks_without_box"]) == (12, 0)
     assert (extra["continuation_blocks"], extra["unscored_blocks"]) == (1, 2)
     assert "title" in extra["labels"]
     assert extra["request_seconds"] >= 0
@@ -539,6 +552,7 @@ def test_max_tokens_truncation(tmp_path):
     ("params", "env", "message"),
     [
         (BASE | {"psm": 3}, {}, "unknown parameters: psm"),
+        (BASE | {"checkpoint": "1B"}, {}, "does not match checkpoint 1B"),
         ({"mode": "plain"}, {}, "checkpoint must be one of"),
         (BASE, {"FAKE_TORCH_GPUS": "0"}, "cuda:0 requested but 0 CUDA devices are visible"),
         (BASE, "corrupt", "not matching models-4B.sha256: ['config.json']"),

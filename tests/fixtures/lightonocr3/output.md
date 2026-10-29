@@ -26,4 +26,4 @@ the lazy dog &amp; the river.
 
 ![footer](0,990,1000,1010) Footer
 
-![text](12,30) A block without a valid box, see ![Fig](fig.png).
+![text](0,900,1000,980) A block that goes on ![image](1,2,3) after an invalid marker, see ![Fig](fig.png).
