@@ -1,0 +1,24 @@
+# Mistral OCR 4.1, plain page Markdown: the page transcription without blocks, converted to text on
+# the host; text-only output.
+# Each page image is sent unchanged to Mistral's OCR API, one request per page (README.md next to
+# engine.toml; format: docs/RUNNER.md). Needs MISTRAL_API_KEY in the environment and
+# --allow-network (ADR 0013); every page is a paid request.
+name = "mistral-ocr-4.1-markdown"
+engine_version = "1"
+image = "ocrbench/engine-mistral-ocr:1-v1"
+model = "mistral-ocr-4-1"
+network = "egress"
+secrets = ["MISTRAL_API_KEY"]
+
+[params]
+mode = "markdown"
+confidence_scores_granularity = "page"
+# Other parameters (table format, header/footer extraction, retries, throttling): README.md
+
+[resources]
+cpus = 1
+memory = "1g"
+
+[timeouts]
+sample = 1800  # a request may wait up to 300 s and is retried up to four times
+startup = 60
