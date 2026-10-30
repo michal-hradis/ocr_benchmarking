@@ -1,0 +1,26 @@
+# Docling standard image pipeline, preset docling-rapidocr-fullpage (#78): the docling preset
+# (../engine.toml) with full-page OCR: RapidOCR reads the whole page once and Docling assigns its
+# text boxes to the layout regions (../README.md#ocr-modes; format: docs/RUNNER.md). Run with
+# --cache <dir> holding the models from make docling-model.
+name = "docling-rapidocr-fullpage"
+engine_version = "1"
+image = "ocrbench/engine-docling:2.145.0-v1"
+model = "docling-2.145.0@layout-heron-8f39ad3c,tableformer-accurate-fc0f2d45,rapidocr-3.10.0-PP-OCRv5-latin-mobile"
+
+[params]
+device = "cuda:0"  # layout and TableFormer; RapidOCR runs on the CPU (onnxruntime)
+ocr_engine = "rapidocr"
+ocr_lang = ["latin"]  # RapidOCR's PP-OCRv5 Latin-script recognizer
+ocr_mode = "full_page"  # RapidOCR on the whole page (upstream force_full_page_ocr)
+ocr_scale = 3.0  # nominal 216 DPI: Docling crops the input pixels 1:1 (RapidOCR shrinks crops over 2000 px)
+table_structure = true  # TableFormer, accurate mode
+
+[resources]
+cpus = 4
+memory = "16g"
+gpus = "all"
+shm_size = "2g"
+
+[timeouts]
+sample = 600
+startup = 300
