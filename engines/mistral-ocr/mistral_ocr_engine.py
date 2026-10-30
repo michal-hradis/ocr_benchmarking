@@ -19,6 +19,7 @@ result, and an output that ends in a repetition loop is reported as truncated.
 from __future__ import annotations
 
 import base64
+import email.utils
 import hashlib
 import json
 import os
@@ -26,6 +27,7 @@ import sys
 import time
 import urllib.error
 import urllib.request
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -56,15 +58,18 @@ REGION_TYPES = {
 # a unit of fewer than LONG_UNIT characters, LONG_TIMES times for a longer one of at most LONG_MAX
 # characters (the rule of the LightOnOCR-3 adapter).
 SHORT_TIMES, LONG_TIMES, LONG_UNIT, LONG_MAX = 8, 3, 64, 4096
-RETRY_STATUSES = {408, 429, 500, 502, 503, 504}
+# Retried: no HTTP response (network error or timeout), 408, 429 and any 5xx.
+RETRY_STATUSES = {408, 429} | set(range(500, 600))
+MAX_RETRY_AFTER = 120.0  # seconds; a longer Retry-After is shortened to this
+# Fixed request options. Tables and headers/footers stay in the page Markdown and the blocks:
+# table_format "markdown"/"html" and extract_header/extract_footer would move that text out of
+# them, and the adapter does not put it back, so they are not configurable.
+FIXED_OPTIONS = {"include_image_base64": False, "extract_header": False, "extract_footer": False}
 # Response headers kept as provenance: request IDs and rate-limit state.
 KEPT_HEADERS = ("x-request-id", "mistral-correlation-id", "x-ratelimit", "ratelimit")
 # Engine parameters (job.json "params"), README.md.
 DEFAULT_PARAMS: dict[str, Any] = {
     "mode": "blocks",
-    "table_format": None,  # tables inline in the page Markdown
-    "extract_header": False,  # headers and footers stay in the transcription
-    "extract_footer": False,
     "confidence_scores_granularity": "block",
     "request_timeout": 300,
     "max_retries": 4,
@@ -85,13 +90,6 @@ def parse_params(params: dict[str, Any]) -> dict[str, Any]:
     merged = {**DEFAULT_PARAMS, **params}
     if merged["mode"] not in ("blocks", "markdown"):
         raise AdapterError(f"mode must be 'blocks' or 'markdown': {merged['mode']!r}")
-    if merged["table_format"] not in (None, "markdown", "html"):
-        raise AdapterError(
-            f"table_format must be null, 'markdown' or 'html': {merged['table_format']!r}"
-        )
-    for key in ("extract_header", "extract_footer"):
-        if type(merged[key]) is not bool:
-            raise AdapterError(f"{key} must be true or false: {merged[key]!r}")
     if merged["confidence_scores_granularity"] not in (None, "page", "block", "word"):
         raise AdapterError("confidence_scores_granularity must be null, page, block or word")
     for key in ("request_timeout", "retry_base_seconds", "usd_per_1000_pages"):
@@ -117,14 +115,11 @@ def request_body(params: dict[str, Any], media_type: str, data: bytes) -> dict[s
             "type": "image_url",
             "image_url": f"data:{media_type};base64,{base64.b64encode(data).decode('ascii')}",
         },
-        "include_image_base64": False,
         "include_blocks": params["mode"] == "blocks",
-        "extract_header": params["extract_header"],
-        "extract_footer": params["extract_footer"],
+        **FIXED_OPTIONS,
     }
-    for key in ("table_format", "confidence_scores_granularity"):
-        if params[key] is not None:
-            body[key] = params[key]
+    if params["confidence_scores_granularity"] is not None:
+        body["confidence_scores_granularity"] = params["confidence_scores_granularity"]
     return body
 
 
@@ -192,11 +187,12 @@ class Client:
         self.last_start = time.monotonic()
 
     def delay(self, attempt: int, headers: dict[str, str]) -> float:
-        """Retry-After when the API gives one (at most 120 s), else exponential backoff."""
-        try:
-            return min(float(headers.get("Retry-After", "")), 120.0)
-        except ValueError:
+        """Retry-After when the API gives a valid one (at most MAX_RETRY_AFTER), else exponential
+        backoff. ``headers`` has lower-case names."""
+        wait = retry_after(headers.get("retry-after"))
+        if wait is None:
             return self.params["retry_base_seconds"] * 2**attempt
+        return min(wait, MAX_RETRY_AFTER)
 
     def send(self, payload: bytes) -> tuple[int | None, dict[str, str], bytes, str | None]:
         request = urllib.request.Request(
@@ -211,11 +207,33 @@ class Client:
         )
         try:
             with urllib.request.urlopen(request, timeout=self.params["request_timeout"]) as reply:
-                return reply.status, dict(reply.headers), reply.read(), None
+                return reply.status, lower_names(reply.headers), reply.read(), None
         except urllib.error.HTTPError as error:
-            return error.code, dict(error.headers or {}), error.read(), None
+            return error.code, lower_names(error.headers), error.read(), None
         except (OSError, TimeoutError) as error:  # URLError, connection reset, timeout
             return None, {}, b"", f"{type(error).__name__}: {error}"
+
+
+def lower_names(headers: Any) -> dict[str, str]:
+    """Response headers with lower-case names: HTTP header names are case-insensitive."""
+    return {name.lower(): value for name, value in (headers or {}).items()}
+
+
+def retry_after(value: str | None, now: datetime | None = None) -> float | None:
+    """Seconds to wait from a Retry-After value, either delay-seconds or an HTTP date (RFC 9110);
+    None when it is missing or invalid. A date in the past means no wait."""
+    if value is None:
+        return None
+    value = value.strip()
+    if value.isdigit():
+        return float(value)
+    try:
+        when = email.utils.parsedate_to_datetime(value)
+    except (TypeError, ValueError, IndexError):
+        return None
+    if when.tzinfo is None:  # "-0000": UTC
+        when = when.replace(tzinfo=UTC)
+    return max(0.0, (when - (now or datetime.now(UTC))).total_seconds())
 
 
 class TransportError(AdapterError):

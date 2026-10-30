@@ -18,6 +18,7 @@ import os
 import subprocess
 import sys
 import tomllib
+from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
@@ -74,8 +75,10 @@ def test_presets_are_pinned_and_need_network():
     [
         ({"prompt": "OCR"}, "unknown parameters: prompt"),
         ({"mode": "pdf"}, "mode"),
-        ({"table_format": "csv"}, "table_format"),
-        ({"extract_header": 1}, "extract_header"),
+        # Options that move text out of the page Markdown and blocks are not configurable.
+        ({"table_format": "html"}, "unknown parameters: table_format"),
+        ({"extract_header": True}, "unknown parameters: extract_header"),
+        ({"extract_footer": True}, "unknown parameters: extract_footer"),
         ({"confidence_scores_granularity": "line"}, "confidence_scores_granularity"),
         ({"request_timeout": 0}, "request_timeout"),
         ({"max_retries": 11}, "max_retries"),
@@ -104,6 +107,43 @@ def test_request_sends_only_the_image_and_pinned_options():
     assert plain["include_blocks"] is False
     assert plain["confidence_scores_granularity"] == "page"
     assert "table_format" not in plain  # tables stay inline in the Markdown
+
+
+DATE = "Wed, 21 Oct 2015 07:28:00 GMT"
+NOW = datetime(2015, 10, 21, 7, 27, 30, tzinfo=UTC)
+
+
+@pytest.mark.parametrize(
+    ("value", "seconds"),
+    [
+        ("3", 3.0),
+        (" 0 ", 0.0),
+        (DATE, 30.0),  # an HTTP date, 30 s after NOW
+        ("Wed, 21 Oct 2015 07:27:00 GMT", 0.0),  # in the past: no wait
+        ("Wednesday, 21-Oct-15 07:28:00 GMT", 30.0),  # obsolete RFC 850 form
+        ("-1", None),
+        ("1.5", None),
+        ("soon", None),
+        (None, None),
+    ],
+)
+def test_retry_after_seconds_or_http_date(value, seconds):
+    assert mo.retry_after(value, NOW) == seconds
+
+
+def test_retry_delay_uses_retry_after_in_any_case_or_backoff():
+    client = mo.Client(mo.parse_params({}), "key")
+    headers = mo.lower_names({"Retry-After": "7", "X-RateLimit-Remaining": "0"})
+    assert headers == {"retry-after": "7", "x-ratelimit-remaining": "0"}
+    assert client.delay(0, headers) == 7.0
+    assert client.delay(0, {"retry-after": "100000"}) == mo.MAX_RETRY_AFTER
+    assert [client.delay(n, {"retry-after": "soon"}) for n in range(4)] == [2.0, 4.0, 8.0, 16.0]
+    assert client.delay(1, {}) == 4.0
+
+
+def test_any_5xx_408_and_429_are_retried():
+    assert {408, 429, 500, 501, 520, 599} <= mo.RETRY_STATUSES
+    assert not {400, 401, 403, 404, 413, 422, 600} & mo.RETRY_STATUSES
 
 
 def test_blocks_become_positioned_regions_with_markup():
@@ -239,6 +279,7 @@ def test_adapter_follows_the_engine_protocol(tmp_path, fake_api):
         "page": ((900, 420), "JPEG"),
         "blank": ((300, 200), "PNG"),
         "throttled": ((429, 200), "PNG"),
+        "unknown-5xx": ((430, 200), "PNG"),
         "down": ((503, 200), "PNG"),
         "denied": ((401, 200), "PNG"),
         "other-model": ((777, 200), "PNG"),
@@ -254,6 +295,7 @@ def test_adapter_follows_the_engine_protocol(tmp_path, fake_api):
         "page": ("success", None),
         "blank": ("success", None),  # an empty transcription is a result, not a failure
         "throttled": ("success", None),  # retried after Retry-After
+        "unknown-5xx": ("success", None),  # any 5xx is retried
         "down": ("failure", "engine-error"),
         "denied": ("failure", "engine-error"),
         "other-model": ("failure", "engine-error"),
@@ -279,7 +321,7 @@ def test_adapter_follows_the_engine_protocol(tmp_path, fake_api):
     # What was sent: the image file unchanged with its media type, the pinned model and options;
     # nothing about the sample.
     sent = requests(log)
-    assert len(sent) == 1 + 1 + 2 + 3 + 1 + 1 + 1 + 1 + 1 + 1  # no request for the TIFF image
+    assert len(sent) == 1 + 1 + 2 + 2 + 3 + 1 + 1 + 1 + 1 + 1 + 1  # no request for the TIFF image
     first = sent[0]
     assert first["document"] == {"type": "image_url", "header": "data:image/jpeg;base64"}
     assert first["bytes"] == (tmp_path / "data" / "page.jpg").stat().st_size
@@ -332,6 +374,8 @@ def test_adapter_follows_the_engine_protocol(tmp_path, fake_api):
     assert settings["request"]["include_blocks"] is True
     throttled = records["throttled"]["engine_extra"]["transport"]["attempts"]
     assert [a["status"] for a in throttled] == [429, 200]
+    unknown = records["unknown-5xx"]["engine_extra"]["transport"]["attempts"]
+    assert [a["status"] for a in unknown] == [520, 200]
     down = records["down"]["engine_extra"]["transport"]["attempts"]
     assert [a["status"] for a in down] == [503, 503, 503]
     blank = records["blank"]["engine_extra"]
