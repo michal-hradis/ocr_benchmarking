@@ -423,8 +423,9 @@ def test_undecodable_image_is_an_adapter_error(tmp_path):
         ({"psm": 3}, "unknown parameters: psm"),
         ({"device": "gpu:0"}, "device must be 'cuda:<n>' or 'cpu'"),
         ({"ocr_engine": "tesseract"}, "ocr_engine must be one of"),
-        ({"ocr_lang": "latin"}, "ocr_lang must be a list of one language code"),
-        ({"ocr_lang": ["latin", "en"]}, "ocr_lang must be a list of one language code"),
+        ({"ocr_lang": "latin"}, r"ocr_lang must be one of \[\['latin'\]\]"),
+        ({"ocr_lang": ["latin", "en"]}, "ocr_lang must be one of"),
+        ({"ocr_lang": ["iso:cs"]}, "the recognizers with pinned models"),
         ({"ocr_mode": "pdf_aware_layout_regions"}, "ocr_mode must be one of"),
         ({"ocr_scale": 0}, "ocr_scale must be a number with 0 < value <= 10"),
         ({"ocr_scale": float("nan")}, "ocr_scale must be a number"),
@@ -442,6 +443,7 @@ def test_preset_is_the_adapter_default_written_out():
     assert dl.parse_params(CONFIG["params"]) == dl.DEFAULT_PARAMS
     assert set(CONFIG["params"]) == set(dl.DEFAULT_PARAMS) - {"document_timeout", "num_threads"}
     assert dl.nominal_dpi(dl.DEFAULT_PARAMS) == 216.0
+    assert CONFIG["model"] == dl.MODEL
     assert CONFIG["image"].startswith("ocrbench/engine-docling:2.145.0-")
     requirements = (ENGINE_DIR / "requirements.in").read_text(encoding="utf-8")
     assert "docling-slim[models-local,feat-ocr-rapidocr-onnx,convert-core]==2.145.0" in requirements
@@ -528,8 +530,9 @@ def make_dataset(root, widths):
     return write_manifest(data, samples)
 
 
-def run_adapter(tmp_path, widths, params=None, env=None):
+def run_adapter(tmp_path, widths, params=None, env=None, model=None):
     config = dict(CONFIG, params=params if params is not None else CONFIG["params"])
+    config["model"] = model or CONFIG["model"]
     config["timeouts"] = {"sample": 20, "startup": 20}
     del config["resources"]
     env = {"PYTHONPATH": str(FIXTURES / "fake"), **model_cache(tmp_path), **(env or {})}
@@ -551,6 +554,7 @@ def test_adapter_follows_the_engine_protocol(tmp_path):
         "fail": 777,
         "part": 888,
         "turned": 999,
+        "orphan": 910,
         "table": 1200,
     }
     run, records = run_adapter(tmp_path, widths)
@@ -562,12 +566,20 @@ def test_adapter_follows_the_engine_protocol(tmp_path):
         "fail": ("failure", "engine-error"),
         "part": ("partial", None),
         "turned": ("failure", "engine-error"),
+        "orphan": ("success", None),
         "table": ("success", None),  # the adapter keeps going after failed samples
     }
     assert records["boom"]["message"] == "RuntimeError: CUDA out of memory (fake)"
     assert records["fail"]["message"] == "Docling: pipeline: fake failure"
     assert records["part"]["message"] == "timeout: fake timeout"
     assert "Docling page is 140.000 x 333.000 pt" in records["turned"]["message"]
+    # Text Docling recognized outside every item is reported, not silently dropped or invented.
+    assert records["orphan"]["message"] == (
+        "1 of 1 non-blank OCR cells are in no DoclingDocument item and are left out"
+    )
+    assert records["orphan"]["engine_extra"]["counts"]["cells_outside_regions"] == 1
+    assert (run.path / "samples" / "orphan" / "attempt-1" / "prediction.txt").read_text() == ""
+    assert records["news"]["message"] is None
     news = run.path / "samples" / "news" / "attempt-1"
     outputs = {o["path"] for o in records["news"]["outputs"]}
     assert outputs == {
@@ -637,6 +649,7 @@ def test_cpu_device_reaches_docling(tmp_path):
         ({}, {"FAKE_TORCH_GPUS": "0"}, "cuda:0 requested but 0 CUDA devices are visible"),
         ({}, "no-cache", "does not exist; download the models with make docling-model"),
         ({}, "corrupt", "not matching models.sha256: ['RapidOcr/rec.onnx']"),
+        ({}, "model", "model must be 'docling-2.145.0@layout-heron-8f39ad3c,"),
     ],
 )
 def test_setup_errors_fail_every_sample_explicitly(tmp_path, params, env, message):
@@ -644,7 +657,10 @@ def test_setup_errors_fail_every_sample_explicitly(tmp_path, params, env, messag
         env = {"OCRBENCH_DOCLING_CACHE": str(tmp_path / "nowhere")}
     elif env == "corrupt":
         env = model_cache(tmp_path / "corrupt", "RapidOcr/rec.onnx")
-    _, records = run_adapter(tmp_path, {"a": 900, "b": 300}, params, env)
+    model = None
+    if env == "model":  # a copied configuration that names other models than the pinned ones
+        env, model = {}, CONFIG["model"].replace("heron-8f39ad3c", "egret-large-0123abcd")
+    _, records = run_adapter(tmp_path, {"a": 900, "b": 300}, params, env, model)
     assert {(r["status"], r["reason"]) for r in records.values()} == {("failure", "engine-error")}
     assert all(message in r["message"] for r in records.values())
 
