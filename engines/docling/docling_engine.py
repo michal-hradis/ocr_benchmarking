@@ -48,6 +48,15 @@ DEFAULT_PARAMS: dict[str, Any] = {
     "num_threads": 4,
 }
 OCR_ENGINES = ("rapidocr",)  # further OCR engines come with their presets (#78-#81)
+# RapidOCR languages whose recognition model is pinned in models.sha256 (PP-OCRv5 Latin).
+OCR_LANGS = ("latin",)
+# The pipeline identity of the pinned Docling version and model bundle; the engine
+# configuration's ``model`` must name exactly this, so results cannot be attributed to other
+# models than the ones that ran.
+MODEL = (
+    "docling-2.145.0@layout-heron-8f39ad3c,tableformer-accurate-fc0f2d45,"
+    "rapidocr-3.10.0-PP-OCRv5-latin-mobile"
+)
 OCR_MODES = ("default", "layout_regions", "full_page")
 POINTS_PER_INCH = 72.0
 # Docling item label: region type (docs/PREDICTIONS.md#region-types); others: "other".
@@ -90,8 +99,11 @@ def parse_params(params: dict[str, Any]) -> dict[str, Any]:
     if merged["ocr_engine"] not in OCR_ENGINES:
         raise AdapterError(f"ocr_engine must be one of {OCR_ENGINES}: {merged['ocr_engine']!r}")
     lang = merged["ocr_lang"]
-    if not isinstance(lang, list) or len(lang) != 1 or not isinstance(lang[0], str):
-        raise AdapterError(f"ocr_lang must be a list of one language code: {lang!r}")
+    if not isinstance(lang, list) or len(lang) != 1 or lang[0] not in OCR_LANGS:
+        raise AdapterError(
+            f"ocr_lang must be one of {[[code] for code in OCR_LANGS]} (the recognizers with "
+            f"pinned models): {lang!r}"
+        )
     if merged["ocr_mode"] not in OCR_MODES:
         raise AdapterError(f"ocr_mode must be one of {OCR_MODES}: {merged['ocr_mode']!r}")
     scale = merged["ocr_scale"]
@@ -108,6 +120,12 @@ def parse_params(params: dict[str, Any]) -> dict[str, Any]:
     if type(threads) is not int or threads < 1:
         raise AdapterError(f"num_threads must be a positive integer: {threads!r}")
     return merged
+
+
+def check_model(model: Any) -> None:
+    """The job's model identity must be the pinned bundle this image and models.sha256 run."""
+    if model != MODEL:
+        raise AdapterError(f"model must be {MODEL!r}, the pinned Docling models: {model!r}")
 
 
 def nominal_dpi(params: dict[str, Any]) -> float:
@@ -537,15 +555,21 @@ def process(
         json.dumps(prediction, ensure_ascii=False, indent=1), encoding="utf-8"
     )
     extra["counts"] = counts
+    notes = []
     if result.status is ConversionStatus.PARTIAL_SUCCESS:
-        message = "; ".join(errors) or "Docling reported a partial conversion"
-        return {
-            "status": "partial",
-            "primary": "prediction.json",
-            "message": message[:2000],
-            "extra": extra,
-        }
-    return {"status": "ok", "primary": "prediction.json", "extra": extra}
+        notes.append("; ".join(errors) or "Docling reported a partial conversion")
+    if counts["cells_outside_regions"]:
+        # Docling recognized text that no DoclingDocument item uses; it is not invented into
+        # the prediction, but reported (it stays in docling_layout.json).
+        notes.append(
+            f"{counts['cells_outside_regions']} of {counts['cells']} non-blank OCR cells are in "
+            "no DoclingDocument item and are left out"
+        )
+    status = "partial" if result.status is ConversionStatus.PARTIAL_SUCCESS else "ok"
+    output = {"status": status, "primary": "prediction.json", "extra": extra}
+    if notes:
+        output["message"] = "; ".join(notes)[:2000]
+    return output
 
 
 def write_result(directory: Path, result: dict[str, Any]) -> None:
@@ -562,6 +586,7 @@ def main() -> None:
     converter, params, info, files, options, init_error = None, None, {}, None, None, None
     try:
         params = parse_params(job.get("params") or {})
+        check_model(job.get("model"))
         info = environment(params["device"])
         files = model_files()
         converter = load_converter(params)

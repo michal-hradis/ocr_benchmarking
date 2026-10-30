@@ -2,7 +2,8 @@
 
 900: page; 520: paragraph; 1000: columns; 1500: newspaper; 1200: table; 666: a CUDA
 out-of-memory error; 777: a failed conversion; 888: a partial conversion (blank page); 999: a
-page whose size is the image turned by 90 degrees; any other width: the blank page with that
+page whose size is the image turned by 90 degrees; 910: a blank page with one OCR cell in a
+cluster that no item uses; any other width: the blank page with that
 image size. The input must be a TIFF at 72 x ocr_scale DPI, and every conversion logs a warning.
 """
 
@@ -79,6 +80,21 @@ class DocumentConverter:
             if width == 999:
                 size = {"width": size["height"], "height": size["width"]}
             document["pages"]["1"]["size"] = layout["pages"][0]["size"] = size
+            if width == 910:
+                rect = {"r_x0": 1, "r_y0": 9, "r_x1": 9, "r_y1": 9, "r_x2": 9, "r_y2": 1}
+                rect |= {"r_x3": 1, "r_y3": 1, "coord_origin": "TOPLEFT"}
+                bbox = {"l": 1, "t": 1, "r": 9, "b": 9, "coord_origin": "TOPLEFT"}
+                cell = {"index": 0, "text": "orphan", "rect": rect, "confidence": 0.9}
+                layout["pages"][0]["clusters"] = [
+                    {
+                        "id": 0,
+                        "label": "text",
+                        "bbox": bbox,
+                        "confidence": 0.9,
+                        "cells": [cell],
+                        "children": [],
+                    }
+                ]
         page = layout["pages"][0]
         pages = [
             SimpleNamespace(
