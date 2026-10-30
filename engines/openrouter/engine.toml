@@ -1,0 +1,31 @@
+# OpenRouter hosted vision model: Gemini 3.8 Flash on Google AI Studio with a provisional literal
+# transcription prompt; text-only output (the answer is converted to text on the host).
+# Each page image is sent unchanged with the fixed prompt, one request per page, to OpenRouter's
+# chat completions API (README.md next to this file; format: docs/RUNNER.md). Needs
+# OPENROUTER_API_KEY in the environment and --allow-network (ADR 0013); every page is a paid request.
+name = "openrouter-gemini-3.8-flash-literal"
+engine_version = "1"
+image = "ocrbench/engine-openrouter:1-v1"
+model = "google/gemini-3.8-flash"
+network = "egress"
+secrets = ["OPENROUTER_API_KEY"]
+
+[params]
+provider = "google-ai-studio"  # the only provider; no fallbacks
+prompt = """Transcribe all text in this page image exactly as written, in reading order. \
+Keep the original line breaks, spelling, punctuation, diacritics and historical letter forms \
+(such as the long s "ſ"). Do not modernize, correct, translate, summarize or add commentary. \
+Output only the transcription as plain text."""
+max_tokens = 32768
+temperature = 0.0
+seed = 0
+reasoning_effort = "minimal"
+# Retries and throttling: README.md
+
+[resources]
+cpus = 1
+memory = "1g"
+
+[timeouts]
+sample = 1800  # a request may wait up to 300 s and is retried up to four times
+startup = 60
