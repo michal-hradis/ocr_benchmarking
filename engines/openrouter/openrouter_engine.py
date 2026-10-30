@@ -2,8 +2,9 @@
 
 It follows the engine protocol in docs/RUNNER.md: read $OCRBENCH_INPUT/job.json and, for every
 sample in job order, send the sample's image file unchanged (base64, with its own media type; no
-resizing or re-encoding) and the preset's fixed prompt to OpenRouter's chat completions API, with
-the job's pinned model ID, one pinned provider without fallbacks and fixed generation settings.
+resizing or re-encoding; the preset may request a resolution with image_detail) and the preset's
+fixed prompt to OpenRouter's chat completions API, with the job's pinned model ID, one pinned
+provider without fallbacks and fixed generation settings.
 Nothing else from the job is sent: no sample ID, metadata or file names. This is the only network
 access, permitted by the runner's --allow-network (ADR 0013); the API key comes from the
 OPENROUTER_API_KEY environment variable and is never written anywhere.
@@ -58,12 +59,16 @@ DEFAULT_PARAMS: dict[str, Any] = {
     "seed": 0,
     "reasoning_effort": None,
     "answer_format": "text",
+    "image_detail": None,
     "request_timeout": 300,
     "max_retries": 4,
     "retry_base_seconds": 2.0,
     "min_interval_seconds": 1.0,
 }
 REASONING_EFFORTS = (None, "none", "minimal", "low", "medium", "high")
+# Sent as image_url.detail; null omits it. OpenRouter ignores an unknown value silently, so only
+# these are accepted. The resolution each one gives depends on the model (README.md).
+IMAGE_DETAILS = (None, "auto", "low", "high", "original")
 # The answer's file by answer_format: plain text is scored as given; Markdown is converted on the
 # host with the shared rules (ADR 0011).
 ANSWER_FILES = {"text": "page.txt", "markdown": "page.md"}
@@ -110,6 +115,8 @@ def parse_params(params: dict[str, Any]) -> dict[str, Any]:
         raise AdapterError(f"answer_format must be one of {sorted(ANSWER_FILES)}")
     if merged["reasoning_effort"] not in REASONING_EFFORTS:
         raise AdapterError(f"reasoning_effort must be one of {REASONING_EFFORTS}")
+    if merged["image_detail"] not in IMAGE_DETAILS:
+        raise AdapterError(f"image_detail must be one of {IMAGE_DETAILS}")
     for key in ("request_timeout", "retry_base_seconds"):
         if type(merged[key]) not in (int, float) or merged[key] <= 0:
             raise AdapterError(f"{key} must be a positive number: {merged[key]!r}")
@@ -128,6 +135,9 @@ def parse_params(params: dict[str, Any]) -> dict[str, Any]:
 def request_body(model: str, params: dict[str, Any], image_url: str) -> dict[str, Any]:
     """The chat request: one user message with the prompt and the image, the pinned model, one
     provider without fallbacks or providers that ignore a setting, and the generation settings."""
+    image: dict[str, Any] = {"url": image_url}
+    if params["image_detail"] is not None:
+        image["detail"] = params["image_detail"]
     body: dict[str, Any] = {
         "model": model,
         "messages": [
@@ -135,7 +145,7 @@ def request_body(model: str, params: dict[str, Any], image_url: str) -> dict[str
                 "role": "user",
                 "content": [
                     {"type": "text", "text": params["prompt"]},
-                    {"type": "image_url", "image_url": {"url": image_url}},
+                    {"type": "image_url", "image_url": image},
                 ],
             }
         ],

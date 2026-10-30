@@ -4,11 +4,11 @@ provider routing, the request, transport failures, finish reasons and the engine
 Offline tests run the adapter as a host process against a fake API on the loopback interface
 (tests/fixtures/openrouter/fake_api.py), started as a separate process so that the test process
 itself opens no sockets. Its hand-written response (tests/fixtures/openrouter/response.json) has
-the shape of a real chat completion from google/gemini-3.8-flash, with a Markdown heading,
-emphasis and an HTML entity in the answer. The fake API also throttles, fails, answers from
-another model, stops at the token limit or a content filter and returns malformed bodies. The
-opt-in API test builds the engine image and sends the synthetic smoke dataset to the real API
-through ``ocrbench run``, then evaluates and reports the run; it makes paid requests and needs
+the shape of a real chat completion from google/gemini-3.8-flash with a plain-text answer; the
+fake API also answers in Markdown, throttles, fails, answers from another model, stops at the
+token limit or a content filter and returns malformed bodies. The opt-in API test builds the
+engine image and sends the synthetic smoke dataset to the real API through ``ocrbench run`` with
+every preset, then evaluates and reports the runs; it makes paid requests and needs
 OPENROUTER_API_KEY.
 """
 
@@ -32,7 +32,15 @@ ROOT = Path(__file__).resolve().parents[1]
 ENGINE_DIR = ROOT / "engines" / "openrouter"
 FIXTURES = Path(__file__).parent / "fixtures" / "openrouter"
 ADAPTER_PATH = ENGINE_DIR / "openrouter_engine.py"
-CONFIG = tomllib.loads((ENGINE_DIR / "engine.toml").read_text(encoding="utf-8"))
+PRESET_FILES = {
+    "openrouter-gemini-3.8-flash-literal": ENGINE_DIR / "engine.toml",
+    "openrouter-gemini-3.8-flash-layout": ENGINE_DIR / "presets" / "layout.toml",
+    "openrouter-gemini-3.8-flash-literal-original": (
+        ENGINE_DIR / "presets" / "literal-original.toml"
+    ),
+}
+PRESETS = {n: tomllib.loads(f.read_text(encoding="utf-8")) for n, f in PRESET_FILES.items()}
+CONFIG = PRESETS["openrouter-gemini-3.8-flash-literal"]
 RESPONSE = json.loads((FIXTURES / "response.json").read_text(encoding="utf-8"))
 MODEL = "google/gemini-3.8-flash"
 
@@ -46,18 +54,25 @@ FIXTURE_TEXT = "The Daily Chronicle\n\nThe quick brown fox jumps over\nthe lazy 
 MARKDOWN = (
     "# The **Daily** Chronicle\n\nThe quick brown fox jumps over\nthe lazy dog &amp; the river."
 )
+LAYOUT = "openrouter-gemini-3.8-flash-layout"
+ORIGINAL = "openrouter-gemini-3.8-flash-literal-original"
 FAST = {"min_interval_seconds": 0, "retry_base_seconds": 0.01, "max_retries": 2}
 REQUIRED = {"provider": "google-ai-studio", "prompt": "OCR"}
 
 
-def test_preset_is_pinned_and_needs_network():
-    engine = parse_engine_config(CONFIG)
+@pytest.mark.parametrize("name", PRESETS)
+def test_presets_are_pinned_and_need_network(name):
+    engine = parse_engine_config(PRESETS[name])
+    assert engine.name == name
+    assert (engine.engine_version, engine.image) == ("2", "ocrbench/engine-openrouter:2-v1")
     assert engine.model == MODEL == oe.check_model(engine.model)
     assert (engine.network, engine.secrets) == ("egress", ("OPENROUTER_API_KEY",))
     assert engine.gpus is None
     params = oe.parse_params(engine.params)
     assert (params["provider"], params["temperature"], params["seed"]) == ("google-ai-studio", 0, 0)
-    assert params["answer_format"] == "text"  # the literal prompt asks for plain text
+    assert params["answer_format"] == "text"  # the prompts ask for plain text
+    assert params["reasoning_effort"] == "minimal"
+    assert params["image_detail"] == ("original" if name.endswith("-original") else None)
     # Every attempt may wait its full timeout and every retry the longest delay.
     assert oe.max_request_seconds(params) == 5 * 301 + 4 * 120
     assert engine.sample_timeout >= oe.max_request_seconds(params)
@@ -94,6 +109,7 @@ def test_routers_aliases_and_variants_are_refused(model):
         (dict(REQUIRED, temperature=3), "temperature"),
         (dict(REQUIRED, seed=1.5), "seed"),
         (dict(REQUIRED, reasoning_effort="max"), "reasoning_effort"),
+        (dict(REQUIRED, image_detail="ultra_high"), "image_detail"),  # ignored by OpenRouter
         (dict(REQUIRED, answer_format="html"), "answer_format"),
         (dict(REQUIRED, request_timeout=0), "request_timeout"),
         (dict(REQUIRED, max_retries=11), "max_retries"),
@@ -134,6 +150,23 @@ def test_request_pins_the_provider_without_fallbacks():
     plain = oe.request_body(MODEL, oe.parse_params(dict(REQUIRED, seed=None)), "x")
     assert "seed" not in plain
     assert "reasoning" not in plain
+    detailed = oe.request_body(MODEL, oe.parse_params(PRESETS[ORIGINAL]["params"]), "x")
+    assert detailed["messages"][0]["content"][1] == {
+        "type": "image_url",
+        "image_url": {"url": "x", "detail": "original"},
+    }
+
+
+def test_presets_differ_only_in_prompt_or_image_detail():
+    literal = oe.parse_params(CONFIG["params"])
+    layout = oe.parse_params(PRESETS[LAYOUT]["params"])
+    original = oe.parse_params(PRESETS[ORIGINAL]["params"])
+    assert dict(layout, prompt=None) == dict(literal, prompt=None)
+    assert dict(original, image_detail=None) == literal
+    for config in PRESETS.values():
+        assert {k: v for k, v in config.items() if k != "name" and k != "params"} == {
+            k: v for k, v in CONFIG.items() if k != "name" and k != "params"
+        }
 
 
 def test_settings_fingerprints_are_stable_and_exclude_the_image():
@@ -308,7 +341,7 @@ def test_adapter_follows_the_engine_protocol(tmp_path, fake_api):
         "type": "text",
         "text": CONFIG["params"]["prompt"],
     }
-    dump = json.dumps(sent)
+    dump = json.dumps(sent).replace(json.dumps(CONFIG["params"]["prompt"])[1:-1], "")  # "page."
     assert not [sid for sid in samples if f'"{sid}' in dump or f"{sid}." in dump]
 
     page = run.path / "samples" / "page" / "attempt-1"
@@ -459,10 +492,11 @@ def openrouter_image():
 
 @pytest.mark.docker
 @pytest.mark.api
-def test_api_smoke_benchmark(tmp_path, openrouter_image):
+@pytest.mark.parametrize("name", PRESETS)
+def test_api_smoke_benchmark(tmp_path, openrouter_image, name):
     manifest = smoke_dataset(tmp_path / "data")
     runs = str(tmp_path / "runs")
-    args = ["run", "start", "--engine", str(ENGINE_DIR / "engine.toml"), "--dataset", str(manifest)]
+    args = ["run", "start", "--engine", str(PRESET_FILES[name]), "--dataset", str(manifest)]
     assert main([*args, "--runs-dir", runs, "--run-id", "smoke"]) == 1  # needs --allow-network
     assert main([*args, "--runs-dir", runs, "--run-id", "smoke", "--allow-network"]) == 0
     run = load_run(tmp_path / "runs" / "smoke")
