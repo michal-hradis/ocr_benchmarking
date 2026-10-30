@@ -27,4 +27,4 @@ Engine containers run with `--network none` ([ADR 0007](0007-runner-and-engine-p
 
 - A hosted engine's results depend on the provider's service at request time. The pinned model ID and the recorded response model, request ID and timestamps are the provenance; exact reproduction later is not guaranteed.
 - Engine time includes network and provider queueing. It is not comparable with on-device speed.
-- `tests/test_runner.py` checks the refusal without `--allow-network`, the missing-secret refusal, the bridge network, the by-name secret and unchanged hashes for offline engines. `tests/test_mistral_ocr.py` runs the first such adapter against the fake API.
+- `tests/test_runner.py` checks the refusal without `--allow-network`, the missing-secret refusal, the bridge network, the by-name secret and unchanged hashes for offline engines. `tests/test_mistral_ocr.py` and `tests/test_openrouter.py` run the hosted adapters against fake APIs.
