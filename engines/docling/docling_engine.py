@@ -6,7 +6,7 @@ pipeline (layout analysis, OCR of the layout regions or of the full page, TableF
 order) and convert every sample image in job order. Each image is decoded as stored (EXIF
 orientation not applied) and handed to Docling as an uncompressed TIFF at a fixed nominal resolution
 of 72 x ocr_scale DPI, so that Docling crops the original pixels 1:1 for OCR whatever the file's own
-DPI says; result.json records the crops and how far RapidOCR shrinks each. Every sample directory
+DPI says; result.json records the crops and how RapidOCR resized each. Every sample directory
 gets the native DoclingDocument (docling.json), its Markdown export (docling.md), Docling's layout
 clusters with their OCR cells (docling_layout.json), the standardized prediction.json and, last,
 result.json.
@@ -558,48 +558,78 @@ def check_page_size(document: dict[str, Any], size: tuple[int, int], dpi: float)
 
 
 class OcrCrops:
-    """Records the boxes Docling hands RapidOCR for each page (``get_ocr_rects``).
+    """Records the boxes Docling hands RapidOCR for each page and what RapidOCR made of them.
 
-    The OCR mode decides them (README.md#ocr-modes): the merged layout clusters or the whole
-    page. RapidOCR shrinks a crop whose longer side exceeds its ``max_side_len`` to that size.
+    The OCR mode decides the boxes (``get_ocr_rects``, README.md#ocr-modes): the merged layout
+    clusters or the whole page. Docling skips a box of zero area and otherwise crops it from the
+    page and calls RapidOCR once (orientation detection is off). RapidOCR's ``preprocess_img``
+    then resizes the crop: down to ``max_side_len`` and up to ``min_side_len``, each side rounded
+    to a multiple of 32. Both are recorded as they happen, not recomputed.
     """
 
-    def __init__(self, ocr_model: Any, max_side_len: int) -> None:
+    def __init__(self, ocr_model: Any) -> None:
         self.boxes: list[tuple[str, float, float, float, float]] = []
-        self.max_side_len = max_side_len
-        original = ocr_model.get_ocr_rects
+        self.calls: list[tuple[int, int, int, int]] = []  # crop width, height; resized
+        rects, reader = ocr_model.get_ocr_rects, ocr_model.reader
+        preprocess = reader.preprocess_img
 
-        def recording(page: Any) -> Any:
-            rects = original(page)
-            self.boxes += [(r.coord_origin.value, r.l, r.t, r.r, r.b) for r in rects]
-            return rects
+        def recording_rects(page: Any) -> Any:
+            result = rects(page)
+            self.boxes += [(r.coord_origin.value, r.l, r.t, r.r, r.b) for r in result]
+            return result
 
-        ocr_model.get_ocr_rects = recording
+        def recording_preprocess(image: Any) -> Any:
+            resized, record = preprocess(image)
+            self.calls.append((*image.shape[1::-1], *resized.shape[1::-1]))
+            return resized, record
 
-    def summary(self, scale: float, page_size: dict[str, float], size: tuple[int, int]) -> dict:
-        """The crops in input pixels, with the factor RapidOCR resizes each by (< 1: shrunk).
+        ocr_model.get_ocr_rects = recording_rects
+        reader.preprocess_img = recording_preprocess
 
-        Docling renders a crop at ``scale`` pixels per point; ``page_size`` (points) and ``size``
-        (pixels) map its box to the input image, top-left origin.
+    def clear(self) -> None:
+        self.boxes.clear()
+        self.calls.clear()
+
+    def summary(self, page_size: dict[str, float], size: tuple[int, int]) -> dict[str, Any]:
+        """The boxes in input pixels (top-left origin), each with RapidOCR's crop and resize.
+
+        ``page_size`` (points) and ``size`` (pixels) map a box to the input image. ``resize`` is
+        the resized crop's width and height over the crop's (< 1: shrunk). If the RapidOCR calls
+        do not pair up with the boxes of non-zero area, they are listed apart (``calls``).
         """
         sx, sy = size[0] / page_size["width"], size[1] / page_size["height"]
-        crops = []
+        crops: list[dict[str, Any]] = []
         for origin, left, top, right, bottom in self.boxes:
             if origin != "TOPLEFT":
                 top, bottom = page_size["height"] - top, page_size["height"] - bottom
-            longest = max(right - left, bottom - top) * scale
-            crops.append(
-                {
-                    "box": [round(v, 1) for v in (left * sx, top * sy, right * sx, bottom * sy)],
-                    "resize": round(min(1.0, self.max_side_len / longest), 4) if longest else 1.0,
-                }
-            )
-        return {
-            "count": len(crops),
-            "shrunk": sum(c["resize"] < 1 for c in crops),
-            "min_resize": min((c["resize"] for c in crops), default=1.0),
+            box = [round(v, 1) for v in (left * sx, top * sy, right * sx, bottom * sy)]
+            crops.append({"box": box, "skipped": (right - left) * (bottom - top) == 0})
+        calls = [
+            {
+                "crop": [width, height],
+                "resized": [new_width, new_height],
+                "resize": [round(new_width / width, 4), round(new_height / height, 4)],
+            }
+            for width, height, new_width, new_height in self.calls
+        ]
+        read = [crop for crop in crops if not crop["skipped"]]
+        factors = [f for call in calls for f in call["resize"]]
+        summary: dict[str, Any] = {
+            "boxes": len(crops),
+            "skipped": len(crops) - len(read),
+            "rapidocr_calls": len(calls),
+            "shrunk": sum(min(call["resize"]) < 1 for call in calls),
+            "enlarged": sum(max(call["resize"]) > 1 for call in calls),
+            "min_resize": min(factors, default=1.0),
+            "paired": len(read) == len(calls),
             "crops": crops,
         }
+        if summary["paired"]:
+            for crop, call in zip(read, calls, strict=True):
+                crop.update(call)
+        else:
+            summary["calls"] = calls
+        return summary
 
 
 class Warnings(logging.Handler):
@@ -638,7 +668,7 @@ def process(
     loggers = [logging.getLogger(name) for name in ("docling", "RapidOCR")]
     for logger in loggers:
         logger.addHandler(collector)
-    crops.boxes.clear()
+    crops.clear()
     try:
         result = converter.convert(
             DocumentStream(name=f"{sample['id']}.tif", stream=stream), raises_on_error=False
@@ -673,7 +703,7 @@ def process(
     )
     extra["counts"] = counts
     page_size = next(iter(document["pages"].values()))["size"]
-    extra["ocr_crops"] = crops.summary(params["ocr_scale"], page_size, size)
+    extra["ocr_crops"] = crops.summary(page_size, size)
     notes = []
     if result.status is ConversionStatus.PARTIAL_SUCCESS:
         notes.append("; ".join(errors) or "Docling reported a partial conversion")
@@ -711,7 +741,7 @@ def main() -> None:
         files = model_files()
         converter, ocr_model = load_converter(params)
         rapidocr = rapidocr_settings(ocr_model.reader.cfg)
-        crops = OcrCrops(ocr_model, rapidocr["Global"]["max_side_len"])
+        crops = OcrCrops(ocr_model)
         options = json.loads(pipeline_options(params).model_dump_json())
     except AdapterError as error:
         init_error = str(error)

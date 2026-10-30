@@ -7,6 +7,7 @@ cluster that no item uses; any other width: the blank page with that
 image size. The input must be a TIFF at 72 x ocr_scale DPI, and every conversion logs a warning.
 The pipeline's RapidOCR reader has RapidOCR 3.10.0's settings and the pinned models; the OCR model
 is asked for its crops once per page: the whole page in full_page mode, else the layout clusters.
+RapidOCR preprocesses each crop of non-zero area at 3 pixels per point, without resizing it.
 """
 
 import json
@@ -90,7 +91,8 @@ class DocumentConverter:
             self.options.ocr_options.rapidocr_params["EngineConfig.onnxruntime.use_cuda"] is False
         )
         self.initialized = False
-        self.ocr_model = SimpleNamespace(reader=SimpleNamespace(cfg=None), get_ocr_rects=None)
+        reader = SimpleNamespace(cfg=None, preprocess_img=lambda image: (image, {}))
+        self.ocr_model = SimpleNamespace(reader=reader, get_ocr_rects=None)
 
     def initialize_pipeline(self, input_format):
         assert input_format == InputFormat.IMAGE
@@ -154,7 +156,10 @@ class DocumentConverter:
                     }
                 ]
         page = layout["pages"][0]
-        self.ocr_model.get_ocr_rects(page)
+        for rect in self.ocr_model.get_ocr_rects(page):
+            crop = (round((rect.b - rect.t) * 3), round((rect.r - rect.l) * 3), 3)
+            if crop[0] and crop[1]:
+                self.ocr_model.reader.preprocess_img(SimpleNamespace(shape=crop))
         pages = [
             SimpleNamespace(
                 page_no=page["page_no"],

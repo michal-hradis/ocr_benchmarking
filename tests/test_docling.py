@@ -682,8 +682,8 @@ def test_adapter_follows_the_engine_protocol(tmp_path):
     )
     assert not any(ocr["rapidocr_params"].values())  # RapidOCR on the CPU
     crops = extra["ocr_crops"]  # the default mode: RapidOCR reads the layout clusters
-    assert crops["count"] == len(layout["pages"][0]["clusters"])
-    assert (crops["shrunk"], crops["min_resize"]) == (0, 1.0)
+    assert crops["boxes"] == crops["rapidocr_calls"] == len(layout["pages"][0]["clusters"])
+    assert (crops["shrunk"], crops["min_resize"], crops["paired"]) == (0, 1.0, True)
     rapidocr = extra["rapidocr"]
     assert (rapidocr["Global"]["max_side_len"], rapidocr["Det"]["limit_side_len"]) == (2000, 736)
     assert rapidocr["Rec"]["model_path"].endswith(
@@ -707,35 +707,104 @@ def test_preset_ocr_mode_reaches_docling(tmp_path, name):
     assert extra["pipeline_options"]["ocr_options"]["mode"] == PRESETS[name]["params"]["ocr_mode"]
     crops = extra["ocr_crops"]["crops"]
     if name == "rapidocr-fullpage":
-        assert crops == [{"box": [0.0, 0.0, 900.0, 420.0], "resize": 1.0}]
+        assert crops == [
+            {
+                "box": [0.0, 0.0, 900.0, 420.0],
+                "skipped": False,
+                "crop": [900, 420],
+                "resized": [900, 420],
+                "resize": [1.0, 1.0],
+            }
+        ]
     else:
         assert len(crops) == len(NATIVE["page"][1]["pages"][0]["clusters"]) > 1
 
 
-def test_ocr_crops_are_recorded_in_input_pixels_with_rapidocrs_resize():
-    def rect(origin, *box):
-        return SimpleNamespace(
-            coord_origin=SimpleNamespace(value=origin), **dict(zip("ltrb", box, strict=True))
-        )
+def ocr_model(rects, resized):
+    """An OCR model whose RapidOCR reader resizes the n-th crop to ``resized[n]``."""
+    sizes = iter(resized)
 
-    page = [rect("TOPLEFT", 0, 0, 1398, 2064)]  # a 4194 x 6192 newspaper read in full
-    model = SimpleNamespace(get_ocr_rects=lambda page: page)
-    crops = dl.OcrCrops(model, 2000)
-    assert model.get_ocr_rects(page) is page  # Docling still gets its rects
-    model.get_ocr_rects([rect("BOTTOMLEFT", 100, 2064, 400, 1064), rect("TOPLEFT", 0, 0, 0, 0)])
-    summary = crops.summary(3.0, {"width": 1398.0, "height": 2064.0}, (4194, 6192))
-    assert summary == {
-        "count": 3,
+    def preprocess(image):
+        width, height = next(sizes)
+        return SimpleNamespace(shape=(height, width, 3)), {"preprocess": {}}
+
+    reader = SimpleNamespace(preprocess_img=preprocess)
+    return SimpleNamespace(get_ocr_rects=lambda page: rects, reader=reader)
+
+
+def rect(origin, *box):
+    return SimpleNamespace(
+        coord_origin=SimpleNamespace(value=origin), **dict(zip("ltrb", box, strict=True))
+    )
+
+
+def read_page(model, crops):
+    """Docling's OCR of one page: skip a box of zero area, else crop it and call RapidOCR."""
+    for r in model.get_ocr_rects(None):
+        if (r.r - r.l) * abs(r.b - r.t):
+            crop = SimpleNamespace(shape=(round(abs(r.b - r.t) * 3), round((r.r - r.l) * 3), 3))
+            model.reader.preprocess_img(crop)
+    return crops.summary({"width": 1398.0, "height": 2064.0}, (4194, 6192))
+
+
+def test_ocr_crops_record_rapidocrs_actual_resizing():
+    # A 4194 x 6192 newspaper read in full: RapidOCR 3.10.0 makes it 1344 x 1984 (rounded to
+    # multiples of 32), a narrow strip is enlarged, and a box of zero area is never read.
+    rects = [
+        rect("TOPLEFT", 0, 0, 1398, 2064),
+        rect("BOTTOMLEFT", 100, 2064, 400, 1064),
+        rect("TOPLEFT", 10, 10, 10, 50),
+        rect("TOPLEFT", 0, 0, 300, 5),
+    ]
+    model = ocr_model(rects, [(1344, 1984), (608, 1984), (1792, 32)])
+    crops = dl.OcrCrops(model)
+    summary = read_page(model, crops)
+    assert {k: v for k, v in summary.items() if k != "crops"} == {
+        "boxes": 4,
+        "skipped": 1,
+        "rapidocr_calls": 3,
         "shrunk": 2,
-        "min_resize": round(2000 / 6192, 4),
-        "crops": [
-            {"box": [0.0, 0.0, 4194.0, 6192.0], "resize": round(2000 / 6192, 4)},
-            {"box": [300.0, 0.0, 1200.0, 3000.0], "resize": round(2000 / 3000, 4)},
-            {"box": [0.0, 0.0, 0.0, 0.0], "resize": 1.0},
-        ],
+        "enlarged": 1,
+        "min_resize": 0.3204,
+        "paired": True,
     }
-    crops.boxes.clear()
-    assert crops.summary(3.0, {"width": 1.0, "height": 1.0}, (3, 3))["count"] == 0
+    assert summary["crops"] == [
+        {
+            "box": [0.0, 0.0, 4194.0, 6192.0],
+            "skipped": False,
+            "crop": [4194, 6192],
+            "resized": [1344, 1984],
+            "resize": [0.3205, 0.3204],
+        },
+        {
+            "box": [300.0, 0.0, 1200.0, 3000.0],
+            "skipped": False,
+            "crop": [900, 3000],
+            "resized": [608, 1984],
+            "resize": [0.6756, 0.6613],
+        },
+        {"box": [30.0, 30.0, 30.0, 150.0], "skipped": True},
+        {
+            "box": [0.0, 0.0, 900.0, 15.0],
+            "skipped": False,
+            "crop": [900, 15],
+            "resized": [1792, 32],
+            "resize": [1.9911, 2.1333],
+        },
+    ]
+    crops.clear()
+    assert read_page(ocr_model([], []), crops)["boxes"] == 0
+
+
+def test_ocr_crops_that_do_not_pair_up_are_listed_apart():
+    model = ocr_model([rect("TOPLEFT", 0, 0, 10, 10)], [(30, 30), (30, 30)])
+    crops = dl.OcrCrops(model)
+    read_page(model, crops)
+    model.reader.preprocess_img(SimpleNamespace(shape=(30, 30, 3)))  # an unexpected second call
+    summary = crops.summary({"width": 1398.0, "height": 2064.0}, (4194, 6192))
+    assert (summary["paired"], summary["rapidocr_calls"]) == (False, 2)
+    assert summary["crops"] == [{"box": [0.0, 0.0, 30.0, 30.0], "skipped": False}]
+    assert len(summary["calls"]) == 2
 
 
 def test_cpu_device_reaches_docling(tmp_path):
@@ -835,7 +904,8 @@ def test_gpu_smoke_benchmark(tmp_path, docling_image):
         assert extra["pipeline_options"]["ocr_options"]["mode"] == mode
         assert extra["rapidocr"]["Global"]["max_side_len"] == 2000
         crops = extra["ocr_crops"]  # the whole page, or the (merged) layout clusters
-        assert crops["count"] == 1 if mode == "full_page" else crops["count"] >= 1
+        assert crops["paired"]  # one RapidOCR call per crop of non-zero area
+        assert crops["boxes"] == 1 if mode == "full_page" else crops["boxes"] >= 1
         assert crops["shrunk"] == 0  # the synthetic pages are smaller than RapidOCR's limit
         environment = extra["environment"]
         assert environment["docling-slim"] == "2.145.0"
