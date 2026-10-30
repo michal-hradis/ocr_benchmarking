@@ -50,13 +50,14 @@ RETRY_STATUSES = {408, 429} | set(range(500, 600))
 MAX_RETRY_AFTER = 120.0  # seconds; a longer Retry-After or backoff is shortened to this
 # Response headers kept as provenance: request IDs and rate-limit state.
 KEPT_HEADERS = ("x-request-id", "x-generation-id", "x-ratelimit", "ratelimit")
-# Engine parameters (job.json "params"), README.md. provider and prompt have no default.
+# Engine parameters (job.json "params"), README.md. provider and prompt have no default; a
+# setting that is null is not sent, as some providers refuse temperature or seed.
 DEFAULT_PARAMS: dict[str, Any] = {
     "provider": None,
     "prompt": None,
     "max_tokens": 32768,
-    "temperature": 0.0,
-    "seed": 0,
+    "temperature": None,
+    "seed": None,
     "reasoning_effort": None,
     "answer_format": "text",
     "image_detail": None,
@@ -107,8 +108,11 @@ def parse_params(params: dict[str, Any]) -> dict[str, Any]:
         raise AdapterError(
             f"max_tokens must be an integer of at least 16: {merged['max_tokens']!r}"
         )
-    if type(merged["temperature"]) not in (int, float) or not 0 <= merged["temperature"] <= 2:
-        raise AdapterError(f"temperature must be from 0 to 2: {merged['temperature']!r}")
+    temperature = merged["temperature"]
+    if temperature is not None and (
+        type(temperature) not in (int, float) or not 0 <= temperature <= 2
+    ):
+        raise AdapterError(f"temperature must be from 0 to 2 or null: {temperature!r}")
     if merged["seed"] is not None and type(merged["seed"]) is not int:
         raise AdapterError(f"seed must be an integer or null: {merged['seed']!r}")
     if merged["answer_format"] not in ANSWER_FILES:
@@ -156,9 +160,10 @@ def request_body(model: str, params: dict[str, Any], image_url: str) -> dict[str
             "data_collection": "deny",
         },
         "max_tokens": params["max_tokens"],
-        "temperature": params["temperature"],
         "stream": False,
     }
+    if params["temperature"] is not None:
+        body["temperature"] = params["temperature"]
     if params["seed"] is not None:
         body["seed"] = params["seed"]
     if params["reasoning_effort"] is not None:

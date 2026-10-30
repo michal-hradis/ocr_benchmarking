@@ -32,17 +32,37 @@ ROOT = Path(__file__).resolve().parents[1]
 ENGINE_DIR = ROOT / "engines" / "openrouter"
 FIXTURES = Path(__file__).parent / "fixtures" / "openrouter"
 ADAPTER_PATH = ENGINE_DIR / "openrouter_engine.py"
+# The model cohort (#59): model, provider, the provider's name in responses, and whether the
+# provider accepts temperature and seed for the model.
+COHORT = {
+    "gemini-3.8-flash": ("google/gemini-3.8-flash", "google-ai-studio", "Google AI Studio", 1, 1),
+    "qwen3.8-flash": ("qwen/qwen3.8-flash", "alibaba", "Alibaba", 1, 1),
+    "gpt-6.1-terra": ("openai/gpt-6.1-terra", "openai", "OpenAI", 0, 1),
+    "claude-sonnet-5.5": ("anthropic/claude-sonnet-5.5", "anthropic", "Anthropic", 0, 0),
+    "gpt-6-luna": ("openai/gpt-6-luna", "openai", "OpenAI", 0, 1),
+    "claude-haiku-5.5": ("anthropic/claude-haiku-5.5", "anthropic", "Anthropic", 0, 0),
+}
 PRESET_FILES = {
     "openrouter-gemini-3.8-flash-literal": ENGINE_DIR / "engine.toml",
     "openrouter-gemini-3.8-flash-layout": ENGINE_DIR / "presets" / "layout.toml",
     "openrouter-gemini-3.8-flash-literal-original": (
         ENGINE_DIR / "presets" / "literal-original.toml"
     ),
+} | {
+    f"openrouter-{slug}-{prompt}": ENGINE_DIR / "presets" / f"{slug}-{prompt}.toml"
+    for slug in list(COHORT)[1:]
+    for prompt in ("literal", "layout")
 }
 PRESETS = {n: tomllib.loads(f.read_text(encoding="utf-8")) for n, f in PRESET_FILES.items()}
 CONFIG = PRESETS["openrouter-gemini-3.8-flash-literal"]
 RESPONSE = json.loads((FIXTURES / "response.json").read_text(encoding="utf-8"))
 MODEL = "google/gemini-3.8-flash"
+
+
+def cohort_entry(name):
+    """The preset's cohort entry: model, provider, provider name, temperature and seed sent."""
+    return next(v for slug, v in COHORT.items() if name.startswith(f"openrouter-{slug}-"))
+
 
 _spec = importlib.util.spec_from_file_location("openrouter_engine", ADAPTER_PATH)
 oe = importlib.util.module_from_spec(_spec)
@@ -64,12 +84,16 @@ REQUIRED = {"provider": "google-ai-studio", "prompt": "OCR"}
 def test_presets_are_pinned_and_need_network(name):
     engine = parse_engine_config(PRESETS[name])
     assert engine.name == name
-    assert (engine.engine_version, engine.image) == ("2", "ocrbench/engine-openrouter:2-v1")
-    assert engine.model == MODEL == oe.check_model(engine.model)
+    assert (engine.engine_version, engine.image) == ("2", "ocrbench/engine-openrouter:2-v2")
+    model, provider, _, temperature, seed = cohort_entry(name)
+    assert engine.model == model == oe.check_model(engine.model)
     assert (engine.network, engine.secrets) == ("egress", ("OPENROUTER_API_KEY",))
     assert engine.gpus is None
     params = oe.parse_params(engine.params)
-    assert (params["provider"], params["temperature"], params["seed"]) == ("google-ai-studio", 0, 0)
+    assert params["provider"] == provider
+    # Temperature 0 and seed 0 where the provider accepts them, else not sent.
+    assert params["temperature"] == (0 if temperature else None)
+    assert params["seed"] == (0 if seed else None)
     assert params["answer_format"] == "text"  # the prompts ask for plain text
     assert params["reasoning_effort"] == "minimal"
     assert params["image_detail"] == ("original" if name.endswith("-original") else None)
@@ -147,9 +171,10 @@ def test_request_pins_the_provider_without_fallbacks():
         "reasoning": {"effort": "minimal"},
         "stream": False,
     }
-    plain = oe.request_body(MODEL, oe.parse_params(dict(REQUIRED, seed=None)), "x")
-    assert "seed" not in plain
-    assert "reasoning" not in plain
+    plain = oe.request_body(MODEL, oe.parse_params(REQUIRED), "x")  # null settings are not sent
+    assert not {"temperature", "seed", "reasoning"} & set(plain)
+    zero = oe.request_body(MODEL, oe.parse_params(dict(REQUIRED, temperature=0, seed=0)), "x")
+    assert (zero["temperature"], zero["seed"]) == (0, 0)
     detailed = oe.request_body(MODEL, oe.parse_params(PRESETS[ORIGINAL]["params"]), "x")
     assert detailed["messages"][0]["content"][1] == {
         "type": "image_url",
@@ -164,9 +189,22 @@ def test_presets_differ_only_in_prompt_or_image_detail():
     assert dict(layout, prompt=None) == dict(literal, prompt=None)
     assert dict(original, image_detail=None) == literal
     for config in PRESETS.values():
-        assert {k: v for k, v in config.items() if k != "name" and k != "params"} == {
-            k: v for k, v in CONFIG.items() if k != "name" and k != "params"
+        assert {k: v for k, v in config.items() if k not in ("name", "params", "model")} == {
+            k: v for k, v in CONFIG.items() if k not in ("name", "params", "model")
         }
+
+
+@pytest.mark.parametrize("name", [n for n in PRESETS if not n.startswith("openrouter-gemini")])
+def test_cohort_presets_share_the_gemini_prompts_and_settings(name):
+    """Each further model has the literal and layout prompts and settings of the Gemini presets;
+    only the model, the provider, and temperature and seed where the provider refuses them,
+    differ (#59)."""
+    gemini = PRESETS["openrouter-gemini-3.8-flash-" + name.rsplit("-", 1)[1]]
+    params, base = oe.parse_params(PRESETS[name]["params"]), oe.parse_params(gemini["params"])
+    differ = {"provider", "temperature", "seed"}
+    assert {k: v for k, v in params.items() if k not in differ} == {
+        k: v for k, v in base.items() if k not in differ
+    }
 
 
 def test_settings_fingerprints_are_stable_and_exclude_the_image():
@@ -507,8 +545,9 @@ def test_api_smoke_benchmark(tmp_path, openrouter_image, name):
         "blank-1": "success",
     }
     extra = records["page-1"]["engine_extra"]
-    assert oe.model_matches(MODEL, extra["response_model"])
-    assert extra["provider"] == "Google AI Studio"
+    model, _, provider_name, _, _ = cohort_entry(name)
+    assert oe.model_matches(model, extra["response_model"])
+    assert extra["provider"] == provider_name
     assert extra["cost_usd"] > 0
     assert main(["evaluate", str(run.path)]) == 0
     scores = json.loads((run.path / "evaluations" / "1" / "scores.json").read_text())

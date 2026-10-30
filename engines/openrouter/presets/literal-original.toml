@@ -7,7 +7,7 @@
 # OPENROUTER_API_KEY in the environment and --allow-network (ADR 0013); every page is a paid request.
 name = "openrouter-gemini-3.8-flash-literal-original"
 engine_version = "2"
-image = "ocrbench/engine-openrouter:2-v1"
+image = "ocrbench/engine-openrouter:2-v2"
 model = "google/gemini-3.8-flash"
 network = "egress"
 secrets = ["OPENROUTER_API_KEY"]
