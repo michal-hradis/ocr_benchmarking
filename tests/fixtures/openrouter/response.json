@@ -14,7 +14,7 @@
    "native_finish_reason": "STOP",
    "message": {
     "role": "assistant",
-    "content": "# The **Daily** Chronicle\n\nThe quick brown fox jumps over\nthe lazy dog &amp; the river.",
+    "content": "The Daily Chronicle\n\nThe quick brown fox jumps over\nthe lazy dog & the river.",
     "refusal": null,
     "reasoning": null,
     "reasoning_details": [

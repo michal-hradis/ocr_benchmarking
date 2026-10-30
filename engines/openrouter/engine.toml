@@ -1,5 +1,5 @@
 # OpenRouter hosted vision model: Gemini 3.8 Flash on Google AI Studio with a provisional literal
-# transcription prompt; text-only output (the answer is converted to text on the host).
+# transcription prompt; text-only output (the answer is scored as plain text, page.txt).
 # Each page image is sent unchanged with the fixed prompt, one request per page, to OpenRouter's
 # chat completions API (README.md next to this file; format: docs/RUNNER.md). Needs
 # OPENROUTER_API_KEY in the environment and --allow-network (ADR 0013); every page is a paid request.
@@ -20,6 +20,7 @@ max_tokens = 32768
 temperature = 0.0
 seed = 0
 reasoning_effort = "minimal"
+answer_format = "text"  # the prompt asks for plain text: no Markdown conversion
 # Retries and throttling: README.md
 
 [resources]
@@ -27,5 +28,5 @@ cpus = 1
 memory = "1g"
 
 [timeouts]
-sample = 1800  # a request may wait up to 300 s and is retried up to four times
+sample = 2100  # five 300 s attempts, four retry delays of at most 120 s: 1985 s
 startup = 60
