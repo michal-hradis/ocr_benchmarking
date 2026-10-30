@@ -40,8 +40,12 @@ _spec = importlib.util.spec_from_file_location("openrouter_engine", ADAPTER_PATH
 oe = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(oe)
 
-# The answer in tests/fixtures/openrouter/response.json after host conversion.
+# The plain-text answer in tests/fixtures/openrouter/response.json, and the fake API's Markdown
+# answer (image width 910), which converts to it.
 FIXTURE_TEXT = "The Daily Chronicle\n\nThe quick brown fox jumps over\nthe lazy dog & the river."
+MARKDOWN = (
+    "# The **Daily** Chronicle\n\nThe quick brown fox jumps over\nthe lazy dog &amp; the river."
+)
 FAST = {"min_interval_seconds": 0, "retry_base_seconds": 0.01, "max_retries": 2}
 REQUIRED = {"provider": "google-ai-studio", "prompt": "OCR"}
 
@@ -53,8 +57,10 @@ def test_preset_is_pinned_and_needs_network():
     assert engine.gpus is None
     params = oe.parse_params(engine.params)
     assert (params["provider"], params["temperature"], params["seed"]) == ("google-ai-studio", 0, 0)
-    # A request waits at most request_timeout and is retried max_retries times.
-    assert engine.sample_timeout >= params["request_timeout"] * (params["max_retries"] + 1)
+    assert params["answer_format"] == "text"  # the literal prompt asks for plain text
+    # Every attempt may wait its full timeout and every retry the longest delay.
+    assert oe.max_request_seconds(params) == 5 * 301 + 4 * 120
+    assert engine.sample_timeout >= oe.max_request_seconds(params)
     assert oe.API_URL == "https://openrouter.ai/api/v1/chat/completions"
 
 
@@ -88,6 +94,7 @@ def test_routers_aliases_and_variants_are_refused(model):
         (dict(REQUIRED, temperature=3), "temperature"),
         (dict(REQUIRED, seed=1.5), "seed"),
         (dict(REQUIRED, reasoning_effort="max"), "reasoning_effort"),
+        (dict(REQUIRED, answer_format="html"), "answer_format"),
         (dict(REQUIRED, request_timeout=0), "request_timeout"),
         (dict(REQUIRED, max_retries=11), "max_retries"),
         (dict(REQUIRED, min_interval_seconds=-1), "min_interval_seconds"),
@@ -160,6 +167,7 @@ def test_retry_delay_and_statuses():
     assert client.delay(0, oe.lower_names({"Retry-After": "7"})) == 7.0
     assert client.delay(0, {"retry-after": "100000"}) == oe.MAX_RETRY_AFTER
     assert [client.delay(n, {}) for n in range(3)] == [2.0, 4.0, 8.0]
+    assert client.delay(10, {}) == oe.MAX_RETRY_AFTER  # backoff is capped too
     assert {408, 429, 500, 502, 503, 599} <= oe.RETRY_STATUSES
     assert not {400, 401, 402, 403, 404, 413} & oe.RETRY_STATUSES
     # An error object in a 200 body without a valid status is a provider error.
@@ -190,17 +198,22 @@ def make_dataset(root, samples):
     return write_manifest(data, entries)
 
 
-@pytest.fixture
-def fake_api(tmp_path):
-    """The fake API's URL and request log."""
-    log = tmp_path / "requests.jsonl"
+def start_fake_api(log, *args):
     process = subprocess.Popen(
-        [sys.executable, str(FIXTURES / "fake_api.py"), str(log)],
+        [sys.executable, str(FIXTURES / "fake_api.py"), str(log), *args],
         stdout=subprocess.PIPE,
         text=True,
     )
     port = int(process.stdout.readline())
-    yield f"http://127.0.0.1:{port}/api/v1/chat/completions", log
+    return process, f"http://127.0.0.1:{port}/api/v1/chat/completions"
+
+
+@pytest.fixture
+def fake_api(tmp_path):
+    """The fake API's URL and request log."""
+    log = tmp_path / "requests.jsonl"
+    process, url = start_fake_api(log)
+    yield url, log
     process.kill()
     process.wait()
 
@@ -227,6 +240,7 @@ def test_adapter_follows_the_engine_protocol(tmp_path, fake_api):
     url, log = fake_api
     samples = {
         "page": ((900, 420), "JPEG"),
+        "markup": ((910, 420), "PNG"),
         "blank": ((300, 200), "PNG"),
         "throttled": ((429, 200), "PNG"),
         "error-in-body": ((430, 200), "PNG"),
@@ -248,6 +262,7 @@ def test_adapter_follows_the_engine_protocol(tmp_path, fake_api):
     got = {sid: (r["status"], r["reason"]) for sid, r in records.items()}
     assert got == {
         "page": ("success", None),
+        "markup": ("success", None),
         "blank": ("success", None),  # an empty transcription is a result, not a failure
         "throttled": ("success", None),  # retried after Retry-After
         "error-in-body": ("success", None),  # a provider error in a 200 body is retried
@@ -279,7 +294,7 @@ def test_adapter_follows_the_engine_protocol(tmp_path, fake_api):
     # What was sent: the prompt and the image file unchanged with its media type, the pinned
     # model, provider routing and settings; nothing about the sample.
     sent = requests(log)
-    assert len(sent) == 1 + 1 + 2 + 2 + 2 + 3 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1  # no TIFF
+    assert len(sent) == 1 + 1 + 1 + 2 + 2 + 2 + 3 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1 + 1  # no TIFF
     first = sent[0]
     image_part = first["messages"][0]["content"][1]
     assert image_part == {"type": "image_url", "image_url": {"url": "data:image/jpeg;base64"}}
@@ -300,20 +315,23 @@ def test_adapter_follows_the_engine_protocol(tmp_path, fake_api):
     assert {o["path"] for o in records["page"]["outputs"]} == {
         "request.json",
         "response.json",
-        "page.md",
+        "page.txt",
         "result.json",
     }
     assert json.loads((page / "output" / "response.json").read_text()) == RESPONSE  # unchanged
-    native = (page / "output" / "page.md").read_text(encoding="utf-8")
-    assert native == RESPONSE["choices"][0]["message"]["content"]
+    native = (page / "output" / "page.txt").read_text(encoding="utf-8")
+    assert native == RESPONSE["choices"][0]["message"]["content"] == FIXTURE_TEXT
     logged = json.loads((page / "output" / "request.json").read_text())
     image_sha = records["page"]["engine_extra"]["image"]["sha256"]
     assert logged["messages"][0]["content"][1]["image_url"]["url"] == (
         f"data:image/jpeg;base64,<sha256 {image_sha}>"
     )
     prediction = json.loads((page / "prediction.json").read_text(encoding="utf-8"))
-    assert prediction["conversion"] == {"from": "markdown", "version": 1}  # converted on the host
+    assert prediction["conversion"]["from"] == "text"
     assert (page / "prediction.txt").read_text(encoding="utf-8") == FIXTURE_TEXT
+    # A plain-text answer is scored as given: Markdown-like characters are text.
+    markup = run.path / "samples" / "markup" / "attempt-1" / "prediction.txt"
+    assert markup.read_text(encoding="utf-8") == MARKDOWN
 
     extra = records["page"]["engine_extra"]
     assert extra["response_model"] == MODEL
@@ -345,6 +363,24 @@ def test_adapter_follows_the_engine_protocol(tmp_path, fake_api):
     assert records["blank"]["engine_extra"]["empty"] is True
     assert (run.path / "samples" / "blank" / "attempt-1" / "prediction.txt").read_text() == ""
     assert records["snapshot"]["engine_extra"]["response_model"] == f"{MODEL}-20260902"
+
+    # The body of every failed attempt is kept unchanged, also after a successful retry.
+    def kept_bodies(sid):
+        output = run.path / "samples" / sid / "attempt-1" / "output"
+        return sorted(p.name for p in output.glob("attempt-*-response.*"))
+
+    assert kept_bodies("page") == []
+    assert kept_bodies("down") == [f"attempt-{n}-response.json" for n in (1, 2, 3)]
+    assert kept_bodies("denied") == ["attempt-1-response.json"]
+    assert kept_bodies("not-json") == ["attempt-1-response.txt"]
+    assert kept_bodies("error-in-choice") == ["attempt-1-response.json"]
+    output = run.path / "samples" / "error-in-choice" / "attempt-1" / "output"
+    failed_choice = json.loads((output / "attempt-1-response.json").read_text())["choices"][0]
+    assert (failed_choice["finish_reason"], failed_choice["message"]["content"]) == (
+        "error",
+        "The image is",
+    )
+    assert json.loads((output / "response.json").read_text()) == RESPONSE
     # The response of a rejected answer is kept for inspection.
     kept = run.path / "samples" / "other-model" / "attempt-1" / "output" / "response.json"
     assert json.loads(kept.read_text())["model"] == "google/gemini-2.5-flash"
@@ -361,6 +397,40 @@ def test_adapter_follows_the_engine_protocol(tmp_path, fake_api):
     report = tmp_path / "report"
     assert main(["report", str(run.path), "-o", str(report), "--inspect"]) == 0
     assert (report / "index.html").is_file()
+
+
+def test_markdown_answers_are_converted_on_the_host(tmp_path, fake_api):
+    url, _ = fake_api
+    params = {"answer_format": "markdown"}
+    run, records = run_adapter(tmp_path, url, {"markup": ((910, 420), "PNG")}, params=params)
+    record = records["markup"]
+    assert (record["status"], record["primary"]) == ("success", "page.md")
+    page = run.path / "samples" / "markup" / "attempt-1"
+    assert (page / "output" / "page.md").read_text(encoding="utf-8") == MARKDOWN  # native
+    prediction = json.loads((page / "prediction.json").read_text(encoding="utf-8"))
+    assert prediction["conversion"] == {"from": "markdown", "version": 1}
+    assert (page / "prediction.txt").read_text(encoding="utf-8") == FIXTURE_TEXT
+
+
+def test_redirects_are_refused_and_never_get_the_key(tmp_path):
+    """A redirect to another server fails the sample; that server receives no request, so no
+    Authorization header."""
+    other_log = tmp_path / "other.jsonl"
+    other, other_url = start_fake_api(other_log)
+    log = tmp_path / "requests.jsonl"
+    api, url = start_fake_api(log, other_url.replace("127.0.0.1", "localhost"))
+    try:
+        _, records = run_adapter(tmp_path, url, {"moved": ((302, 200), "PNG")})
+    finally:
+        for process in (api, other):
+            process.kill()
+            process.wait()
+    assert not other_log.exists()  # checked first: the redirect target got nothing
+    record = records["moved"]
+    assert (record["status"], record["reason"]) == ("failure", "engine-error")
+    assert record["message"].startswith("HTTP 302 after 1 attempts: redirect to")
+    assert "refused" in record["message"]
+    assert len(requests(log)) == 1
 
 
 @pytest.mark.parametrize(

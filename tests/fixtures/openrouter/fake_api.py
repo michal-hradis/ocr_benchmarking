@@ -1,14 +1,16 @@
 """A fake OpenRouter chat completions API on the loopback interface for the offline adapter tests.
 
 It prints its port, then serves POST /api/v1/chat/completions. The answer depends on the width of
-the posted image: 900 (and any other) returns response.json; 300 an empty answer; 401 an
+the posted image: 900 (and any other) returns response.json; 910 the same answer in Markdown;
+302 redirects to the URL given as the optional second argument; 300 an empty answer; 401 an
 authentication error; 402 an out-of-credits error; 429 throttles the first request with
 Retry-After; 430 answers the first request with HTTP 200 and an error object in the body; 431
 answers the first request with HTTP 200 and a choice that failed during generation; 503
 always fails; 555 returns an answer that ends in a repetition loop; 600 stops at the token limit;
 601 is blocked by a content filter; 776 answers from a dated snapshot of the model; 777 from
 another model; 778 returns two choices; 779 returns a body that is not JSON. Every request is
-logged, without the image data, to the JSON-lines file given as the first argument.
+logged, without the image data, to the JSON-lines file given as the first argument; a GET, which
+only a followed redirect sends, is logged with its Authorization header.
 """
 
 import base64
@@ -22,6 +24,10 @@ from PIL import Image
 
 RESPONSE = json.loads((Path(__file__).parent / "response.json").read_text(encoding="utf-8"))
 LOG = Path(sys.argv[1])
+REDIRECT = sys.argv[2] if len(sys.argv) > 2 else "http://127.0.0.1:9/"
+MARKDOWN = (
+    "# The **Daily** Chronicle\n\nThe quick brown fox jumps over\nthe lazy dog &amp; the river."
+)
 SEEN: dict[int, int] = {}
 
 
@@ -38,6 +44,15 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(data)
 
+    def do_GET(self):
+        # Only a followed redirect would arrive here; log it with its Authorization header.
+        with LOG.open("a") as log:
+            entry = {"method": "GET", "path": self.path}
+            log.write(
+                json.dumps(entry | {"authorization": self.headers.get("Authorization")}) + "\n"
+            )
+        self.reply(404, {"error": {"code": 404, "message": "Not found"}})
+
     def do_POST(self):
         body = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
         parts = body["messages"][0]["content"]
@@ -53,6 +68,8 @@ class Handler(BaseHTTPRequestHandler):
             log.write(json.dumps(logged) + "\n")
         if self.headers.get("Authorization") != "Bearer test-key" or width == 401:
             return self.reply(401, {"error": {"code": 401, "message": "No auth credentials"}})
+        if width == 302:
+            return self.reply(302, b"", [("Location", REDIRECT)])
         if width == 402:
             return self.reply(402, {"error": {"code": 402, "message": "Insufficient credits"}})
         if width == 429 and SEEN[width] == 1:
@@ -77,6 +94,8 @@ class Handler(BaseHTTPRequestHandler):
         choice = response["choices"][0]
         if width == 300:
             choice["message"]["content"] = ""
+        if width == 910:
+            choice["message"]["content"] = MARKDOWN
         if width == 555:
             choice["message"]["content"] = "The river rose. " + "v Brně, " * 20
         if width == 600:

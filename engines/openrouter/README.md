@@ -6,7 +6,7 @@
 
 | Preset | File | Model | Provider | Output |
 | --- | --- | --- | --- | --- |
-| `openrouter-gemini-3.8-flash-literal` | `engine.toml` | `google/gemini-3.8-flash` | `google-ai-studio` | The answer (`page.md`), converted to text on the host, without positions |
+| `openrouter-gemini-3.8-flash-literal` | `engine.toml` | `google/gemini-3.8-flash` | `google-ai-studio` | The answer as plain text (`page.txt`), scored as given, without positions |
 
 This first preset exercises the transport. Its prompt is **provisional**: the fixed literal and layout-aware prompt presets are [#58](https://github.com/michal-hradis/ocr_benchmarking/issues/58), and the Qwen, OpenAI and Claude models are [#59](https://github.com/michal-hradis/ocr_benchmarking/issues/59). Each further model or prompt is a further preset file of this engine.
 
@@ -59,6 +59,7 @@ For every sample, in job order, the adapter sends one request:
 - **The image file is sent unchanged**, as a base64 data URL with its own media type. There is no resizing or re-encoding on our side ([ADR 0001](../../docs/adr/0001-image-only-samples-engine-owned-preprocessing.md)). The adapter sends JPEG, PNG and WebP files. Any other format, such as TIFF, fails the sample instead of being converted. JPEG pages up to 4194 × 6192 pixels (6.1 MB) were accepted.
 - **Nothing else from the job is sent:** no sample ID, file name, language or other metadata, and no ground truth. There is no system message.
 - **The prompt is the same for every page** of a preset; there is no page-specific prompt.
+- **Redirects are refused.** Python's default redirect handling would resend the `Authorization` header to the new location, which may be another host. The adapter follows no redirect, so the key goes only to the configured API URL. A `3xx` answer fails the sample and is not retried.
 
 ### Parameters (`[params]`)
 
@@ -70,12 +71,13 @@ For every sample, in job order, the adapter sends one request:
 | `temperature` | 0 | Sampling temperature |
 | `seed` | 0 | Sampling seed; `null` omits it |
 | `reasoning_effort` | (omitted) | `none`, `minimal`, `low`, `medium` or `high`; sent as `reasoning.effort` |
+| `answer_format` | `text` | `text`: the answer is `page.txt`, scored as given. `markdown`: the answer is `page.md`, converted on the host with the shared Markdown rules ([ADR 0011](../../docs/adr/0011-region-markup-converted-on-the-host.md)), for a prompt that asks for Markdown |
 | `request_timeout` | 300 | Seconds per HTTP request |
 | `max_retries` | 4 | Retries after a throttled (`429`), timed-out (`408`), server-error (any `5xx`) or network-failed request, and after a `200` response that carries an error object instead of an answer |
-| `retry_base_seconds` | 2 | Backoff: the response's `Retry-After` when valid (at most 120 s), else 2, 4, 8, 16 s |
+| `retry_base_seconds` | 2 | Backoff: the response's `Retry-After` when valid, else 2, 4, 8, 16 s; any delay is at most 120 s |
 | `min_interval_seconds` | 1 | Minimum spacing between request starts |
 
-The sample timeout (1,800 s) covers a request's full timeout on every attempt. The preset sets `reasoning_effort = "minimal"`.
+The sample timeout (2,100 s) covers the longest retry sequence: five attempts that each wait their full 300 s timeout after the 1 s spacing, and four delays of 120 s, 1,985 s in all. The test checks this bound against the preset. `request_timeout` limits each blocking socket operation, as in `urllib`; a server that trickles a response slowly could exceed it, and the runner's sample timeout then stops the container. The preset sets `reasoning_effort = "minimal"` and `answer_format = "text"`, because its prompt asks for plain text: Markdown conversion would treat characters of the transcription, such as a leading `#` or `*`, as formatting.
 
 ## Outputs and statuses
 
@@ -83,7 +85,8 @@ Each sample directory holds:
 
 - **`request.json`**: the request as sent, with the image data replaced by `data:<type>;base64,<sha256 …>`. It never contains the API key.
 - **`response.json`**: the API's response body, unchanged, including Gemini's encrypted reasoning details.
-- **`page.md`** (primary): the answer, `choices[0].message.content`. The host converts it with the shared Markdown rules ([ADR 0011](../../docs/adr/0011-region-markup-converted-on-the-host.md)). The model gave plain text on every dev-01 page, so the conversion did not change it there. An answer wrapped in a Markdown code fence would keep its content literally.
+- **`attempt-<n>-response.json`**: the response body of every failed attempt *n*, unchanged, also when a later retry succeeds: HTTP error bodies and `200` bodies that carry an error, including any partial answer. A body that is not JSON is kept as `attempt-<n>-response.txt`. Error bodies do not contain the request, so they hold no image and no key.
+- **`page.txt`** (primary): the answer, `choices[0].message.content`, unchanged. The host scores it as plain text. With `answer_format = "markdown"`, the answer is `page.md` instead, and the host converts it with the shared Markdown rules.
 - **`result.json`**: in `extra`, the image's media type, size and SHA-256; the request settings (without the image) with their SHA-256 and the prompt's SHA-256, the same for every sample of a run; every HTTP attempt with its start time (UTC), status, seconds and any error; the latency of the successful request; the generation ID and `created` time; the response model, provider, service tier and system fingerprint; the usage, including prompt, completion and reasoning tokens; the cost in USD that OpenRouter reports (`usage.cost`); the finish reason and the provider's native one.
 
 | Case | Status |
@@ -94,25 +97,27 @@ Each sample directory holds:
 | Answer ends in a **repetition loop** | `truncated`, scored as produced. A tail of one unit repeated in a row (8 times for a unit of up to 63 characters, 3 times for one of up to 4,096) is the rule of the [LightOnOCR-3 adapter](../lightonocr3/README.md) |
 | HTTP error, an error object in a `200` response (top-level, or a choice with `finish_reason` `error`), throttling or network failure that outlasts the retries | `failed`, with the status and the error message. Authentication (`401`), missing credits (`402`) and other request errors (`4xx` except `408` and `429`) are not retried |
 | Any other finish reason, such as `content_filter` | `failed`, with the finish reasons and any refusal |
-| Response not JSON, not one choice, no text message, another model | `failed`, with `response.json` kept when the body was JSON |
+| Response not JSON, not one choice, no text message, another model | `failed`, with the body kept as `response.json`, or as `attempt-<n>-response.txt` when it is not JSON |
+| A redirect (`3xx`) | `failed`, not followed and not retried |
 | `OPENROUTER_API_KEY` unset in the container, unknown or invalid parameter, a router, alias or variant as the job model | Every sample `failed`, without a request |
 
 Engine time is the time of the HTTP requests, including retries: upload, OpenRouter's and Google's queueing and processing, and download. It depends on the network and the service load, and **it is not comparable with the on-device time of local engines**.
 
 ## Development-set results
 
-On 2026-10-30, the preset was run twice on the seven pages of `datasets/dev-01.json` (run IDs `dev01-openrouter-gemini-3.8-flash-literal-v1` and `…-v1-r2`, the second with the final adapter; default evaluation configuration, micro-averaged %). Both runs gave the same scores. One run cost $0.063, as reported by OpenRouter.
+On 2026-10-30, the preset was run three times on the seven pages of `datasets/dev-01.json`. The table is run `dev01-openrouter-gemini-3.8-flash-literal-v1-r3`, made with the final adapter, which scores the answer as plain text (default evaluation configuration, micro-averaged %). The earlier runs `…-v1` and `…-v1-r2` scored the same answers through Markdown conversion. All three runs gave byte-identical answers on the six successful pages. One run cost $0.063, as reported by OpenRouter.
 
 | Preset | CER | WER | fCER | fWER | BoW F1 | ROUGE-2 F1 | Engine time | Status |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- |
-| `openrouter-gemini-3.8-flash-literal` | 31.56 | 40.40 | 3.18 | 6.43 | 95.11 | 91.51 | 194.3 s | 6 success, 1 failure |
+| `openrouter-gemini-3.8-flash-literal` | 31.55 | 40.39 | 3.17 | 6.41 | 95.13 | 91.51 | 190.3 s | 6 success, 1 failure |
 
-- **The Glagolitic page** (`CkXII61-0017`) **fails** in every attempt of both runs. The model starts with "The image is oriented upside-down. Transcribing the page in…", then Google AI Studio ends the generation with an internal error (`finish_reason` `error`, native `OTHER`, code 500, no charge). After four retries the sample fails and is scored as empty. The five attempts are 49 s of the engine time.
+- **The Glagolitic page** (`CkXII61-0017`) **fails** in every attempt of all three runs. The model starts with "The image is oriented upside-down. Transcribing the page in…", then Google AI Studio ends the generation with an internal error (`finish_reason` `error`, native `OTHER`, code 500, no charge). After four retries the sample fails and is scored as empty. The five attempts take 47 s of the engine time. Their bodies, with the partial answer, are kept as `attempt-<n>-response.json`.
 - **Czech newspapers:** almost all text is right (fCER 1.7 % and 2.4 %), but the column reading order differs from the reference, so strict CER is 64.0 % and 15.4 %.
-- **Clean early-modern pages:** CER 1.1–4.8 %. The output keeps the long s (`ſ`) and line-end hyphens. On the Latin page `dta-346672…`, the model writes no space after commas (`felix,odioſa`), so WER is 25.6 % at 3.3 % CER.
+- **Plain text versus Markdown conversion:** with the same answers, the Markdown conversion of the earlier runs gave 4.76 % instead of 4.44 % CER on `dta-laube…` and changed its line count from 24 to 23.
+- **Clean early-modern pages:** CER 1.1–4.4 %. The output keeps the long s (`ſ`) and line-end hyphens. On the Latin page `dta-346672…`, the model writes no space after commas (`felix,odioſa`), so WER is 25.6 % at 3.3 % CER.
 - **Lines:** the answer keeps the page's lines (for example 418 hypothesis against 419 reference lines on `3e6309d0…`).
-- Latency was 4–7 s per dta page and 54–69 s for the two large newspaper pages.
+- Latency was 4–7 s per dta page and 53–68 s for the two large newspaper pages.
 
 ## Tests
 
-`tests/test_openrouter.py` runs the adapter offline as a host process against a fake API on the loopback interface (`tests/fixtures/openrouter/fake_api.py`). The fake API's hand-written response (`response.json`) has the shape of a real Gemini 3.8 Flash response. The tests cover the request (only the prompt, the image and the pinned model, provider and settings), the refusal of routers, aliases and variants, the settings fingerprints, host conversion of the answer, an empty answer, a repetition loop, the token limit, a content filter, a dated snapshot and another model, a throttled request and two kinds of error in a `200` body that succeed on retry, persistent `503` and immediate `401` and `402` failures, two choices, a non-JSON body, a TIFF image that is not sent, and setup errors. They also check that the API key appears in no output. The opt-in `make openrouter-smoke` (`pytest -m api --run-docker --run-api`) builds the image and runs the preset against the real API through `ocrbench run`, `evaluate` and `report`.
+`tests/test_openrouter.py` runs the adapter offline as a host process against a fake API on the loopback interface (`tests/fixtures/openrouter/fake_api.py`). The fake API's hand-written response (`response.json`) has the shape of a real Gemini 3.8 Flash response. The tests cover the request (only the prompt, the image and the pinned model, provider and settings), the refusal of routers, aliases and variants, the settings fingerprints, plain-text scoring of the answer and host conversion of a Markdown answer, an empty answer, a repetition loop, the token limit, a content filter, a dated snapshot and another model, a throttled request and two kinds of error in a `200` body that succeed on retry, persistent `503` and immediate `401` and `402` failures, two choices, a non-JSON body, a TIFF image that is not sent, and setup errors. They check that the bodies of failed attempts are kept, and that the API key appears in no output. A two-server test checks that a redirect to another server is refused and that server receives no request. The opt-in `make openrouter-smoke` (`pytest -m api --run-docker --run-api`) builds the image and runs the preset against the real API through `ocrbench run`, `evaluate` and `report`.

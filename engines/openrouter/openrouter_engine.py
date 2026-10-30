@@ -9,9 +9,12 @@ access, permitted by the runner's --allow-network (ADR 0013); the API key comes 
 OPENROUTER_API_KEY environment variable and is never written anywhere.
 
 It writes $OCRBENCH_OUTPUT/<id>/ with the request without the image data (request.json), the API
-response body unchanged (response.json) and the model's answer (page.md, converted to text on the
-host). Last comes result.json with the image, prompt and request fingerprints, the effective
-provider and model, usage, cost, HTTP attempts and latency. API errors, throttling that outlasts
+response body unchanged (response.json), the body of every failed attempt
+(attempt-<n>-response.json, or .txt when it is not JSON) and the model's answer (page.txt, or
+page.md for a preset that asks for Markdown, converted to text on the host). Redirects are refused,
+so the API key is sent only to the configured URL. Last comes result.json with the image, prompt
+and request fingerprints, the effective provider and model, usage, cost, HTTP attempts and
+latency. API errors, throttling that outlasts
 the retries, refusals and malformed responses fail the sample; an empty answer is a valid result,
 and an answer cut off by the token limit or ending in a repetition loop is reported as truncated.
 """
@@ -43,7 +46,7 @@ SHORT_TIMES, LONG_TIMES, LONG_UNIT, LONG_MAX = 8, 3, 64, 4096
 # Retried: no HTTP response (network error or timeout), 408, 429 and any 5xx, also when OpenRouter
 # reports it as an error object in a 200 response.
 RETRY_STATUSES = {408, 429} | set(range(500, 600))
-MAX_RETRY_AFTER = 120.0  # seconds; a longer Retry-After is shortened to this
+MAX_RETRY_AFTER = 120.0  # seconds; a longer Retry-After or backoff is shortened to this
 # Response headers kept as provenance: request IDs and rate-limit state.
 KEPT_HEADERS = ("x-request-id", "x-generation-id", "x-ratelimit", "ratelimit")
 # Engine parameters (job.json "params"), README.md. provider and prompt have no default.
@@ -54,12 +57,16 @@ DEFAULT_PARAMS: dict[str, Any] = {
     "temperature": 0.0,
     "seed": 0,
     "reasoning_effort": None,
+    "answer_format": "text",
     "request_timeout": 300,
     "max_retries": 4,
     "retry_base_seconds": 2.0,
     "min_interval_seconds": 1.0,
 }
 REASONING_EFFORTS = (None, "none", "minimal", "low", "medium", "high")
+# The answer's file by answer_format: plain text is scored as given; Markdown is converted on the
+# host with the shared rules (ADR 0011).
+ANSWER_FILES = {"text": "page.txt", "markdown": "page.md"}
 
 
 class AdapterError(Exception):
@@ -99,6 +106,8 @@ def parse_params(params: dict[str, Any]) -> dict[str, Any]:
         raise AdapterError(f"temperature must be from 0 to 2: {merged['temperature']!r}")
     if merged["seed"] is not None and type(merged["seed"]) is not int:
         raise AdapterError(f"seed must be an integer or null: {merged['seed']!r}")
+    if merged["answer_format"] not in ANSWER_FILES:
+        raise AdapterError(f"answer_format must be one of {sorted(ANSWER_FILES)}")
     if merged["reasoning_effort"] not in REASONING_EFFORTS:
         raise AdapterError(f"reasoning_effort must be one of {REASONING_EFFORTS}")
     for key in ("request_timeout", "retry_base_seconds"):
@@ -184,6 +193,27 @@ def read_image(path: Path) -> tuple[bytes, str, int, int]:
     return data, MEDIA_TYPES[kind], width, height
 
 
+class RefuseRedirects(urllib.request.HTTPRedirectHandler):
+    """Follows no redirect: urllib's handler would resend the Authorization header to the new
+    location, which may be another host. The 3xx response is returned as an HTTP error."""
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        return None
+
+
+OPENER = urllib.request.build_opener(RefuseRedirects)
+
+
+def max_request_seconds(params: dict[str, Any]) -> float:
+    """The longest time one request with all its retries can take: every attempt waits its full
+    timeout after the minimum spacing, and every retry waits the longest delay."""
+    attempts = params["max_retries"] + 1
+    return (
+        attempts * (params["request_timeout"] + params["min_interval_seconds"])
+        + params["max_retries"] * MAX_RETRY_AFTER
+    )
+
+
 class Client:
     """POSTs requests with retries on throttling and transient errors, and spaces requests at
     least ``min_interval_seconds`` apart."""
@@ -194,11 +224,13 @@ class Client:
         self.url = url
         self.last_start: float | None = None
 
-    def post(self, body: dict[str, Any]) -> tuple[dict[str, Any], dict[str, Any]]:
-        """The parsed response and the transport record; raises AdapterError on failure."""
+    def post(self, body: dict[str, Any]) -> tuple[dict[str, Any], dict[str, Any], list]:
+        """The parsed response, the transport record and the bodies of the failed attempts as
+        (attempt number, bytes); raises TransportError on failure."""
         payload = json.dumps(body).encode("utf-8")
         attempts: list[dict[str, Any]] = []
         record: dict[str, Any] = {"attempts": attempts, "request_bytes": len(payload)}
+        failed_bodies: list[tuple[int, bytes]] = []
         for attempt in range(self.params["max_retries"] + 1):
             self.throttle()
             started = datetime.now(UTC).isoformat(timespec="milliseconds")
@@ -207,12 +239,14 @@ class Client:
             seconds = round(time.monotonic() - start, 3)
             attempts.append({"started": started, "status": status, "seconds": seconds})
             record["headers"] = {k: v for k, v in headers.items() if k.startswith(KEPT_HEADERS)}
-            response = None
             if status == 200:
                 try:
                     response = json.loads(data.decode("utf-8"))
                 except ValueError as exc:
-                    raise TransportError(f"the response is not JSON: {exc}", record) from exc
+                    failed_bodies.append((attempt + 1, data))
+                    raise TransportError(
+                        f"the response is not JSON: {exc}", record, failed_bodies
+                    ) from exc
                 # OpenRouter may answer 200 with an error object, e.g. a provider error.
                 failed = body_error(response)
                 if failed:
@@ -220,13 +254,17 @@ class Client:
                     attempts[-1]["error_in_body"] = status
                 else:
                     record |= {"latency_seconds": seconds, "response_bytes": len(data)}
-                    return response, record
+                    return response, record, failed_bodies
+            if data:
+                failed_bodies.append((attempt + 1, data))
             attempts[-1]["error"] = error
             retry = status is None or status in RETRY_STATUSES
             if not retry or attempt == self.params["max_retries"]:
                 detail = error or data[:500].decode("utf-8", "replace")
                 what = f"HTTP {status}" if status is not None else "request failed"
-                raise TransportError(f"{what} after {len(attempts)} attempts: {detail}", record)
+                raise TransportError(
+                    f"{what} after {len(attempts)} attempts: {detail}", record, failed_bodies
+                )
             time.sleep(self.delay(attempt, headers))
         raise AssertionError("unreachable")
 
@@ -242,7 +280,7 @@ class Client:
         backoff. ``headers`` has lower-case names."""
         wait = retry_after(headers.get("retry-after"))
         if wait is None:
-            return self.params["retry_base_seconds"] * 2**attempt
+            wait = self.params["retry_base_seconds"] * 2**attempt
         return min(wait, MAX_RETRY_AFTER)
 
     def send(self, payload: bytes) -> tuple[int | None, dict[str, str], bytes, str | None]:
@@ -257,10 +295,14 @@ class Client:
             },
         )
         try:
-            with urllib.request.urlopen(request, timeout=self.params["request_timeout"]) as reply:
+            with OPENER.open(request, timeout=self.params["request_timeout"]) as reply:
                 return reply.status, lower_names(reply.headers), reply.read(), None
         except urllib.error.HTTPError as error:
-            return error.code, lower_names(error.headers), error.read(), None
+            headers = lower_names(error.headers)
+            refused = None
+            if 300 <= error.code < 400:
+                refused = f"redirect to {headers.get('location')!r} refused"
+            return error.code, headers, error.read(), refused
         except (OSError, TimeoutError) as error:  # URLError, connection reset, timeout
             return None, {}, b"", f"{type(error).__name__}: {error}"
 
@@ -313,11 +355,15 @@ def retry_after(value: str | None, now: datetime | None = None) -> float | None:
 
 
 class TransportError(AdapterError):
-    """The request failed; ``record`` holds the attempts made."""
+    """The request failed; ``record`` holds the attempts made and ``failed_bodies`` the response
+    bodies of the failed attempts."""
 
-    def __init__(self, message: str, record: dict[str, Any]) -> None:
+    def __init__(
+        self, message: str, record: dict[str, Any], failed_bodies: list[tuple[int, bytes]]
+    ) -> None:
         super().__init__(message)
         self.record = record
+        self.failed_bodies = failed_bodies
 
 
 def tail_repeats(text: str) -> bool:
@@ -372,11 +418,13 @@ def process(
     logged = request_body(model, params, f"data:{media_type};base64,<sha256 {image_sha256}>")
     (out / "request.json").write_text(json.dumps(logged, ensure_ascii=False), "utf-8")
     try:
-        response, transport = client.post(body)
+        response, transport, failed_bodies = client.post(body)
     except TransportError as error:
         extra["transport"] = error.record
+        keep_failed_bodies(out, error.failed_bodies)
         raise
     extra["transport"] = transport
+    keep_failed_bodies(out, failed_bodies)
     (out / "response.json").write_text(json.dumps(response, ensure_ascii=False), "utf-8")
     if not isinstance(response, dict):
         raise AdapterError("the response is not a JSON object (response.json)")
@@ -405,15 +453,28 @@ def process(
             f"the model stopped with {finish!r} (native {native!r})"
             + (f": {detail}" if detail else "")
         )
-    (out / "page.md").write_text(text, encoding="utf-8")
+    answer = ANSWER_FILES[params["answer_format"]]
+    (out / answer).write_text(text, encoding="utf-8")
     loop = tail_repeats(text)
     extra["tail_repetition"] = loop
-    result: dict[str, Any] = {"status": "ok", "primary": "page.md"}
+    result: dict[str, Any] = {"status": "ok", "primary": answer}
     if finish == "length":
         result |= {"status": "truncated", "message": "the answer reached max_tokens"}
     elif loop:
         result |= {"status": "truncated", "message": "repetition loop at the end of the answer"}
     return result
+
+
+def keep_failed_bodies(out: Path, bodies: list[tuple[int, bytes]]) -> None:
+    """Keep the response body of each failed attempt unchanged: attempt-<n>-response.json, or
+    .txt when it is not JSON. Error bodies do not contain the request, so no image or key."""
+    for number, data in bodies:
+        try:
+            json.loads(data.decode("utf-8"))
+            suffix = "json"
+        except ValueError:
+            suffix = "txt"
+        (out / f"attempt-{number}-response.{suffix}").write_bytes(data)
 
 
 def write_result(directory: Path, result: dict[str, Any]) -> None:
