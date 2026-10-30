@@ -18,6 +18,7 @@ Create short ADRs for agreed cross-engine decisions, including output schema, co
 | [0010: Reports from stored evaluations](0010-reports.md) | proposed |
 | [0011: Region markup converted on the host](0011-region-markup-converted-on-the-host.md) | accepted |
 | [0012: Inference servers inside engine containers](0012-inference-servers-inside-engine-containers.md) | accepted |
+| [0013: Opt-in network access for hosted-API engines](0013-opt-in-network-for-hosted-api-engines.md) | accepted |
 
 ## Conventions
 

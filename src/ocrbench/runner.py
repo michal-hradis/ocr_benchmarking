@@ -413,20 +413,41 @@ class _DockerProcess:
 
 
 class DockerLauncher:
-    """Runs the engine image isolated: no network, read-only root and input, host UID/GID."""
+    """Runs the engine image isolated: no network, read-only root and input, host UID/GID.
 
-    def __init__(self, engine: EngineConfig, image_id: str, cache: Path | None = None) -> None:
+    An engine configured with ``network = "egress"`` (a hosted API, ADR 0013) runs only when
+    ``allow_network`` is set; it gets outbound access on Docker's default bridge network and its
+    secrets by name from the host environment, so their values never appear in the command."""
+
+    def __init__(
+        self,
+        engine: EngineConfig,
+        image_id: str,
+        cache: Path | None = None,
+        allow_network: bool = False,
+    ) -> None:
+        if engine.network != "none" and not allow_network:
+            raise RunnerError(
+                f"engine {engine.name!r} needs outbound network access (network = "
+                f"{engine.network!r}) to a hosted API; pass --allow-network to permit it"
+            )
+        missing = [key for key in engine.secrets if not os.environ.get(key)]
+        if missing:
+            raise RunnerError(f"secrets not set in the environment: {', '.join(missing)}")
         self.engine = engine
         self.image_id = image_id
         self.cache = cache
 
     def describe(self, name: str, input_dir: Path, output_dir: Path) -> list[str]:
         engine = self.engine
-        args = ["docker", "run", "--rm", "--name", name, "--network", "none", "--read-only"]
+        network = "bridge" if engine.network == "egress" else "none"
+        args = ["docker", "run", "--rm", "--name", name, "--network", network, "--read-only"]
         args += ["--tmpfs", "/tmp", "--user", f"{os.getuid()}:{os.getgid()}"]
         env = {"HOME": "/tmp", "OCRBENCH_INPUT": "/input", "OCRBENCH_OUTPUT": "/output"}
         for key, value in {**engine.env, **env}.items():
             args += ["--env", f"{key}={value}"]
+        for key in engine.secrets:
+            args += ["--env", key]  # Docker copies the value from its own environment
         for flag, value in (
             ("--cpus", engine.cpus),
             ("--memory", engine.memory),

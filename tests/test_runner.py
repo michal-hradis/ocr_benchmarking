@@ -238,6 +238,45 @@ def test_docker_command_is_isolated(tmp_path):
     assert "OMP=1" in args
 
 
+def test_hosted_api_engine_needs_explicit_network_and_secrets(tmp_path, monkeypatch):
+    config = engine(network="egress", secrets=["OCRBENCH_TEST_KEY"])
+    assert config.to_json()["network"] == "egress"
+    assert parse_engine_config(config.to_json()).sha256() == config.sha256()
+    # An offline engine's frozen form has neither field, so existing run hashes are unchanged.
+    assert {"network", "secrets"}.isdisjoint(engine().to_json())
+    monkeypatch.setenv("OCRBENCH_TEST_KEY", "sk-secret-value")
+    with pytest.raises(RunnerError, match="--allow-network"):
+        DockerLauncher(config, "sha256:abc")
+    with pytest.raises(RunnerError, match="--allow-network"):
+        DockerLauncher(engine(network="egress"), "sha256:abc")
+    args = DockerLauncher(config, "sha256:abc", allow_network=True).describe(
+        "name", tmp_path / "in", tmp_path / "out"
+    )
+    command = " ".join(args)
+    assert "--network bridge" in command
+    assert "--network none" not in command
+    assert "--read-only" in command
+    assert args[args.index("OCRBENCH_TEST_KEY") - 1] == "--env"  # by name only
+    assert "sk-secret-value" not in command
+    monkeypatch.delenv("OCRBENCH_TEST_KEY")
+    with pytest.raises(RunnerError, match="OCRBENCH_TEST_KEY"):
+        DockerLauncher(config, "sha256:abc", allow_network=True)
+
+
+def test_cli_refuses_hosted_api_engine_without_allow_network(tmp_path, monkeypatch, capsys):
+    manifest = make_dataset(tmp_path, {"s1": "page"})
+    path = tmp_path / "engine.toml"
+    path.write_text(
+        'name = "api"\nengine_version = "1"\nimage = "x:1"\nnetwork = "egress"\n',
+        encoding="utf-8",
+    )
+    monkeypatch.setattr("ocrbench.cli.resolve_image", lambda image: "sha256:abc")
+    args = ["run", "start", "--engine", str(path), "--dataset", str(manifest)]
+    assert main([*args, "--runs-dir", str(tmp_path / "runs")]) == 1
+    assert "--allow-network" in capsys.readouterr().err
+    assert not (tmp_path / "runs").exists()  # refused before a run directory is created
+
+
 def test_resume_keeps_results_and_retries_failures_as_new_attempts(tmp_path):
     flaky = tmp_path / "flaky"
     flaky.mkdir()
@@ -401,6 +440,10 @@ def test_run_is_locked_against_a_second_runner(tmp_path):
         ({"timeouts": {"sample": 0}}, "timeouts.sample"),
         ({"resources": {"gpu": "all"}}, "resources.gpu"),
         ({"name": "Bad Name"}, "'name'"),
+        ({"network": "host"}, "'network'"),
+        ({"secrets": ["KEY"]}, "needs network"),
+        ({"network": "egress", "secrets": ["HOME"]}, "secret name 'HOME'"),
+        ({"network": "egress", "secrets": ["K", "K"]}, "twice"),
     ],
 )
 def test_engine_config_errors(change, message):
