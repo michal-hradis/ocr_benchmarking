@@ -11,7 +11,7 @@ device = "cuda:0"  # layout and TableFormer; RapidOCR runs on the CPU (onnxrunti
 ocr_engine = "rapidocr"
 ocr_lang = ["latin"]  # RapidOCR's PP-OCRv5 Latin-script recognizer
 ocr_mode = "default"  # Docling's default: OCR of the layout regions
-ocr_scale = 3.0  # nominal 216 DPI: OCR sees the input pixels 1:1
+ocr_scale = 3.0  # nominal 216 DPI: Docling crops the input pixels 1:1 (RapidOCR shrinks crops over 2000 px)
 table_structure = true  # TableFormer, accurate mode
 
 [resources]

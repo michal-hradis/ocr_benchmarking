@@ -19,6 +19,7 @@ import subprocess
 import sys
 import tomllib
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 from PIL import Image
@@ -46,6 +47,10 @@ ENGINE_DIR = ROOT / "engines" / "docling"
 FIXTURES = Path(__file__).parent / "fixtures" / "docling"
 ADAPTER_PATH = ENGINE_DIR / "docling_engine.py"
 CONFIG = tomllib.loads((ENGINE_DIR / "engine.toml").read_text(encoding="utf-8"))
+PRESETS = {
+    name: tomllib.loads((ENGINE_DIR / "presets" / f"{name}.toml").read_text(encoding="utf-8"))
+    for name in ("rapidocr-regions", "rapidocr-fullpage")
+}
 SIZES = {
     "page": (900, 420),
     "paragraph": (520, 120),
@@ -449,6 +454,60 @@ def test_preset_is_the_adapter_default_written_out():
     assert "docling-slim[models-local,feat-ocr-rapidocr-onnx,convert-core]==2.145.0" in requirements
 
 
+def test_rapidocr_presets_differ_from_docling_only_in_name_and_ocr_mode():
+    assert sorted(p.name for p in (ENGINE_DIR / "presets").iterdir()) == [
+        f"{name}.toml" for name in sorted(PRESETS)
+    ]
+    modes = {name: (p["name"], p["params"]["ocr_mode"]) for name, p in PRESETS.items()}
+    assert modes == {
+        "rapidocr-regions": ("docling-rapidocr-regions", "layout_regions"),
+        "rapidocr-fullpage": ("docling-rapidocr-fullpage", "full_page"),
+    }
+    for preset in PRESETS.values():
+        assert dl.parse_params(preset["params"])["ocr_mode"] == preset["params"]["ocr_mode"]
+        params = dict(preset["params"], ocr_mode=CONFIG["params"]["ocr_mode"])
+        assert {**preset, "name": CONFIG["name"], "params": params} == CONFIG
+
+
+def rapidocr_config(cache, **changes):
+    """A RapidOCR reader configuration as Docling 2.145.0 builds it, with ``changes``."""
+    cfg = {
+        "Global": dict.fromkeys(dl.RAPIDOCR_SETTINGS["Global"], 1),
+        "Det": dict.fromkeys(dl.RAPIDOCR_SETTINGS["Det"], 0.5),
+        "Cls": dict.fromkeys(dl.RAPIDOCR_SETTINGS["Cls"], 6),
+        "Rec": dict(rec_img_shape=(3, 48, 320), rec_batch_num=6, rec_keys_path=None),
+    }
+    for section, name in dl.RAPIDOCR_MODELS.items():
+        cfg[section]["model_path"] = cache / dl.MODELS_DIR / name
+    for key, value in changes.items():
+        section, key = key.split(".")
+        cfg[section][key] = value
+    return cfg
+
+
+def test_rapidocr_settings_are_recorded_for_the_pinned_models_only(tmp_path, monkeypatch):
+    monkeypatch.setattr(dl, "CACHE", tmp_path)
+    names = (ENGINE_DIR / "models.sha256").read_text(encoding="utf-8").split()[1::2]
+    assert set(dl.RAPIDOCR_MODELS.values()) == {n for n in names if n.startswith("RapidOcr/")}
+    settings = dl.rapidocr_settings(rapidocr_config(tmp_path))
+    assert settings["Rec"] == {
+        "rec_img_shape": [3, 48, 320],
+        "rec_batch_num": 6,
+        "rec_keys_path": None,
+        "model_path": str(tmp_path / "models/docling/RapidOcr/latin_PP-OCRv5_rec_mobile.onnx"),
+    }
+    assert set(settings["Global"]) == set(dl.RAPIDOCR_SETTINGS["Global"])
+    json.dumps(settings)
+    other = tmp_path / "rapidocr" / "models" / "latin_PP-OCRv6_rec_small.onnx"
+    for changes in (
+        {"Rec.model_path": other},  # RapidOCR's own model directory, not the pinned file
+        {"Det.model_path": None},
+        {"Rec.rec_keys_path": "latin_dict.txt"},  # a character list that is not pinned
+    ):
+        with pytest.raises(dl.AdapterError, match="RapidOCR does not run the pinned models"):
+            dl.rapidocr_settings(rapidocr_config(tmp_path, **changes))
+
+
 def load_fetch_model(monkeypatch):
     monkeypatch.delitem(sys.modules, "fetch_model", raising=False)  # each engine has its own
     sys.path.insert(0, str(ENGINE_DIR))
@@ -622,6 +681,14 @@ def test_adapter_follows_the_engine_protocol(tmp_path):
         3.0,
     )
     assert not any(ocr["rapidocr_params"].values())  # RapidOCR on the CPU
+    crops = extra["ocr_crops"]  # the default mode: RapidOCR reads the layout clusters
+    assert crops["count"] == len(layout["pages"][0]["clusters"])
+    assert (crops["shrunk"], crops["min_resize"]) == (0, 1.0)
+    rapidocr = extra["rapidocr"]
+    assert (rapidocr["Global"]["max_side_len"], rapidocr["Det"]["limit_side_len"]) == (2000, 736)
+    assert rapidocr["Rec"]["model_path"].endswith(
+        "/models/docling/RapidOcr/latin_PP-OCRv5_rec_mobile.onnx"
+    )
     part = run.path / "samples" / "part" / "attempt-1"
     assert (part / "prediction.txt").read_text(encoding="utf-8") == ""
     assert (run.path / "samples" / "blank" / "attempt-1" / "prediction.txt").read_text() == ""
@@ -630,6 +697,45 @@ def test_adapter_follows_the_engine_protocol(tmp_path):
     report = tmp_path / "report"
     assert main(["report", str(run.path), "-o", str(report), "--inspect"]) == 0
     assert (report / "index.html").is_file()
+
+
+@pytest.mark.parametrize("name", sorted(PRESETS))
+def test_preset_ocr_mode_reaches_docling(tmp_path, name):
+    _, records = run_adapter(tmp_path, {"page": 900}, PRESETS[name]["params"])
+    assert records["page"]["status"] == "success"
+    extra = records["page"]["engine_extra"]
+    assert extra["pipeline_options"]["ocr_options"]["mode"] == PRESETS[name]["params"]["ocr_mode"]
+    crops = extra["ocr_crops"]["crops"]
+    if name == "rapidocr-fullpage":
+        assert crops == [{"box": [0.0, 0.0, 900.0, 420.0], "resize": 1.0}]
+    else:
+        assert len(crops) == len(NATIVE["page"][1]["pages"][0]["clusters"]) > 1
+
+
+def test_ocr_crops_are_recorded_in_input_pixels_with_rapidocrs_resize():
+    def rect(origin, *box):
+        return SimpleNamespace(
+            coord_origin=SimpleNamespace(value=origin), **dict(zip("ltrb", box, strict=True))
+        )
+
+    page = [rect("TOPLEFT", 0, 0, 1398, 2064)]  # a 4194 x 6192 newspaper read in full
+    model = SimpleNamespace(get_ocr_rects=lambda page: page)
+    crops = dl.OcrCrops(model, 2000)
+    assert model.get_ocr_rects(page) is page  # Docling still gets its rects
+    model.get_ocr_rects([rect("BOTTOMLEFT", 100, 2064, 400, 1064), rect("TOPLEFT", 0, 0, 0, 0)])
+    summary = crops.summary(3.0, {"width": 1398.0, "height": 2064.0}, (4194, 6192))
+    assert summary == {
+        "count": 3,
+        "shrunk": 2,
+        "min_resize": round(2000 / 6192, 4),
+        "crops": [
+            {"box": [0.0, 0.0, 4194.0, 6192.0], "resize": round(2000 / 6192, 4)},
+            {"box": [300.0, 0.0, 1200.0, 3000.0], "resize": round(2000 / 3000, 4)},
+            {"box": [0.0, 0.0, 0.0, 0.0], "resize": 1.0},
+        ],
+    }
+    crops.boxes.clear()
+    assert crops.summary(3.0, {"width": 1.0, "height": 1.0}, (3, 3))["count"] == 0
 
 
 def test_cpu_device_reaches_docling(tmp_path):
@@ -712,47 +818,61 @@ def test_gpu_smoke_benchmark(tmp_path, docling_image):
     runs = str(tmp_path / "runs")
     args = ["run", "start", "--engine", engine, "--dataset", str(manifest), "--runs-dir", runs]
     args += ["--cache", str(cache)]
-    assert main([*args, "--run-id", "docling"]) == 0
-    run = load_run(tmp_path / "runs" / "docling")
-    records = {s.id: latest_record(run, s.id) for s in run.samples}
-    assert {sid: r["status"] for sid, r in records.items()} == dict.fromkeys(
-        ("page-1", "para-1", "blank-1", "columns-1", "news-1", "table-1", "exif-1"), "success"
-    )
-    extra = records["page-1"]["engine_extra"]
-    environment = extra["environment"]
-    assert environment["docling-slim"] == "2.145.0"
-    assert environment["rapidocr"] == "3.10.0"
-    assert environment["torch"] == "2.14.1+cu130"
-    assert environment["gpu"]
-    assert extra["models"]["files"] == dict(
-        reversed(line.split()) for line in (ENGINE_DIR / "models.sha256").read_text().splitlines()
-    )
-    assert json.loads((run.path / "run.json").read_text())["host"]["gpus"]
-    for sid in ("columns-1", "news-1", "table-1", "exif-1"):
-        prediction = json.loads(
-            (run.path / "samples" / sid / "attempt-1" / "prediction.json").read_text()
+    configs = {"docling": engine} | {
+        name: str(ENGINE_DIR / "presets" / f"{name}.toml") for name in sorted(PRESETS)
+    }
+    paths = []
+    for run_id, config in configs.items():
+        mode = tomllib.loads(Path(config).read_text(encoding="utf-8"))["params"]["ocr_mode"]
+        assert main([*args[:3], config, *args[4:], "--run-id", run_id]) == 0
+        run = load_run(tmp_path / "runs" / run_id)
+        paths.append(str(run.path))
+        records = {s.id: latest_record(run, s.id) for s in run.samples}
+        assert {sid: r["status"] for sid, r in records.items()} == dict.fromkeys(
+            ("page-1", "para-1", "blank-1", "columns-1", "news-1", "table-1", "exif-1"), "success"
         )
-        assert prediction["reading_order"]
-        assert all("polygon" in region for region in prediction["regions"])
-        assert not records[sid]["findings"], sid  # positions fit the input image
-    blank = run.path / "samples" / "blank-1" / "attempt-1" / "prediction.txt"
-    assert blank.read_text(encoding="utf-8") == ""  # a genuine empty result, not a failure
-    page = (run.path / "samples" / "page-1" / "attempt-1" / "prediction.json").read_text()
-    exif = (run.path / "samples" / "exif-1" / "attempt-1" / "prediction.json").read_text()
-    lines = [sum(json.loads(p)["regions"][1]["lines"][0]["polygon"], []) for p in (page, exif)]
-    assert lines[1] == pytest.approx(lines[0], abs=4)  # the stored pixels, not the EXIF view
+        extra = records["page-1"]["engine_extra"]
+        assert extra["pipeline_options"]["ocr_options"]["mode"] == mode
+        assert extra["rapidocr"]["Global"]["max_side_len"] == 2000
+        crops = extra["ocr_crops"]  # the whole page, or the (merged) layout clusters
+        assert crops["count"] == 1 if mode == "full_page" else crops["count"] >= 1
+        assert crops["shrunk"] == 0  # the synthetic pages are smaller than RapidOCR's limit
+        environment = extra["environment"]
+        assert environment["docling-slim"] == "2.145.0"
+        assert environment["rapidocr"] == "3.10.0"
+        assert environment["torch"] == "2.14.1+cu130"
+        assert environment["gpu"]
+        assert extra["models"]["files"] == dict(
+            reversed(line.split())
+            for line in (ENGINE_DIR / "models.sha256").read_text().splitlines()
+        )
+        assert json.loads((run.path / "run.json").read_text())["host"]["gpus"]
+        for sid in ("columns-1", "news-1", "table-1", "exif-1"):
+            prediction = json.loads(
+                (run.path / "samples" / sid / "attempt-1" / "prediction.json").read_text()
+            )
+            assert prediction["reading_order"]
+            assert all("polygon" in region for region in prediction["regions"])
+            assert not records[sid]["findings"], sid  # positions fit the input image
+        blank = run.path / "samples" / "blank-1" / "attempt-1" / "prediction.txt"
+        assert blank.read_text(encoding="utf-8") == ""  # a genuine empty result, not a failure
+        page = (run.path / "samples" / "page-1" / "attempt-1" / "prediction.json").read_text()
+        exif = (run.path / "samples" / "exif-1" / "attempt-1" / "prediction.json").read_text()
+        lines = [sum(json.loads(p)["regions"][1]["lines"][0]["polygon"], []) for p in (page, exif)]
+        assert lines[1] == pytest.approx(lines[0], abs=4)  # the stored pixels, not the EXIF view
 
-    # Scoring and re-scoring read only stored outputs: no container runs.
-    for _ in range(2):
-        assert main(["evaluate", str(run.path)]) == 0
-    scores = json.loads((run.path / "evaluations" / "2" / "scores.json").read_text())
-    rates = {s["sample_id"]: s["chars"]["rate"] for s in scores["samples"]}
-    flexible = {s["sample_id"]: s["flexible_chars"]["rate"] for s in scores["samples"]}
-    for sid in ("page-1", "para-1", "columns-1", "exif-1", "table-1"):
-        assert rates[sid] < 0.1, sid
-    assert flexible["news-1"] < 0.1  # Docling reads its paragraphs across the columns
+        # Scoring and re-scoring read only stored outputs: no container runs.
+        for _ in range(2):
+            assert main(["evaluate", str(run.path)]) == 0
+        scores = json.loads((run.path / "evaluations" / "2" / "scores.json").read_text())
+        rates = {s["sample_id"]: s["chars"]["rate"] for s in scores["samples"]}
+        flexible = {s["sample_id"]: s["flexible_chars"]["rate"] for s in scores["samples"]}
+        for sid in ("page-1", "para-1", "columns-1", "exif-1", "table-1"):
+            assert rates[sid] < 0.1, sid
+        assert flexible["news-1"] < 0.1  # Docling reads its paragraphs across the columns
+
     report = tmp_path / "report"
-    assert main(["report", str(run.path), "-o", str(report), "--inspect"]) == 0
+    assert main(["report", *paths, "-o", str(report), "--inspect"]) == 0
     assert (report / "index.html").is_file()
 
     # A GPU that is not visible is an explicit engine failure for every sample.
