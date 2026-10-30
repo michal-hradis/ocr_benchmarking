@@ -53,7 +53,7 @@ NEMOTRON_PARSE_IMAGE := ocrbench/engine-nemotron-parse:3.5-v1
 UNLIMITED_OCR_IMAGE := ocrbench/engine-unlimited-ocr:1.0-v1
 LIGHTONOCR3_IMAGE := ocrbench/engine-lightonocr3:3-v1
 MISTRAL_OCR_IMAGE := ocrbench/engine-mistral-ocr:1-v1
-OPENROUTER_IMAGE := ocrbench/engine-openrouter:1-v1
+OPENROUTER_IMAGE := ocrbench/engine-openrouter:2-v1
 # Host directory with the user-supplied PERO OCR model bundles (engines/pero/README.md).
 PERO_BUNDLES ?= dev_data/pero_ocr_models
 # Host directory mounted as /cache for engines whose weights are not in the image.

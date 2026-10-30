@@ -1,0 +1,40 @@
+# OpenRouter hosted vision model: Gemini 3.8 Flash on Google AI Studio with the fixed layout-aware
+# transcription prompt (blocks and columns in reading order) at the model's default image
+# resolution; text-only output (the answer is scored as plain text, page.txt). The literal preset
+# is engine.toml.
+# Each page image is sent unchanged with the fixed prompt, one request per page, to OpenRouter's
+# chat completions API (README.md next to this file; format: docs/RUNNER.md). Needs
+# OPENROUTER_API_KEY in the environment and --allow-network (ADR 0013); every page is a paid request.
+name = "openrouter-gemini-3.8-flash-layout"
+engine_version = "2"
+image = "ocrbench/engine-openrouter:2-v1"
+model = "google/gemini-3.8-flash"
+network = "egress"
+secrets = ["OPENROUTER_API_KEY"]
+
+[params]
+provider = "google-ai-studio"  # the only provider; no fallbacks
+prompt = """Transcribe all text in this page image exactly as written, following the page \
+layout. The page may have several columns, text blocks, headings, captions, tables, marginal \
+notes, headers and footers. Output the blocks in their natural reading order: read each column \
+from top to bottom before moving to the next column, and put a heading or title that spans \
+several columns before the columns below it. Separate blocks with one empty line, and within a \
+block keep one output line for each line of the page. Keep the original spelling, punctuation, \
+capitalization, diacritics, abbreviations, line-end hyphens and historical letter forms (such as \
+the long s "ſ"). Do not modernize, correct, expand, translate or summarize the text. Do not \
+describe the image or the layout, and add no commentary or labels. Output only the transcription \
+as plain text."""
+max_tokens = 32768
+temperature = 0.0
+seed = 0
+reasoning_effort = "minimal"
+answer_format = "text"  # the prompt asks for plain text: no Markdown conversion
+# Retries and throttling: README.md
+
+[resources]
+cpus = 1
+memory = "1g"
+
+[timeouts]
+sample = 2100  # five 300 s attempts, four retry delays of at most 120 s: 1985 s
+startup = 60
