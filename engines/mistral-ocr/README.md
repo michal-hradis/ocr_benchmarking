@@ -54,7 +54,7 @@ For every sample, in job order, the adapter sends one request:
 
 - **The image file is sent unchanged**, as a base64 data URL with its own media type. There is no PDF conversion, resizing or re-encoding ([ADR 0001](../../docs/adr/0001-image-only-samples-engine-owned-preprocessing.md)). Mistral documents raster image input, and JPEG and PNG pages were accepted at their full size, up to the 4194 × 6192 pixel (5.9 MB) newspaper page of dev-01. The adapter sends JPEG, PNG, WebP and AVIF files. Any other format, such as TIFF, fails the sample instead of being converted. Any resizing happens on Mistral's side and is not visible. The reported `dimensions` equalled the input image size on every page tried.
 - **Nothing else from the job is sent:** no sample ID, file name, language or other metadata, and no ground truth.
-- `table_format` is not set, so tables stay inline in the Markdown. With `markdown` or `html`, Mistral moves tables out of the Markdown into separate `tables` and leaves a link in their place. Headers and footers are not extracted (`extract_header`/`extract_footer` false), so running heads and page numbers stay in the transcription, as they are in the reference.
+- **Fixed options.** `table_format` is not set, so tables stay inline in the Markdown and in the blocks. Headers and footers are not extracted (`extract_header`/`extract_footer` false), so running heads and page numbers stay in the transcription, as they are in the reference. These three options are not parameters. With `table_format` `markdown` or `html`, Mistral moves tables out of the Markdown into a separate `tables` list and leaves a link in their place. The extract options move headers and footers into separate fields in the same way. The adapter does not put that text back, so it would go unscored.
 - `include_image_base64` is false: the response refers to pictures but does not contain them.
 
 ### Parameters (`[params]`)
@@ -62,12 +62,10 @@ For every sample, in job order, the adapter sends one request:
 | Parameter | Default | Meaning |
 | --- | --- | --- |
 | `mode` | `blocks` | `blocks` (request blocks, positioned output) or `markdown` (page Markdown only) |
-| `table_format` | none | `markdown` or `html` moves tables out of the page Markdown (above) |
-| `extract_header`, `extract_footer` | `false` | `true` moves headers/footers out of the Markdown |
 | `confidence_scores_granularity` | `block` | `page`, `block` or `word`; recorded, never scored |
 | `request_timeout` | 300 | Seconds per HTTP request |
-| `max_retries` | 4 | Retries after a throttled (`429`), timed-out (`408`), server-error (`500`, `502`–`504`) or network-failed request |
-| `retry_base_seconds` | 2 | Backoff: `Retry-After` when the API sends one (at most 120 s), else 2, 4, 8, 16 s |
+| `max_retries` | 4 | Retries after a throttled (`429`), timed-out (`408`), server-error (any `5xx`) or network-failed request |
+| `retry_base_seconds` | 2 | Backoff: the response's `Retry-After` when valid (delay-seconds or an HTTP date, header name in any case; at most 120 s), else 2, 4, 8, 16 s |
 | `min_interval_seconds` | 1 | Minimum spacing between request starts |
 | `usd_per_1000_pages` | 4.0 | Only for the recorded cost estimate |
 
@@ -87,7 +85,7 @@ Each sample directory holds:
 | Valid one-page response | `ok` |
 | Empty page Markdown | `ok`, an empty transcription. It is a result, not an error, and is recorded as `empty` |
 | The page Markdown or any block ends in a **repetition loop** | `truncated`, scored as produced. The API reports no stop reason. A tail of one unit repeated in a row (8 times for a unit of up to 63 characters, 3 times for one of up to 4,096) means the service stopped generating inside a loop. This is the rule of the [LightOnOCR-3 adapter](../lightonocr3/README.md). The message and `tail_repetition` name the looping part |
-| HTTP error, or throttling or network failure that outlasts the retries | `failed`, with the HTTP status and the API's error message. Authentication (`401`) and request errors (`4xx`) are not retried |
+| HTTP error, or throttling or network failure that outlasts the retries | `failed`, with the HTTP status and the API's error message. Authentication (`401`) and other request errors (`4xx` except `408` and `429`) are not retried |
 | Response not JSON, not one page, no Markdown, another model, blocks missing or malformed in the blocks preset | `failed`, with `response.json` kept when the body was JSON |
 | `MISTRAL_API_KEY` unset in the container, unknown parameter, wrong job model | Every sample `failed`, without a request |
 
@@ -111,4 +109,4 @@ On 2026-10-30, both presets were run on the seven pages of `datasets/dev-01.json
 
 ## Tests
 
-`tests/test_mistral_ocr.py` runs the adapter offline as a host process against a fake API on the loopback interface (`tests/fixtures/mistral-ocr/fake_api.py`). The fake API's hand-written response (`response.json`) has the shape of the real one, with boxes in half-size page dimensions to test the scaling. The tests cover the request content (only the image and the pinned options), the block conversion, empty pages, a repetition loop, a throttled request that succeeds on retry, persistent `503` and immediate `401` failures, another model, two pages, a non-JSON body, a TIFF image that is not sent, and setup errors. They also check that the API key appears in no output. The opt-in `make mistral-ocr-smoke` (`pytest -m api --run-docker --run-api`) builds the image and runs both presets against the real API through `ocrbench run`, `evaluate` and `report`.
+`tests/test_mistral_ocr.py` runs the adapter offline as a host process against a fake API on the loopback interface (`tests/fixtures/mistral-ocr/fake_api.py`). The fake API's hand-written response (`response.json`) has the shape of the real one, with boxes in half-size page dimensions to test the scaling. The tests cover the request content (only the image and the pinned options), the block conversion, empty pages, a repetition loop, a throttled request that succeeds on retry, an unlisted `520` with a lower-case `retry-after` date that succeeds on retry, `Retry-After` parsing, persistent `503` and immediate `401` failures, another model, two pages, a non-JSON body, a TIFF image that is not sent, and setup errors. They also check that the API key appears in no output. The opt-in `make mistral-ocr-smoke` (`pytest -m api --run-docker --run-api`) builds the image and runs both presets against the real API through `ocrbench run`, `evaluate` and `report`.

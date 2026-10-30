@@ -2,7 +2,8 @@
 
 It prints its port, then serves POST /v1/ocr. The answer depends on the width of the posted image:
 900 (and any other) returns response.json for that image; 300 an empty page; 401 an
-authentication error; 429 throttles the first request with Retry-After; 503 always fails; 555
+authentication error; 429 throttles the first request with Retry-After; 430 answers the first
+request with HTTP 520 and a lower-case retry-after date in the past; 503 always fails; 555
 returns a text block that ends in a repetition loop; 777 answers from another model; 778 returns
 two pages; 779 returns a body that is not JSON. Every request is logged, without the image data,
 to the JSON-lines file given as the first argument.
@@ -51,6 +52,9 @@ class Handler(BaseHTTPRequestHandler):
             return self.reply(401, {"message": "Unauthorized", "type": "invalid_api_key"})
         if width == 429 and SEEN[width] == 1:
             return self.reply(429, {"message": "Rate limit exceeded"}, [("Retry-After", "0")])
+        if width == 430 and SEEN[width] == 1:
+            date = [("retry-after", "Wed, 21 Oct 2015 07:28:00 GMT")]
+            return self.reply(520, {"message": "Unknown error"}, date)
         if width == 503:
             return self.reply(503, {"message": "Service unavailable"})
         if width == 779:
