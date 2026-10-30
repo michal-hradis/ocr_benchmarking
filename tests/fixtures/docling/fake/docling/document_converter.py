@@ -5,6 +5,8 @@ out-of-memory error; 777: a failed conversion; 888: a partial conversion (blank 
 page whose size is the image turned by 90 degrees; 910: a blank page with one OCR cell in a
 cluster that no item uses; any other width: the blank page with that
 image size. The input must be a TIFF at 72 x ocr_scale DPI, and every conversion logs a warning.
+The pipeline's RapidOCR reader has RapidOCR 3.10.0's settings and the pinned models; the OCR model
+is asked for its crops once per page: the whole page in full_page mode, else the layout clusters.
 """
 
 import json
@@ -18,6 +20,41 @@ from docling.datamodel.base_models import ConversionStatus, InputFormat
 
 FIXTURES = Path(__file__).resolve().parents[2]
 RESULTS = {900: "page", 520: "paragraph", 1000: "columns", 1500: "newspaper", 1200: "table"}
+RAPIDOCR = {
+    "Global": {
+        "text_score": 0.5,
+        "use_det": True,
+        "use_cls": True,
+        "use_rec": True,
+        "use_preprocess_img": True,
+        "min_side_len": 30,
+        "max_side_len": 2000,
+        "min_height": 30,
+        "width_height_ratio": 8,
+    },
+    "Det": {
+        "limit_side_len": 736,
+        "limit_type": "min",
+        "thresh": 0.3,
+        "box_thresh": 0.5,
+        "unclip_ratio": 1.6,
+        "max_candidates": 1000,
+        "use_dilation": True,
+        "score_mode": "fast",
+        "model_path": "RapidOcr/ch_PP-OCRv5_det_mobile.onnx",
+    },
+    "Cls": {
+        "cls_thresh": 0.9,
+        "cls_batch_num": 6,
+        "model_path": "RapidOcr/ch_ppocr_mobile_v2.0_cls_mobile.onnx",
+    },
+    "Rec": {
+        "rec_img_shape": (3, 48, 320),
+        "rec_batch_num": 6,
+        "rec_keys_path": None,
+        "model_path": "RapidOcr/latin_PP-OCRv5_rec_mobile.onnx",
+    },
+}
 
 
 class ImageFormatOption:
@@ -53,10 +90,31 @@ class DocumentConverter:
             self.options.ocr_options.rapidocr_params["EngineConfig.onnxruntime.use_cuda"] is False
         )
         self.initialized = False
+        self.ocr_model = SimpleNamespace(reader=SimpleNamespace(cfg=None), get_ocr_rects=None)
 
     def initialize_pipeline(self, input_format):
         assert input_format == InputFormat.IMAGE
         self.initialized = True
+        cfg = {section: dict(values) for section, values in RAPIDOCR.items()}
+        for values in cfg.values():
+            if "model_path" in values:
+                values["model_path"] = Path(self.options.artifacts_path) / values["model_path"]
+        self.ocr_model.reader.cfg = cfg
+        self.ocr_model.get_ocr_rects = self._ocr_rects
+
+    def _ocr_rects(self, page):
+        if self.options.ocr_options.mode.value == "full_page":
+            size = page["size"]
+            boxes = [{"l": 0, "t": 0, "r": size["width"], "b": size["height"]}]
+        else:
+            boxes = [cluster["bbox"] for cluster in page["clusters"]]
+        origin = SimpleNamespace(value="TOPLEFT")
+        return [SimpleNamespace(coord_origin=origin, **{k: b[k] for k in "ltrb"}) for b in boxes]
+
+    def _get_pipeline(self, input_format):
+        assert self.initialized
+        assert input_format == InputFormat.IMAGE
+        return SimpleNamespace(ocr_model=self.ocr_model)
 
     def convert(self, source, raises_on_error):
         assert self.initialized
@@ -96,6 +154,7 @@ class DocumentConverter:
                     }
                 ]
         page = layout["pages"][0]
+        self.ocr_model.get_ocr_rects(page)
         pages = [
             SimpleNamespace(
                 page_no=page["page_no"],

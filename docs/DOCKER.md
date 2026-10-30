@@ -72,7 +72,7 @@ Publishing bases to a registry and pinning them by digest would also work, but w
 | `make doctr-smoke` | Opt-in, GPU: build the docTR image and run both presets on synthetic samples, including two-column and newspaper pages, through the runner, evaluation and reports |
 | `make docker-docling` | Build the Docling GPU engine image from the torch base, without models ([engines/docling](../engines/docling/README.md)) |
 | `make docling-model` | Opt-in: download the pinned Docling layout, TableFormer and RapidOCR models (397 MB) into `$(OCRBENCH_CACHE)` |
-| `make docling-smoke` | Opt-in, GPU: build the Docling image and run it on synthetic samples, including two-column, newspaper, table and EXIF-rotated pages, through the runner, evaluation and reports |
+| `make docling-smoke` | Opt-in, GPU: build the Docling image and run its three presets on synthetic samples, including two-column, newspaper, table and EXIF-rotated pages, through the runner, evaluation and reports |
 | `make docker-kraken` | Build the Kraken GPU engine image from the torch base ([engines/kraken](../engines/kraken/README.md)) |
 | `make kraken-smoke` | Opt-in, GPU: build the Kraken image and run it and its presets on synthetic samples through the runner, evaluation and reports |
 | `make docker-pylaia` | Build the PyLaia GPU engine image from the torch base, with its model; it adds a second venv with Python 3.10 and torch 1.13.1 for PyLaia, and its build context is `engines/` ([engines/pylaia](../engines/pylaia/README.md)) |
