@@ -1,0 +1,25 @@
+# Docling standard image pipeline, preset docling: Heron layout, RapidOCR PP-OCRv5 Latin on the
+# layout regions and TableFormer, Docling's defaults otherwise (README.md next to this file;
+# format: docs/RUNNER.md). Run with --cache <dir> holding the models from make docling-model.
+name = "docling"
+engine_version = "1"
+image = "ocrbench/engine-docling:2.145.0-v1"
+model = "docling-2.145.0@layout-heron-8f39ad3c,tableformer-accurate-fc0f2d45,rapidocr-3.10.0-PP-OCRv5-latin-mobile"
+
+[params]
+device = "cuda:0"  # layout and TableFormer; RapidOCR runs on the CPU (onnxruntime)
+ocr_engine = "rapidocr"
+ocr_lang = ["latin"]  # RapidOCR's PP-OCRv5 Latin-script recognizer
+ocr_mode = "default"  # Docling's default: OCR of the layout regions
+ocr_scale = 3.0  # nominal 216 DPI: OCR sees the input pixels 1:1
+table_structure = true  # TableFormer, accurate mode
+
+[resources]
+cpus = 4
+memory = "16g"
+gpus = "all"
+shm_size = "2g"
+
+[timeouts]
+sample = 600
+startup = 300

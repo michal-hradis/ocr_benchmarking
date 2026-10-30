@@ -17,7 +17,7 @@
         docker-nemotron-parse nemotron-parse-model nemotron-parse-smoke docker-unlimited-ocr \
         unlimited-ocr-model unlimited-ocr-smoke docker-cu130-vllm030 docker-lightonocr3 \
         lightonocr3-model lightonocr3-smoke docker-mistral-ocr mistral-ocr-smoke \
-        docker-openrouter openrouter-smoke
+        docker-openrouter openrouter-smoke docker-docling docling-model docling-smoke
 
 UV ?= uv
 BASE_VERSION ?= 1
@@ -41,6 +41,7 @@ PERO_IMAGE := ocrbench/engine-pero:0.7.0-81b496e-v1
 OCRD_CALAMARI_IMAGE := ocrbench/engine-ocrd-calamari:2.1.0-v1
 SURYA_IMAGE := ocrbench/engine-surya:0.17.1-v1
 DOCTR_IMAGE := ocrbench/engine-doctr:1.1.0-v1
+DOCLING_IMAGE := ocrbench/engine-docling:2.145.0-v1
 GLM_OCR_IMAGE := ocrbench/engine-glm-ocr:0.9B-v1
 MINERU25_PRO_IMAGE := ocrbench/engine-mineru25-pro:2605-1.2B-v1
 CHANDRA_OCR2_IMAGE := ocrbench/engine-chandra-ocr2:2-v1
@@ -184,6 +185,9 @@ docker-lock:  ## Re-lock the hashed requirements of the CUDA bases and the Pytho
 		--override engines/doctr/overrides.txt --index-url https://pypi.org/simple \
 		--extra-index-url https://download.pytorch.org/whl/cu130 --index-strategy unsafe-best-match \
 		-o engines/doctr/requirements.txt
+	$(LOCK) engines/docling/requirements.in -c docker/base-cu130-torch/requirements.txt \
+		--index-url https://pypi.org/simple --extra-index-url https://download.pytorch.org/whl/cu130 \
+		--index-strategy unsafe-best-match -o engines/docling/requirements.txt
 	$(LOCK_PY311) engines/ocrd-calamari/requirements.in -o engines/ocrd-calamari/requirements.txt
 	$(LOCK_PYLAIA) engines/pylaia/pylaia-requirements.in --index-url https://pypi.org/simple \
 		-o engines/pylaia/pylaia-requirements.txt
@@ -440,6 +444,16 @@ doctr-model:  ## Download the pinned docTR checkpoints (129 MB) into $(OCRBENCH_
 
 doctr-smoke:  ## Build the docTR image and run, evaluate and report a synthetic dataset on the GPU (opt-in; needs doctr-model)
 	$(UV) run --locked pytest -m gpu --run-docker --run-gpu tests/test_doctr.py
+
+docker-docling:  ## Build the Docling engine image (needs the torch base) and print its image ID
+	docker build -t $(DOCLING_IMAGE) engines/docling
+	@docker image inspect --format '$(DOCLING_IMAGE) {{.Id}}' $(DOCLING_IMAGE)
+
+docling-model:  ## Download the pinned Docling layout, TableFormer and RapidOCR models into $(OCRBENCH_CACHE) (opt-in)
+	python3 engines/docling/fetch_model.py $(OCRBENCH_CACHE)
+
+docling-smoke:  ## Build the Docling image and run, evaluate and report a synthetic dataset on the GPU (opt-in; needs docling-model)
+	$(UV) run --locked pytest -m gpu --run-docker --run-gpu tests/test_docling.py
 
 gpu-preflight:  ## Check host driver, Docker and NVIDIA Container Toolkit
 	scripts/gpu_preflight.sh

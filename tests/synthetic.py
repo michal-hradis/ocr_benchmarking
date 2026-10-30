@@ -98,6 +98,53 @@ def render_columns(path, heading, columns, size, font_size=28):
     return regions
 
 
+TABLE_PAGE = (
+    "Annual Figures",
+    ["The table below lists the harvest of", "three villages in the years 1921 and 1922."],
+    [["Village", "1921", "1922"], ["North", "120", "135"], ["South", "98", "101"]],
+    "Figure 1: A drawing of the fields.",
+    (1200, 1300),
+)
+
+
+def render_table_figure(path, heading, lines, rows, caption, size):
+    """Synthetic page with a heading, a paragraph, a ruled table and a picture with a caption.
+
+    Returns the text regions in reading order as ``render`` (the table one region of one line per
+    row, its cells joined by spaces); the picture is a grey gradient and an ellipse without text.
+    """
+    image = Image.new("L", size, 255)
+    draw = ImageDraw.Draw(image)
+    font = ImageFont.load_default(size=28)
+    title_font = ImageFont.load_default(size=56)
+    draw.text((60, 40), heading, font=title_font, fill=0)
+    regions = [[(heading, draw.textbbox((60, 40), heading, font=title_font))]]
+    paragraph, y = [], 150
+    for text in lines:
+        draw.text((60, y), text, font=font, fill=0)
+        paragraph.append((text, draw.textbbox((60, y), text, font=font)))
+        y += 40
+    regions.append(paragraph)
+    table, top, width, height = [], 280, 300, 60
+    for r, row in enumerate(rows):
+        boxes = []
+        for c, cell in enumerate(row):
+            x, y = 60 + c * width, top + r * height
+            draw.rectangle([x, y, x + width, y + height], outline=0, width=2)
+            draw.text((x + 15, y + 15), cell, font=font, fill=0)
+            boxes.append(draw.textbbox((x + 15, y + 15), cell, font=font))
+        box = (boxes[0][0], min(b[1] for b in boxes), boxes[-1][2], max(b[3] for b in boxes))
+        table.append((" ".join(row), box))
+    regions.append(table)
+    for i in range(400):
+        draw.line([(100 + i, 520), (100 + i, 920)], fill=int(255 * i / 400))
+    draw.ellipse([600, 570, 1000, 870], fill=80)
+    draw.text((100, 950), caption, font=font, fill=0)
+    regions.append([(caption, draw.textbbox((100, 950), caption, font=font))])
+    image.save(path)
+    return regions
+
+
 def page_xml(path, regions, size):
     def points(box):
         x0, y0, x1, y1 = box

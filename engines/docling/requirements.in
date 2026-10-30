@@ -1,0 +1,5 @@
+# Docling 2.145.0 (the docling-slim package that the docling metapackage wraps) with only the extras
+# the standard image pipeline needs: local layout and TableFormer models on the base's torch,
+# RapidOCR on onnxruntime (CPU) and the image conversion core. No PDF, office or web formats.
+docling-slim[models-local,feat-ocr-rapidocr-onnx,convert-core]==2.145.0
+torchvision==0.29.1+cu130
