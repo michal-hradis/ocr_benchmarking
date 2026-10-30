@@ -6,14 +6,15 @@ The runner executes one OCR engine, packaged as a Docker image, over a dataset m
 
 ```sh
 uv run ocrbench run start --engine engines/<name>/engine.toml --dataset datasets/dev-01.json \
-    [--runs-dir runs] [--run-id <id>] [--cache <dir>]
-uv run ocrbench run resume runs/<run-id> [--retry-failed]
+    [--runs-dir runs] [--run-id <id>] [--cache <dir>] [--allow-network]
+uv run ocrbench run resume runs/<run-id> [--retry-failed] [--allow-network]
 uv run ocrbench run status runs/<run-id>
 ```
 
 - **`start`** creates a new run directory with a frozen configuration and processes every sample. The engine image must already exist locally: the runner never builds or pulls images. `--cache` mounts a host directory at `/cache` for model weights ([DOCKER.md](DOCKER.md)). An existing run ID is refused.
 - **`resume`** continues an interrupted run. Samples that already have a record are kept and not run again. `--retry-failed` also retries failed samples; each retry is a new attempt and earlier attempts are kept. Continuing is refused if the image tag now resolves to a different image ID.
 - **`status`** counts samples by status and lists failures.
+- **`--allow-network`** permits an engine that declares `network = "egress"` (a hosted OCR API, [below](#hosted-api-engines)). Without it, `start` and `resume` refuse such an engine before anything runs.
 
 `start` and `resume` print one line per finished sample and a summary. They exit with status 0 when the run completes, even if samples failed (failures are results); 1 on an error that stops the run; and 130 when interrupted with Ctrl-C, after which the run can be continued.
 
@@ -29,6 +30,8 @@ command = []                          # optional; empty uses the image's CMD
 model = "example-model@rev1"          # optional model name and revision, passed to the engine
 metadata = ["language"]               # optional metadata to pass: language, doc_type, year
 env = { OMP_THREAD_LIMIT = "4" }      # optional container environment
+network = "none"                      # optional; "egress" for a hosted API (below)
+secrets = []                          # optional; host variables passed by name, needs "egress"
 
 [params]                              # free parameters passed to the engine (prompts, limits, ...)
 max_new_tokens = 8192
@@ -45,6 +48,10 @@ startup = 300                         # extra allowance for the first sample aft
 ```
 
 Unknown fields are errors. The parsed configuration is frozen into `run.json` with its SHA-256 hash, together with the resolved image ID. A changed configuration needs a new run.
+
+### Hosted-API engines
+
+An engine that calls a hosted OCR service declares `network = "egress"` and the names of the environment variables holding its credentials, such as `secrets = ["MISTRAL_API_KEY"]` ([ADR 0013](adr/0013-opt-in-network-for-hosted-api-engines.md)). The runner starts it only with `--allow-network` and only when every secret is set in its own environment. The container then runs on Docker's default bridge network instead of `--network none`. Each secret is passed as `--env NAME`, so Docker copies the value and it is never written to the command, `run.json`, `container.json` or logs. `run.json` records only the names. Other isolation is unchanged. Every request is paid and sends the page image to the provider: run such engines only on data you are authorized to send. The `network` and `secrets` fields are left out of the frozen configuration of offline engines.
 
 ## Engine protocol
 
@@ -82,7 +89,7 @@ Unknown fields are errors. The parsed configuration is frozen into `run.json` wi
 
 `result.json` must be standard JSON: `NaN`, `Infinity` and numbers that overflow (such as `1e999`) make the output `invalid-output`. Write `result.json` atomically (write a temporary file in the same directory, then rename it). Its appearance tells the runner that the sample is finished. An engine that cannot process a sample writes `status: failed` and continues with the next one.
 
-**Container environment.** Containers run with `--network none`, a read-only root filesystem with a writable `/tmp`, the host user's UID/GID (so output files belong to the host user) and `HOME=/tmp`. The configured CPU, memory, shared-memory and GPU limits are applied, and `/cache` is mounted only with `--cache`. The image's own user is therefore not used. Engines must not rely on writing anywhere except `/output`, `/tmp` and `/cache`.
+**Container environment.** Containers run with `--network none` (hosted-API engines: [above](#hosted-api-engines)), a read-only root filesystem with a writable `/tmp`, the host user's UID/GID (so output files belong to the host user) and `HOME=/tmp`. The configured CPU, memory, shared-memory and GPU limits are applied, and `/cache` is mounted only with `--cache`. The image's own user is therefore not used. Engines must not rely on writing anywhere except `/output`, `/tmp` and `/cache`.
 
 ## Statuses and failures
 

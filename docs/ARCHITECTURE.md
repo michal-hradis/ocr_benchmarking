@@ -4,7 +4,7 @@ This document defines the system boundaries and high-level contracts of the benc
 
 ## Data and execution flow
 
-Everything runs **locally on one Linux machine**. The OCR inference component runs in an isolated Docker container. The surrounding local application manages images and PAGE XML reference data, runs OCR, evaluates predictions, and produces reports. In the diagram, only the image and permitted inference metadata cross into the OCR container.
+Everything runs **locally on one Linux machine**. The OCR inference component runs in an isolated Docker container without network access. The exception is a hosted-API engine, which may send the page image, and nothing else, to its provider when the run explicitly allows it ([ADR 0013](adr/0013-opt-in-network-for-hosted-api-engines.md)). The surrounding local application manages images and PAGE XML reference data, runs OCR, evaluates predictions, and produces reports. In the diagram, only the image and permitted inference metadata cross into the OCR container.
 
 ```text
                       dataset manifest (sample id, image path, GT path, metadata)

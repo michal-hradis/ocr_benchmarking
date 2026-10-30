@@ -156,8 +156,8 @@ def _progress(record: dict) -> None:
     print(f"{record['sample_id']}: {record['status']}{reason}", file=sys.stderr, flush=True)
 
 
-def _execute(run: Run, image_id: str, retry_failed: bool) -> int:
-    launcher = DockerLauncher(run.engine, image_id, run.cache)
+def _execute(run: Run, image_id: str, retry_failed: bool, allow_network: bool) -> int:
+    launcher = DockerLauncher(run.engine, image_id, run.cache, allow_network=allow_network)
     try:
         execute(run, launcher, retry_failed=retry_failed, progress=_progress)
     except KeyboardInterrupt:
@@ -171,6 +171,8 @@ def _run_start(args: argparse.Namespace) -> int:
     try:
         engine = load_engine_config(args.engine)
         image_id = resolve_image(engine.image)
+        # Refuse a hosted-API engine before a run directory is created.
+        DockerLauncher(engine, image_id, allow_network=args.allow_network)
         run = create_run(
             engine,
             args.dataset,
@@ -180,7 +182,7 @@ def _run_start(args: argparse.Namespace) -> int:
             cache=args.cache.resolve() if args.cache else None,
         )
         print(f"run {run.run_id}: {len(run.samples)} samples, image {image_id}", file=sys.stderr)
-        return _execute(run, image_id, retry_failed=False)
+        return _execute(run, image_id, retry_failed=False, allow_network=args.allow_network)
     except (EngineConfigError, RunnerError) as error:
         print(f"error: {error}", file=sys.stderr)
         return 1
@@ -193,7 +195,9 @@ def _run_resume(args: argparse.Namespace) -> int:
             raise RunnerError(f"{args.run} was not run with Docker and cannot be resumed here")
         image_id = resolve_image(run.engine.image)
         verify_image(run, image_id)
-        return _execute(run, image_id, retry_failed=args.retry_failed)
+        return _execute(
+            run, image_id, retry_failed=args.retry_failed, allow_network=args.allow_network
+        )
     except RunnerError as error:
         print(f"error: {error}", file=sys.stderr)
         return 1
@@ -333,12 +337,22 @@ def build_parser() -> argparse.ArgumentParser:
     start.add_argument("--runs-dir", type=Path, default=Path("runs"), help="default: runs/")
     start.add_argument("--run-id", help="default: <engine>-<dataset>-<UTC time>")
     start.add_argument("--cache", type=Path, help="host directory mounted at /cache")
+    start.add_argument(
+        "--allow-network",
+        action="store_true",
+        help="permit a hosted-API engine's outbound network access and secrets (ADR 0013)",
+    )
     start.set_defaults(handler=_run_start)
 
     resume = actions.add_parser("resume", help="continue a run; finished samples are kept")
     resume.add_argument("run", type=Path, help="run directory")
     resume.add_argument(
         "--retry-failed", action="store_true", help="also retry failed samples (new attempts)"
+    )
+    resume.add_argument(
+        "--allow-network",
+        action="store_true",
+        help="permit a hosted-API engine's outbound network access and secrets (ADR 0013)",
     )
     resume.set_defaults(handler=_run_resume)
 

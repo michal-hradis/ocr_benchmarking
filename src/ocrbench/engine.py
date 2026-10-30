@@ -2,8 +2,10 @@
 
 An engine configuration names the Docker image and command of one OCR engine adapter, the
 parameters passed to it, the optional manifest metadata it may receive, its resource limits and
-its timeouts. The format is documented in docs/RUNNER.md. The parsed configuration is frozen
-into every run and identified by a hash, so a run can only be continued with the same settings.
+its timeouts. The format is documented in docs/RUNNER.md. A hosted-API engine also declares
+outbound network access and the names of the host secrets it needs (ADR 0013). The parsed
+configuration is frozen into every run and identified by a hash, so a run can only be continued
+with the same settings.
 """
 
 from __future__ import annotations
@@ -25,9 +27,11 @@ NAME_RE = re.compile(r"^[a-z0-9][a-z0-9._-]{0,63}$")
 ENV_NAME_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 # Set by the runner; an engine configuration cannot override them.
 RESERVED_ENV = {"OCRBENCH_INPUT", "OCRBENCH_OUTPUT", "HOME"}
+# "none": no network (the default); "egress": outbound access for a hosted API (ADR 0013).
+NETWORK_MODES = ("none", "egress")
 
 _TOP_KEYS = {"format", "version", "name", "engine_version", "image", "command", "model"}
-_TOP_KEYS |= {"metadata", "params", "env", "resources", "timeouts"}
+_TOP_KEYS |= {"metadata", "params", "env", "resources", "timeouts", "network", "secrets"}
 _RESOURCE_KEYS = {"cpus", "memory", "gpus", "shm_size"}
 _TIMEOUT_KEYS = {"sample", "startup"}
 
@@ -56,9 +60,11 @@ class EngineConfig:
     shm_size: str | None = None
     sample_timeout: float = 600.0  # seconds without a finished sample before the container stops
     startup_timeout: float = 300.0  # extra allowance for the first sample after each start
+    network: str = "none"  # one of NETWORK_MODES
+    secrets: tuple[str, ...] = ()  # host environment variables forwarded by name, never by value
 
     def to_json(self) -> dict[str, Any]:
-        return {
+        data = {
             "format": ENGINE_FORMAT,
             "version": ENGINE_VERSION,
             "name": self.name,
@@ -77,6 +83,12 @@ class EngineConfig:
             },
             "timeouts": {"sample": self.sample_timeout, "startup": self.startup_timeout},
         }
+        # Only when set, so the frozen form and hash of offline engines are unchanged.
+        if self.network != "none":
+            data["network"] = self.network
+        if self.secrets:
+            data["secrets"] = list(self.secrets)
+        return data
 
     def sha256(self) -> str:
         canonical = json.dumps(self.to_json(), sort_keys=True, ensure_ascii=False)
@@ -134,6 +146,20 @@ def parse_engine_config(data: Any, location: str = "engine") -> EngineConfig:
             errors.append(f"environment variable name {key!r} is invalid or reserved")
         if not isinstance(value, str):
             errors.append(f"environment variable {key!r} must be a string")
+    network = data.get("network", "none")
+    if network not in NETWORK_MODES:
+        errors.append(f"'network' must be one of {NETWORK_MODES}")
+    secrets = data.get("secrets", [])
+    if not (isinstance(secrets, list) and all(isinstance(s, str) for s in secrets)):
+        errors.append("'secrets' must be a list of environment variable names")
+        secrets = []
+    for key in secrets:
+        if not ENV_NAME_RE.match(key) or key in RESERVED_ENV or key in env:
+            errors.append(f"secret name {key!r} is invalid, reserved or also in 'env'")
+    if len(set(secrets)) != len(secrets):
+        errors.append("'secrets' lists a name twice")
+    if secrets and network == "none":
+        errors.append("'secrets' needs network = \"egress\"; offline engines get no secrets")
     resources = data.get("resources", {})
     timeouts = data.get("timeouts", {})
     if not isinstance(resources, dict):
@@ -170,6 +196,8 @@ def parse_engine_config(data: Any, location: str = "engine") -> EngineConfig:
         shm_size=shm_size,
         sample_timeout=float(timeouts.get("sample", 600.0)),
         startup_timeout=float(timeouts.get("startup", 300.0)),
+        network=network,
+        secrets=tuple(secrets),
     )
 
 

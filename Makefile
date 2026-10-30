@@ -16,7 +16,7 @@
         surya2-model surya2-smoke docker-pylaia pylaia-smoke docker-cu130-vllm026 \
         docker-nemotron-parse nemotron-parse-model nemotron-parse-smoke docker-unlimited-ocr \
         unlimited-ocr-model unlimited-ocr-smoke docker-cu130-vllm030 docker-lightonocr3 \
-        lightonocr3-model lightonocr3-smoke
+        lightonocr3-model lightonocr3-smoke docker-mistral-ocr mistral-ocr-smoke
 
 UV ?= uv
 BASE_VERSION ?= 1
@@ -51,6 +51,7 @@ SURYA2_IMAGE := ocrbench/engine-surya2:0.22.1-v1
 NEMOTRON_PARSE_IMAGE := ocrbench/engine-nemotron-parse:3.5-v1
 UNLIMITED_OCR_IMAGE := ocrbench/engine-unlimited-ocr:1.0-v1
 LIGHTONOCR3_IMAGE := ocrbench/engine-lightonocr3:3-v1
+MISTRAL_OCR_IMAGE := ocrbench/engine-mistral-ocr:1-v1
 # Host directory with the user-supplied PERO OCR model bundles (engines/pero/README.md).
 PERO_BUNDLES ?= dev_data/pero_ocr_models
 # Host directory mounted as /cache for engines whose weights are not in the image.
@@ -109,7 +110,7 @@ docker-cu130-vllm030:  ## Build the CUDA 13.0 + vLLM 0.30.0 base image (multi-GB
 	docker build -t $(CU130_VLLM030_IMAGE) docker/base-cu130-vllm030
 	@docker image inspect --format '$(CU130_VLLM030_IMAGE) {{.Id}}' $(CU130_VLLM030_IMAGE)
 
-docker-lock:  ## Re-lock the hashed requirements of the CUDA bases and the GPU engines
+docker-lock:  ## Re-lock the hashed requirements of the CUDA bases and the Python engines
 	$(LOCK) docker/base-cu130-torch/requirements.in \
 		--index-url https://download.pytorch.org/whl/cu130 \
 		-o docker/base-cu130-torch/requirements.txt
@@ -170,6 +171,8 @@ docker-lock:  ## Re-lock the hashed requirements of the CUDA bases and the GPU e
 		--index-strategy unsafe-best-match -o engines/infinityparser2/requirements.txt
 	$(LOCK) engines/pero/requirements.in -c docker/base-cu130-torch/requirements.txt \
 		--index-url https://pypi.org/simple -o engines/pero/requirements.txt
+	$(LOCK) engines/mistral-ocr/requirements.in --index-url https://pypi.org/simple \
+		-o engines/mistral-ocr/requirements.txt
 	$(LOCK) engines/surya/requirements.in -c docker/base-cu130-torch/requirements.txt \
 		--index-url https://pypi.org/simple --extra-index-url https://download.pytorch.org/whl/cu130 \
 		--index-strategy unsafe-best-match -o engines/surya/requirements.txt
@@ -379,6 +382,13 @@ lightonocr3-model:  ## Download pinned LightOnOCR-3 weights (all 12.8 GB, or CHE
 
 lightonocr3-smoke:  ## Build the LightOnOCR-3 image and run, evaluate and report a synthetic dataset with every preset on the GPU (opt-in; needs lightonocr3-model)
 	$(UV) run --locked pytest -m gpu --run-docker --run-gpu tests/test_lightonocr3.py
+
+docker-mistral-ocr:  ## Build the Mistral OCR 4.1 hosted-API engine image (needs the CPU base) and print its image ID
+	docker build -t $(MISTRAL_OCR_IMAGE) engines/mistral-ocr
+	@docker image inspect --format '$(MISTRAL_OCR_IMAGE) {{.Id}}' $(MISTRAL_OCR_IMAGE)
+
+mistral-ocr-smoke:  ## Build the Mistral OCR image and run, evaluate and report the synthetic samples with both presets (opt-in; paid API requests; needs MISTRAL_API_KEY)
+	$(UV) run --locked pytest -m api --run-docker --run-api tests/test_mistral_ocr.py
 
 docker-infinityparser2:  ## Build the Infinity-Parser2-Flash engine image (needs the torch base) and print its image ID
 	docker build -t $(INFINITYPARSER2_IMAGE) engines/infinityparser2

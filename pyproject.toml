@@ -45,4 +45,5 @@ addopts = ["--strict-markers", "--disable-socket", "--allow-unix-socket"]
 markers = [
     "docker: builds or runs Docker images; opt in with --run-docker",
     "gpu: needs an NVIDIA GPU in Docker; opt in with --run-gpu",
+    "api: sends paid requests to a hosted OCR API (ADR 0013); opt in with --run-api",
 ]
