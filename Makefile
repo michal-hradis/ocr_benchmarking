@@ -17,7 +17,8 @@
         docker-nemotron-parse nemotron-parse-model nemotron-parse-smoke docker-unlimited-ocr \
         unlimited-ocr-model unlimited-ocr-smoke docker-cu130-vllm030 docker-lightonocr3 \
         lightonocr3-model lightonocr3-smoke docker-mistral-ocr mistral-ocr-smoke \
-        docker-openrouter openrouter-smoke docker-docling docling-model docling-smoke
+        docker-openrouter openrouter-smoke docker-docling docling-model docling-smoke \
+        docker-monkeyocrv2 monkeyocrv2-model monkeyocrv2-smoke
 
 UV ?= uv
 BASE_VERSION ?= 1
@@ -52,6 +53,7 @@ DOTS_MOCR_IMAGE := ocrbench/engine-dots-mocr:3B-v1
 SURYA2_IMAGE := ocrbench/engine-surya2:0.22.1-v1
 NEMOTRON_PARSE_IMAGE := ocrbench/engine-nemotron-parse:3.5-v1
 UNLIMITED_OCR_IMAGE := ocrbench/engine-unlimited-ocr:1.0-v1
+MONKEYOCRV2_IMAGE := ocrbench/engine-monkeyocrv2:2-v1
 LIGHTONOCR3_IMAGE := ocrbench/engine-lightonocr3:3-v1
 MISTRAL_OCR_IMAGE := ocrbench/engine-mistral-ocr:1-v1
 OPENROUTER_IMAGE := ocrbench/engine-openrouter:2-v2
@@ -380,6 +382,16 @@ unlimited-ocr-model:  ## Download the pinned Unlimited-OCR weights (6.7 GB) into
 
 unlimited-ocr-smoke:  ## Build the Unlimited-OCR image and run, evaluate and report a synthetic dataset on the GPU (opt-in; needs unlimited-ocr-model)
 	$(UV) run --locked pytest -m gpu --run-docker --run-gpu tests/test_unlimited_ocr.py
+
+docker-monkeyocrv2:  ## Build the MonkeyOCRv2 parsing engine image (needs the vLLM 0.26 base) and print its image ID
+	docker build -t $(MONKEYOCRV2_IMAGE) engines/monkeyocrv2
+	@docker image inspect --format '$(MONKEYOCRV2_IMAGE) {{.Id}}' $(MONKEYOCRV2_IMAGE)
+
+monkeyocrv2-model:  ## Download the pinned MonkeyOCRv2-B-Parsing weights and DFlash draft (1.9 GB, or CHECKPOINT=B-Parsing|B-Parsing-DFlash) into $(OCRBENCH_CACHE) (opt-in)
+	python3 engines/monkeyocrv2/fetch_model.py $(OCRBENCH_CACHE) $(CHECKPOINT)
+
+monkeyocrv2-smoke:  ## Build the MonkeyOCRv2 image and run, evaluate and report a synthetic dataset with both presets on the GPU (opt-in; needs monkeyocrv2-model)
+	$(UV) run --locked pytest -m gpu --run-docker --run-gpu tests/test_monkeyocrv2.py
 
 docker-lightonocr3:  ## Build the LightOnOCR-3 engine image (needs the vLLM 0.30 base) and print its image ID
 	docker build -t $(LIGHTONOCR3_IMAGE) engines/lightonocr3

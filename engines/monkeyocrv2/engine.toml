@@ -1,0 +1,26 @@
+# MonkeyOCRv2-B-Parsing, without dewarping: upstream's two-stage pipeline (one layout request per
+# page, one recognition request per block crop) at the pinned source commit with --skip-preprocess,
+# served by vLLM with upstream's model plugin inside the container, normal (non-speculative)
+# decoding; positioned layout blocks in reading order (README.md next to this file; format:
+# docs/RUNNER.md). Run with --cache <dir> holding the weights from make monkeyocrv2-model.
+name = "monkeyocrv2-b-parsing-nodewarp"
+engine_version = "1"
+image = "ocrbench/engine-monkeyocrv2:2-v1"
+model = "zenosai/MonkeyOCRv2-B-Parsing@e8871a0057c98378219b369f924a25ba10f392bf"
+
+[params]
+device = "cuda:0"
+dflash = false
+# Share of GPU memory for vLLM (weights, CUDA graphs and KV cache): serve.py's default 0.5, at
+# most 0.6 (ADR 0012). Other parameters: README.md
+gpu_memory_utilization = 0.5
+
+[resources]
+cpus = 4
+memory = "24g"
+gpus = "all"
+shm_size = "4g"
+
+[timeouts]
+sample = 1800
+startup = 1200
