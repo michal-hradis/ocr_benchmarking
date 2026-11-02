@@ -247,10 +247,11 @@ def model_cache(root, corrupt=False, extra_file=False, without_draft=False):
 NEWSPAPER_LINES = 2000
 # The fake server chooses the layout by the gray level in the top-left corner (fake/README.md).
 GRAY = {
-    "page": 200, "news": 150, "rec500": 140, "repeat": 120, "garbage": 100, "abort": 80,
-    "empty": 70, "boom": 50, "die": 20,
+    "page": 200, "invalid": 175, "overflow": 160, "news": 150, "rec500": 140, "repeat": 120,
+    "garbage": 100, "blank": 87, "abort": 80, "empty": 70, "boom": 50, "die": 20,
 }  # fmt: skip
 NEWS = [(f"Line {n}", (50, n * 9, 950, n * 9 + 8)) for n in range(1, 101)]
+REC500 = [(100, y, 900, y + 200) for y in (100, 400, 700)]
 
 
 def _newspaper_line(number):
@@ -262,7 +263,11 @@ def make_dataset(root, samples):
     data.mkdir()
     entries = []
     for sid, (kind, size) in samples.items():
-        boxes = {"page": [box for _, box in LAYOUT], "news": [box for _, box in NEWS]}
+        boxes = {
+            "page": [box for _, box in LAYOUT],
+            "news": [box for _, box in NEWS],
+            "rec500": REC500,
+        }
         page_image(GRAY[kind], size, boxes.get(kind, ())).save(data / f"{sid}.png")
         if kind == "news":  # a newspaper page whose reference has 2,000 lines
             lines = [_newspaper_line(n) for n in range(1, NEWSPAPER_LINES + 1)]
@@ -303,11 +308,14 @@ def test_adapter_follows_the_engine_protocol(tmp_path):
         "page": ("page", (1000, 700)),
         "empty": ("empty", (300, 200)),
         "garbage": ("garbage", (500, 500)),
+        "invalid": ("invalid", (500, 500)),
+        "overflow": ("overflow", (500, 500)),
+        "blank": ("blank", (300, 200)),
         "boom": ("boom", (666, 400)),
         "news": ("news", (2000, 3000)),
         "repeat": ("repeat", (400, 300)),
         "abort": ("abort", (300, 200)),
-        "rec500": ("rec500", (300, 200)),
+        "rec500": ("rec500", (1000, 700)),
         "big": ("page", (2500, 1750)),
         "die": ("die", (500, 500)),
         "after": ("page", (1000, 700)),
@@ -317,7 +325,10 @@ def test_adapter_follows_the_engine_protocol(tmp_path):
     assert got == {
         "page": ("success", None),
         "empty": ("success", None),  # an empty layout is an empty page
-        "garbage": ("success", None),  # an output without layout items: no blocks
+        "garbage": ("failure", "engine-error"),  # not empty, but no readable layout item
+        "invalid": ("failure", "engine-error"),  # a list without a valid item
+        "overflow": ("failure", "engine-error"),  # a box that cannot be mapped
+        "blank": ("success", None),  # a blank output is an empty page
         "boom": ("failure", "engine-error"),
         "news": ("truncated", None),  # the layout stopped at max_tokens, scored as parsed
         "repeat": ("truncated", None),  # a block stopped at max_tokens in a repetition loop
@@ -327,11 +338,29 @@ def test_adapter_follows_the_engine_protocol(tmp_path):
         "die": ("failure", "engine-error"),
         "after": ("failure", "engine-error"),
     }
-    assert records["empty"]["message"] == "the layout output has no blocks"
-    assert records["garbage"]["message"] == "the layout output has no blocks"
+    assert records["empty"]["message"] == "the layout output is empty"
+    assert records["blank"]["message"] == "the layout output is empty"
+    malformed = "the layout output is not empty but has no readable blocks (layout.txt)"
+    assert records["garbage"]["message"] == malformed
+    assert records["invalid"]["message"] == malformed
+    assert records["overflow"]["message"].startswith(
+        "cannot parse the layout output: OverflowError"
+    )
+    for sid in ("garbage", "invalid", "overflow"):  # the native output is kept on failure
+        assert {o["path"] for o in records[sid]["outputs"]} == {"layout.txt", "result.json"}
+        assert records[sid]["engine_extra"]["layout"]["finish_reason"] == "stop"
     assert "request failed: HTTP 500" in records["boom"]["message"]
     assert "fake CUDA out of memory" in records["boom"]["message"]
+    assert records["rec500"]["message"].startswith(
+        "1 of 3 block requests failed; first: request failed: HTTP 500: "
+    )
     assert "fake recognition error" in records["rec500"]["message"]
+    assert records["rec500"]["engine_extra"]["failed_blocks"] == 1
+    rec500 = run.path / "samples" / "rec500" / "attempt-1" / "output" / "blocks.json"
+    kept = json.loads(rec500.read_text(encoding="utf-8"))["blocks"]  # kept despite the failure
+    assert [b.get("output") for b in kept] == ["THE CHRONICLE", None, FIXTURE_TEXTS[2]]
+    assert "fake recognition error" in kept[1]["error"]
+    assert "request" not in kept[1]
     assert records["abort"]["message"] == "layout request failed (finish_reason 'abort')"
     assert records["after"]["message"].startswith("the vLLM server has exited")
 

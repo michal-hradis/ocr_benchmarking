@@ -20,6 +20,7 @@ host) and, last, result.json.
 
 from __future__ import annotations
 
+import ast
 import hashlib
 import json
 import os
@@ -358,30 +359,51 @@ class Client:
         }
 
 
-def layout(runner: Any, client: Client, image: Any) -> tuple[dict, list[dict]]:
-    """Upstream's get_layout for one page: the layout request, the tolerant parse of its output
-    (a list of {"bbox", "label"} items) and every box mapped from [0, 1000] to the input image
-    (rounded to whole pixels and clipped, as upstream crops)."""
-    reply = client.request(
+def request_layout(runner: Any, client: Client, image: Any) -> dict:
+    """Upstream's get_layout request for one page: the whole page, enlarged or reduced to about
+    1 MP, with the layout prompt."""
+    return client.request(
         image,
         runner.ALL_PROMPT["LAYOUT"],
         PIPELINE["layout_max_tokens"],
         max_pixels=PIPELINE["max_pixels"],
         min_pixels=PIPELINE["layout_min_pixels"],
     )
-    items = runner._parse_tolerant_items(
-        reply["output"], lambda item: runner._normalize_model_item(item, include_content=False)
-    )
+
+
+def parse_layout(runner: Any, output: str, image: Any) -> list[dict]:
+    """Upstream's get_layout parsing: the tolerant parse of the output (a list of {"bbox",
+    "label"} items) and every box mapped from [0, 1000] to the input image (rounded to whole
+    pixels and clipped, as upstream crops). An error in either step fails the sample."""
     width, height = image.size
-    blocks = [
-        {
-            "label": item["label"],
-            "box": item["bbox"],
-            "bbox": runner._map_bbox_to_image(item["bbox"], width, height),
-        }
-        for item in items
-    ]
-    return reply, blocks
+    try:
+        items = runner._parse_tolerant_items(
+            output, lambda item: runner._normalize_model_item(item, include_content=False)
+        )
+        return [
+            {
+                "label": item["label"],
+                "box": item["bbox"],
+                "bbox": runner._map_bbox_to_image(item["bbox"], width, height),
+            }
+            for item in items
+        ]
+    except Exception as error:
+        raise AdapterError(
+            f"cannot parse the layout output: {type(error).__name__}: {error}"
+        ) from error
+
+
+def empty_layout(output: str) -> bool:
+    """Whether the layout output is an empty page: blank, or exactly an empty list literal.
+    Anything else from which no block can be read is a malformed layout."""
+    text = output.strip()
+    if not text:
+        return True
+    try:
+        return ast.literal_eval(text) == []
+    except (SyntaxError, ValueError, TypeError, MemoryError, RecursionError):
+        return False
 
 
 def recognize(runner: Any, client: Client, image: Any, blocks: list[dict]) -> list[dict]:
@@ -389,19 +411,25 @@ def recognize(runner: Any, client: Client, image: Any, blocks: list[dict]) -> li
     concurrently (at most the server's max_num_seqs at a time) with its label's prompt, and the
     output formatted as upstream's pipeline does (titles and section headers as Markdown
     headings, formulas as $$ blocks, OTSL tables as HTML). Other labels (Picture, Footnote,
-    unknown ones) are not recognized and have no content."""
+    unknown ones) are not recognized and have no content. A failed request (an HTTP error, a
+    time-out) does not stop the others: its block gets ``error`` instead of a reply."""
     tasks = runner._build_page_tasks(
         0, image, [{"bbox": b["bbox"], "label": b["label"]} for b in blocks]
     )
     todo = [task for task in tasks if task["need_infer"]]
 
     def run(task: dict) -> dict:
-        return client.request(
-            task["image"],
-            task["question"],
-            PIPELINE["recognition_max_tokens"],
-            max_pixels=PIPELINE["max_pixels"],
-        )
+        try:
+            return client.request(
+                task["image"],
+                task["question"],
+                PIPELINE["recognition_max_tokens"],
+                max_pixels=PIPELINE["max_pixels"],
+            )
+        except AdapterError as error:
+            return {"error": str(error)}
+        except Exception as error:
+            return {"error": f"{type(error).__name__}: {error}"}
 
     with ThreadPoolExecutor(
         max_workers=max(1, min(len(todo), SERVER_SETTINGS["max_num_seqs"]))
@@ -411,7 +439,9 @@ def recognize(runner: Any, client: Client, image: Any, blocks: list[dict]) -> li
     for task in tasks:
         record = {"index": task["block_idx"], "label": task["label"], "bbox": task["bbox"]}
         reply = replies.get(task["block_idx"])
-        if reply is not None:
+        if reply is not None and "error" in reply:
+            record["error"] = reply["error"]
+        elif reply is not None:
             fields = runner._format_block_fields(task, reply["output"], None, None, True, None)
             record |= {"request": reply, "content": fields["content"]}
             if "otsl" in fields:
@@ -461,14 +491,25 @@ def process(server: Any, params: dict, sample: dict, source: Path, out: Path) ->
     client = Client(server.url, runner)
     before = server.spec_decode() if params["dflash"] else None
     start = time.monotonic()
-    reply, blocks = layout(runner, client, image)
+    reply = request_layout(runner, client, image)
     layout_seconds = time.monotonic() - start
-    (out / "layout.txt").write_text(reply["output"], encoding="utf-8")  # native, unchanged
+    # The native output is kept unchanged before it is parsed, also when parsing fails.
+    (out / "layout.txt").write_text(reply["output"], encoding="utf-8")
     extra: dict[str, Any] = {"layout": {k: v for k, v in reply.items() if k != "output"}}
     if reply["finish_reason"] not in ("stop", "length"):
         return {
             "status": "failed",
             "message": f"layout request failed (finish_reason {reply['finish_reason']!r})",
+            "extra": extra,
+        }
+    try:
+        blocks = parse_layout(runner, reply["output"], image)
+    except AdapterError as error:
+        return {"status": "failed", "message": str(error), "extra": extra}
+    if not blocks and reply["finish_reason"] == "stop" and not empty_layout(reply["output"]):
+        return {
+            "status": "failed",
+            "message": "the layout output is not empty but has no readable blocks (layout.txt)",
             "extra": extra,
         }
     start = time.monotonic()
@@ -485,6 +526,15 @@ def process(server: Any, params: dict, sample: dict, source: Path, out: Path) ->
             ],
         },
     )
+    errors = [record["error"] for record in records if "error" in record]
+    if errors:  # blocks.json keeps the successful replies and every error
+        attempted = sum("error" in r or "request" in r for r in records)
+        extra |= {"blocks": len(blocks), "failed_blocks": len(errors)}
+        return {
+            "status": "failed",
+            "message": f"{len(errors)} of {attempted} block requests failed; first: {errors[0]}",
+            "extra": extra,
+        }
     # Upstream's page record and Markdown, as its pipeline writes them for an image.
     page = [
         {"bbox": r["bbox"], "label": r["label"], "content": r.get("content", "")} for r in records
@@ -523,7 +573,7 @@ def process(server: Any, params: dict, sample: dict, source: Path, out: Path) ->
     elif messages:
         result |= {"status": "truncated", "message": "; ".join(messages)}
     elif not blocks:
-        result["message"] = "the layout output has no blocks"
+        result["message"] = "the layout output is empty"
     generated = sum(r["generated_tokens"] or 0 for r in requests)
     extra |= {
         "blocks": len(blocks),

@@ -31,6 +31,8 @@ BLOCKS = {
     9: "Footer",
     10: "A block with its corners swapped.",
 }
+# Three blocks; the recognition request of the second one fails.
+REC500 = str([{"bbox": [100, y, 900, y + 200], "label": "Text"} for y in (100, 400, 700)])
 STATE = {"kind": None, "draft": False}
 COUNTERS = {"drafts": 0, "draft_tokens": 0, "accepted_tokens": 0}
 LOCK = threading.Lock()
@@ -46,10 +48,13 @@ def layout(gray, limit):
     """The layout output for a page, chosen by the gray level of its top-left corner."""
     kinds = [
         (190, "page", lambda: ((FIXTURES / "layout.txt").read_text(encoding="utf-8"), "stop")),
+        (165, "invalid", lambda: ("[{'bbox': [1, 2], 'label': 'Text'}]", "stop")),
+        (155, "overflow", lambda: ("[{'bbox': [0, 0, 1e999, 10], 'label': 'Text'}]", "stop")),
         (145, "news", lambda: news(limit)),
-        (130, "rec500", lambda: ("[{'bbox': [0, 0, 1000, 1000], 'label': 'Text'}]", "stop")),
+        (130, "rec500", lambda: (REC500, "stop")),
         (110, "repeat", lambda: ("[{'bbox': [0, 0, 1000, 1000], 'label': 'Text'}]", "stop")),
         (90, "garbage", lambda: ("There is no layout here.", "stop")),
+        (84, "blank", lambda: ("  \n", "stop")),
         (75, "abort", lambda: ("[{'bbox': [0, 0, 1000, 1000], 'label': 'Text'}", "abort")),
         (0, "empty", lambda: ("[]", "stop")),
     ]
@@ -119,9 +124,10 @@ class Handler(BaseHTTPRequestHandler):
             text, reason = layout(gray, request["max_tokens"])
         else:
             assert image.width * image.height <= 1003520
-            if STATE["kind"] == "rec500":
+            marker = image.getpixel((2, 2))
+            if STATE["kind"] == "rec500" and marker == 102:
                 return self.reply(500, {"error": {"message": "fake recognition error"}})
-            text, reason = recognize(image.getpixel((2, 2)), request["max_tokens"])
+            text, reason = recognize(marker, request["max_tokens"])
         if STATE["draft"]:
             with LOCK:
                 COUNTERS["drafts"] += len(text) // 16 + 1
