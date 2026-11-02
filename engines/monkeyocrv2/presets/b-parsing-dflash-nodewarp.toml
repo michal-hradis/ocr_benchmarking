@@ -1,0 +1,25 @@
+# MonkeyOCRv2-B-Parsing with the MonkeyOCRv2-B-Parsing-DFlash draft, without dewarping: as the
+# normal preset (../engine.toml), with vLLM DFlash speculative decoding (16 proposed tokens per
+# step) as upstream's serve.py --draft-model enables it (../README.md; format: docs/RUNNER.md).
+# Run with --cache <dir> holding both checkpoints from make monkeyocrv2-model.
+name = "monkeyocrv2-b-parsing-dflash-nodewarp"
+engine_version = "1"
+image = "ocrbench/engine-monkeyocrv2:2-v1"
+model = "zenosai/MonkeyOCRv2-B-Parsing@e8871a0057c98378219b369f924a25ba10f392bf"
+
+[params]
+device = "cuda:0"
+dflash = true
+# Share of GPU memory for vLLM (weights, CUDA graphs and KV cache): serve.py's default 0.5, at
+# most 0.6 (ADR 0012). Other parameters: README.md
+gpu_memory_utilization = 0.5
+
+[resources]
+cpus = 4
+memory = "24g"
+gpus = "all"
+shm_size = "4g"
+
+[timeouts]
+sample = 1800
+startup = 1200
