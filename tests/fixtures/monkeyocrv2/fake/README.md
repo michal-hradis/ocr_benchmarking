@@ -14,10 +14,13 @@ process without vLLM, upstream's source, PyTorch, weights or a GPU. The test poi
   | Gray level | Layout output |
   | --- | --- |
   | 200 | `../layout.txt` (a hand-written layout with every block type and an invalid item, not real model output), stop |
+  | 175 | a list whose only item has no valid box (no readable block), stop |
+  | 160 | an item whose box cannot be mapped to pixels (`1e999`), stop |
   | 150 | 100 newspaper line blocks, cut off at `max_tokens` (stop reason `length`) |
-  | 140 | one whole-page `Text` block whose recognition request fails with HTTP 500 |
+  | 140 | three `Text` blocks; the recognition request of the second fails with HTTP 500 |
   | 120 | one whole-page `Text` block whose recognition repeats a word up to `max_tokens` (stop reason `length`) |
   | 100 | text without layout items, stop |
+  | 87 | a blank output, stop |
   | 80 | an unfinished item and the stop reason `abort` |
   | 50 | an HTTP 500 error (a request failure) |
   | 20 | the server exits |
