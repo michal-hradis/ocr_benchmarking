@@ -1,0 +1,24 @@
+# Nanonets-OCR2-3B page-image to Markdown model, served by vLLM inside the container: the model
+# card's request (the image as stored, the official prompt, greedy decoding, max_tokens 15000);
+# Markdown without positions, converted to text on the host (README.md next to this file; format:
+# docs/RUNNER.md). Run with --cache <dir> holding the weights from make nanonets-ocr2-model.
+name = "nanonets-ocr2-3b"
+engine_version = "1"
+image = "ocrbench/engine-nanonets-ocr2:3B-v1"
+model = "nanonets/Nanonets-OCR2-3B@c3886ff00bb037ce7da24988c9eafaf1fe2bed72"
+
+[params]
+device = "cuda:0"
+max_tokens = 15000  # other parameters: README.md
+# Share of GPU memory for vLLM (weights, CUDA graphs and KV cache), at most 0.6 (ADR 0012).
+gpu_memory_utilization = 0.6
+
+[resources]
+cpus = 4
+memory = "24g"
+gpus = "all"
+shm_size = "4g"
+
+[timeouts]
+sample = 1200
+startup = 1200
