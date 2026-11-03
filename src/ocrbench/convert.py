@@ -16,6 +16,7 @@ from html.parser import HTMLParser
 from typing import Any
 
 from markdown_it import MarkdownIt
+from markdown_it.rules_inline import StateInline
 from markdown_it.token import Token
 from mdit_py_plugins.dollarmath import dollarmath_plugin
 
@@ -97,6 +98,7 @@ def _tidy(text: str) -> str:
 
 def _parser() -> MarkdownIt:
     parser = MarkdownIt("commonmark").enable(["table", "strikethrough"])
+    parser.inline.ruler.before("html_inline", "underscore_tag", _underscore_tag)
     return parser.use(dollarmath_plugin, allow_space=True, double_inline=True)
 
 
@@ -107,26 +109,21 @@ _TEXT_TOKENS = ("text", "code_inline", "math_inline", "math_inline_double")
 _UNDERSCORE_TAG = re.compile(r"</?[A-Za-z][A-Za-z0-9-]*_[A-Za-z0-9_-]*\s*/?>")
 
 
-def _children(token: Token) -> list[Token]:
-    """The inline tokens, with underscore tags in plain text split out as inline HTML."""
-    children: list[Token] = []
-    for child in token.children or []:
-        if child.type != "text" or not _UNDERSCORE_TAG.search(child.content):
-            children.append(child)
-            continue
-        start = 0
-        for match in _UNDERSCORE_TAG.finditer(child.content):
-            if match.start() > start:
-                children.append(Token("text", "", 0, content=child.content[start : match.start()]))
-            children.append(Token("html_inline", "", 0, content=match.group()))
-            start = match.end()
-        if start < len(child.content):
-            children.append(Token("text", "", 0, content=child.content[start:]))
-    return children
+def _underscore_tag(state: StateInline, silent: bool) -> bool:
+    """Inline rule: an underscore tag in the Markdown source is inline HTML. It matches the
+    source before escapes and entities are decoded, so \\<page_number> and &lt;page_number&gt;
+    stay literal text."""
+    match = _UNDERSCORE_TAG.match(state.src, state.pos)
+    if not match:
+        return False
+    if not silent:
+        state.push("html_inline", "", 0).content = match.group()
+    state.pos = match.end()
+    return True
 
 
 def _inline(token: Token) -> str:
-    children = _children(token)
+    children = token.children or []
     if any(child.type == "html_inline" for child in children):
         # Inline HTML uses the HTML rules, so text inside <script>, <style>, … is dropped.
         fragment = []
@@ -236,6 +233,7 @@ class _Node:
     tag: str
     attrs: dict[str, str | None]
     children: list[_Node | str]
+    closed: bool = False  # an <img> whose explicit end (</img> or />) was already seen
 
 
 class _TreeBuilder(HTMLParser):
@@ -256,18 +254,20 @@ class _TreeBuilder(HTMLParser):
             self.stack.append(node)
 
     def handle_startendtag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
-        self.stack[-1].children.append(_Node(tag, dict(attrs), []))
+        self.stack[-1].children.append(_Node(tag, dict(attrs), [], closed=True))
 
     def handle_endtag(self, tag: str) -> None:
         if tag == "img":
             # <img> is void, so an explicit </img> closes nothing; what is between them (an image
-            # description or caption, as Nanonets-OCR2 writes) adds nothing, like alt text.
+            # description or caption, as Nanonets-OCR2 writes) adds nothing, like alt text. An
+            # </img> without an unclosed <img> before it is ignored and drops nothing.
             siblings = self.stack[-1].children
             for index in range(len(siblings) - 1, -1, -1):
                 node = siblings[index]
-                if isinstance(node, _Node) and node.tag == "img":
+                if isinstance(node, _Node) and node.tag == "img" and not node.closed:
                     node.children.extend(siblings[index + 1 :])
                     del siblings[index + 1 :]
+                    node.closed = True
                     return
             return
         for depth in range(len(self.stack) - 1, 0, -1):
