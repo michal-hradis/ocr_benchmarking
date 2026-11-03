@@ -92,7 +92,7 @@ The check box symbols ☐ and ☑ are recognized text, not markup, and are kept.
 - A failed request (for example an out-of-memory error in the server) fails only that sample. If the server exits, that sample and every later one fail with its log tail.
 - Every sample fails when the GPU is unusable, the parameters are invalid, the configured model is not the pinned checkpoint, the model directory is missing or does not match its checksums, or the server does not start (the message has the end of its log).
 
-**Memory.** vLLM reserves `gpu_memory_utilization` of the GPU's memory up front: 0.6 × 24 GB = 14.1 GiB on an RTX 4090. The bfloat16 weights take about 7 GiB of it. The language model keeps about 36 KiB of key/value cache per token (36 layers, 2 key/value heads of 128 dimensions), so a full 32,768-token context needs about 1.2 GiB. The model should therefore fit an RTX 4090 at the benchmark's share; the measured cache size and the peak memory per page are not yet recorded here.
+**Memory.** vLLM reserves `gpu_memory_utilization` of the GPU's memory up front: 0.6 × 24 GB = 14.1 GiB on an RTX 4090. The bfloat16 weights take about 7 GiB of it. The language model keeps about 36 KiB of key/value cache per token (36 layers, 2 key/value heads of 128 dimensions), so a full 32,768-token context needs about 1.2 GiB. It fits an RTX 4090 at the benchmark's share: all seven dev-01 pages, including the 26-megapixel newspaper page at 16,433 prompt tokens, ran without an out-of-memory error. The peak memory per page is not measured.
 
 **Time.** `extra.request_seconds` is the time of the request (inference), `extra.tokens_per_second` the generated tokens per second of it, and the sample's `seconds` the whole page including image encoding. Server start-up is not part of the per-sample engine time.
 
@@ -105,7 +105,12 @@ The check box symbols ☐ and ☑ are recognized text, not markup, and are kept.
 
 ## Results on dev-01
 
-Not yet measured. The development-set results for all seven dev-01 pages go in the pull request for [#99](https://github.com/michal-hradis/ocr_benchmarking/issues/99).
+Measured in run `dev01-nanonets-ocr2-3b-v1` (image `sha256:5c47aed3…`) on an RTX 4090; the scores are in the pull request for [#99](https://github.com/michal-hradis/ocr_benchmarking/issues/99). The development set is seven pages and not representative.
+
+- **Book pages.** The four 1600-pixel German and Latin prints ended normally, at 0.8–10.7 % CER. No long s (ſ) was written in Fraktur, and Fraktur letters are misread (`Dertter`, `daffelbe`). Page numbers came as `<page_number>` tags and are kept as text by converter version 2.
+- **Newspapers: repetition loops.** Both Czech newspaper pages (4194 × 6192 and 3509 × 5239, about 16,400 image tokens each) start with correct Czech text with diacritics. They then fall into a loop that repeats one phrase until `max_tokens` (`truncated`, "the output ends in a repetition loop"). On `3e6309d0` the loop starts after about 10,400 of 31,900 characters, so the output is twice as long as the reference and the CER is above 100 %. On `bd497a62` it starts after about 4,400 characters. The repetition penalty of 1.05 does not prevent it.
+- **Glagolitic page.** The model does not read the script. It returned `<img>original_image.jpg</img>` (dropped by the converter) and `<signature>匿名</signature>` (Japanese for "anonymous", kept as text): CER 100 %.
+- **Time.** About 95–112 generated tokens/s. A book page took 4–9 s and a newspaper page that runs to `max_tokens` about 142 s. Server start-up (load, compilation and CUDA graph capture) took 74 s and is not part of the per-sample time.
 
 ## Tests
 
