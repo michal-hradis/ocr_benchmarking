@@ -181,7 +181,7 @@ def test_blocks_become_positioned_regions_with_markup():
     assert issues == []
     assert [r.text for r in standardized.regions if r.text] == FIXTURE_TEXTS
     assert standardized.text == "\n\n".join(FIXTURE_TEXTS)
-    assert standardized.conversion == {"from": "markdown", "version": 1}
+    assert standardized.conversion == {"from": "markdown", "version": 2}
 
 
 @pytest.mark.parametrize(
@@ -350,7 +350,7 @@ def test_adapter_follows_the_engine_protocol(tmp_path, fake_api):
     assert native == RESPONSE["pages"][0]["markdown"]
     assert records["page"]["findings"] == []
     prediction = json.loads((page / "prediction.json").read_text(encoding="utf-8"))
-    assert prediction["conversion"] == {"from": "markdown", "version": 1}  # converted on the host
+    assert prediction["conversion"] == {"from": "markdown", "version": 2}  # converted on the host
     assert [r["text"] for r in prediction["regions"] if "text" in r] == FIXTURE_TEXTS
     assert (page / "prediction.txt").read_text(encoding="utf-8") == "\n\n".join(FIXTURE_TEXTS)
 
@@ -408,7 +408,7 @@ def test_markdown_preset_converts_the_page_markdown_on_the_host(tmp_path, fake_a
     page = run.path / "samples" / "page" / "attempt-1"
     assert not (page / "output" / "prediction.json").exists()
     prediction = json.loads((page / "prediction.json").read_text(encoding="utf-8"))
-    assert prediction["conversion"] == {"from": "markdown", "version": 1}
+    assert prediction["conversion"] == {"from": "markdown", "version": 2}
     assert "regions" not in prediction or all("polygon" not in r for r in prediction["regions"])
     text = (page / "prediction.txt").read_text(encoding="utf-8")
     assert "**" not in text
@@ -475,7 +475,7 @@ def test_api_smoke_benchmark(tmp_path, mistral_image):
             prediction = json.loads(
                 (run.path / "samples" / "page-1" / "attempt-1" / "prediction.json").read_text()
             )
-            assert prediction["conversion"] == {"from": "markdown", "version": 1}
+            assert prediction["conversion"] == {"from": "markdown", "version": 2}
             assert all("polygon" in region for region in prediction["regions"])
         assert main(["evaluate", str(run.path)]) == 0
         scores = json.loads((run.path / "evaluations" / "1" / "scores.json").read_text())

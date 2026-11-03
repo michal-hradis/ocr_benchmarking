@@ -7,6 +7,7 @@ from pathlib import Path
 import pytest
 from jsonschema import Draft202012Validator
 
+from ocrbench.convert import CONVERTER_VERSION
 from ocrbench.issues import Severity
 from ocrbench.prediction import (
     load_prediction,
@@ -242,7 +243,7 @@ def test_region_markup_is_converted_on_the_host_and_keeps_positions():
     ]
     assert prediction.regions[1].polygon == ((0, 0), (50, 0), (50, 9), (0, 9))
     assert prediction.text == "Kopf\n\nerste Zeile\nzweite"
-    assert prediction.conversion == {"from": "html", "version": 1}
+    assert prediction.conversion == {"from": "html", "version": CONVERTER_VERSION}
     standardized = prediction_to_json(prediction)
     assert "markup" not in standardized["regions"][0]
     assert validate_prediction(standardized)[0] == prediction

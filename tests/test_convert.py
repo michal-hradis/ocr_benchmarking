@@ -87,6 +87,54 @@ def test_markdown_rules(markdown, expected):
     assert regions(convert(markdown, "markdown")) == expected
 
 
+@pytest.mark.parametrize(
+    ("markdown", "expected"),
+    [
+        # converter version 2: a tag with an underscore is markup, its text is kept
+        ("<page_number>14</page_number>", [("text", "14")]),
+        ("Seite <page_number>9/22</page_number> Ende", [("text", "Seite 9/22 Ende")]),
+        (
+            "<watermark>COPY</watermark> und <signature>J. Novák</signature>",
+            [("text", "COPY und J. Novák")],
+        ),
+        ("| a | <page_number>3</page_number> |\n|---|---|\n| b | c |", [("table", "a\t3\nb\tc")]),
+        ("`<page_number>` x", [("text", "<page_number> x")]),  # code stays verbatim
+        ("a <b_c d>", [("text", "a <b_c d>")]),  # not a tag: attributes are not matched
+        # text between <img> and an explicit </img> is a description or caption: nothing
+        ("<img>A drawing of a horse</img>", []),
+        ("Vor <img>Bild *eines* Pferdes</img> nach", [("text", "Vor nach")]),
+        ("<img src=x>after", [("text", "after")]),  # a void <img> still ends at once
+        (
+            "text\n\n<img>\nmultiline\ndescription\n</img>\n\nnext",
+            [
+                ("text", "text"),
+                ("text", "next"),
+            ],
+        ),
+    ],
+)
+def test_markdown_semantic_tags_and_image_text(markdown, expected):
+    assert regions(convert(markdown, "markdown")) == expected
+
+
+@pytest.mark.parametrize(
+    ("content", "expected"),
+    [
+        ("<p>A <img>desc</img> B</p>", "A B"),
+        ("<p>A <img src='x.png'>B</p>", "A B"),
+        ("<img>x <b>y</b></img>Z", "Z"),
+        ("<p><page_number>7</page_number></p>", "7"),
+        ("<p>a</img>b</p>", "ab"),  # a stray </img> drops nothing
+    ],
+)
+def test_html_image_text_and_underscore_tags(content, expected):
+    assert fragment_text(content, "html") == expected
+
+
+def test_converter_version_is_2():
+    assert CONVERTER_VERSION == 2
+
+
 def test_plain_text_is_kept_exactly():
     prediction = convert("  line one\n\n# not a heading\n", "text")
     assert prediction.text == "  line one\n\n# not a heading\n"

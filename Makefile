@@ -18,7 +18,8 @@
         unlimited-ocr-model unlimited-ocr-smoke docker-cu130-vllm030 docker-lightonocr3 \
         lightonocr3-model lightonocr3-smoke docker-mistral-ocr mistral-ocr-smoke \
         docker-openrouter openrouter-smoke docker-docling docling-model docling-smoke \
-        docker-monkeyocrv2 monkeyocrv2-model monkeyocrv2-smoke
+        docker-monkeyocrv2 monkeyocrv2-model monkeyocrv2-smoke docker-nanonets-ocr2 \
+        nanonets-ocr2-model nanonets-ocr2-smoke
 
 UV ?= uv
 BASE_VERSION ?= 1
@@ -55,6 +56,7 @@ NEMOTRON_PARSE_IMAGE := ocrbench/engine-nemotron-parse:3.5-v1
 UNLIMITED_OCR_IMAGE := ocrbench/engine-unlimited-ocr:1.0-v1
 MONKEYOCRV2_IMAGE := ocrbench/engine-monkeyocrv2:2-v1
 LIGHTONOCR3_IMAGE := ocrbench/engine-lightonocr3:3-v1
+NANONETS_OCR2_IMAGE := ocrbench/engine-nanonets-ocr2:3B-v1
 MISTRAL_OCR_IMAGE := ocrbench/engine-mistral-ocr:1-v1
 OPENROUTER_IMAGE := ocrbench/engine-openrouter:2-v2
 # Host directory with the user-supplied PERO OCR model bundles (engines/pero/README.md).
@@ -402,6 +404,16 @@ lightonocr3-model:  ## Download pinned LightOnOCR-3 weights (all 12.8 GB, or CHE
 
 lightonocr3-smoke:  ## Build the LightOnOCR-3 image and run, evaluate and report a synthetic dataset with every preset on the GPU (opt-in; needs lightonocr3-model)
 	$(UV) run --locked pytest -m gpu --run-docker --run-gpu tests/test_lightonocr3.py
+
+docker-nanonets-ocr2:  ## Build the Nanonets-OCR2-3B engine image (needs the vLLM 0.30 base) and print its image ID
+	docker build -t $(NANONETS_OCR2_IMAGE) engines/nanonets-ocr2
+	@docker image inspect --format '$(NANONETS_OCR2_IMAGE) {{.Id}}' $(NANONETS_OCR2_IMAGE)
+
+nanonets-ocr2-model:  ## Download the pinned Nanonets-OCR2-3B weights (7.5 GB) into $(OCRBENCH_CACHE) (opt-in)
+	python3 engines/nanonets-ocr2/fetch_model.py $(OCRBENCH_CACHE)
+
+nanonets-ocr2-smoke:  ## Build the Nanonets-OCR2-3B image and run, evaluate and report a synthetic dataset on the GPU (opt-in; needs nanonets-ocr2-model)
+	$(UV) run --locked pytest -m gpu --run-docker --run-gpu tests/test_nanonets_ocr2.py
 
 docker-mistral-ocr:  ## Build the Mistral OCR 4.1 hosted-API engine image (needs the CPU base) and print its image ID
 	docker build -t $(MISTRAL_OCR_IMAGE) engines/mistral-ocr

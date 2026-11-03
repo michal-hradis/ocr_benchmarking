@@ -479,7 +479,7 @@ def test_markdown_answers_are_converted_on_the_host(tmp_path, fake_api):
     page = run.path / "samples" / "markup" / "attempt-1"
     assert (page / "output" / "page.md").read_text(encoding="utf-8") == MARKDOWN  # native
     prediction = json.loads((page / "prediction.json").read_text(encoding="utf-8"))
-    assert prediction["conversion"] == {"from": "markdown", "version": 1}
+    assert prediction["conversion"] == {"from": "markdown", "version": 2}
     assert (page / "prediction.txt").read_text(encoding="utf-8") == FIXTURE_TEXT
 
 

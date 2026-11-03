@@ -26,7 +26,9 @@ from ocrbench.prediction import (
     REGION_SEPARATOR,
 )
 
-CONVERTER_VERSION = 1
+# Version 2: tags with an underscore in their name (<page_number>) are inline markup in Markdown;
+# text between <img> and an explicit </img> adds nothing.
+CONVERTER_VERSION = 2
 FORMATS = ("text", "markdown", "html")
 SUFFIXES = {".txt": "text", ".md": "markdown", ".markdown": "markdown", ".html": "html"}
 SUFFIXES[".htm"] = "html"
@@ -99,10 +101,32 @@ def _parser() -> MarkdownIt:
 
 
 _TEXT_TOKENS = ("text", "code_inline", "math_inline", "math_inline_double")
+# A start or end tag with an underscore in its name, such as Nanonets-OCR2's <page_number>. HTML
+# allows such names, CommonMark does not, so Markdown would keep the tag as text: it is treated as
+# inline HTML instead.
+_UNDERSCORE_TAG = re.compile(r"</?[A-Za-z][A-Za-z0-9-]*_[A-Za-z0-9_-]*\s*/?>")
+
+
+def _children(token: Token) -> list[Token]:
+    """The inline tokens, with underscore tags in plain text split out as inline HTML."""
+    children: list[Token] = []
+    for child in token.children or []:
+        if child.type != "text" or not _UNDERSCORE_TAG.search(child.content):
+            children.append(child)
+            continue
+        start = 0
+        for match in _UNDERSCORE_TAG.finditer(child.content):
+            if match.start() > start:
+                children.append(Token("text", "", 0, content=child.content[start : match.start()]))
+            children.append(Token("html_inline", "", 0, content=match.group()))
+            start = match.end()
+        if start < len(child.content):
+            children.append(Token("text", "", 0, content=child.content[start:]))
+    return children
 
 
 def _inline(token: Token) -> str:
-    children = token.children or []
+    children = _children(token)
     if any(child.type == "html_inline" for child in children):
         # Inline HTML uses the HTML rules, so text inside <script>, <style>, … is dropped.
         fragment = []
@@ -235,6 +259,17 @@ class _TreeBuilder(HTMLParser):
         self.stack[-1].children.append(_Node(tag, dict(attrs), []))
 
     def handle_endtag(self, tag: str) -> None:
+        if tag == "img":
+            # <img> is void, so an explicit </img> closes nothing; what is between them (an image
+            # description or caption, as Nanonets-OCR2 writes) adds nothing, like alt text.
+            siblings = self.stack[-1].children
+            for index in range(len(siblings) - 1, -1, -1):
+                node = siblings[index]
+                if isinstance(node, _Node) and node.tag == "img":
+                    node.children.extend(siblings[index + 1 :])
+                    del siblings[index + 1 :]
+                    return
+            return
         for depth in range(len(self.stack) - 1, 0, -1):
             if self.stack[depth].tag == tag:
                 del self.stack[depth:]

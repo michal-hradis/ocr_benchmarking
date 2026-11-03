@@ -271,7 +271,7 @@ def test_blocks_become_positioned_regions_with_markup():
     assert issues == []
     assert [r.text for r in standardized.regions if r.text] == FIXTURE_TEXTS
     assert standardized.text == "\n\n".join(FIXTURE_TEXTS)
-    assert standardized.conversion == {"from": "markdown", "version": 1}
+    assert standardized.conversion == {"from": "markdown", "version": 2}
 
 
 def test_tail_repetition():
@@ -418,7 +418,7 @@ def test_grounding_follows_the_engine_protocol(tmp_path):
     assert engine_prediction["text"] == ""
     assert "markup" in engine_prediction["regions"][0]
     prediction = json.loads((page / "prediction.json").read_text(encoding="utf-8"))
-    assert prediction["conversion"] == {"from": "markdown", "version": 1}  # converted on the host
+    assert prediction["conversion"] == {"from": "markdown", "version": 2}  # converted on the host
     regions = prediction["regions"]
     assert [r["text"] for r in regions if "text" in r] == FIXTURE_TEXTS
     assert all("markup" not in r for r in regions)
@@ -521,7 +521,7 @@ def test_plain_mode_writes_markdown_converted_on_the_host(tmp_path):
     native = (page / "output" / "page.md").read_text(encoding="utf-8")
     assert native == (FIXTURES / "page.md").read_text(encoding="utf-8")  # unchanged
     prediction = json.loads((page / "prediction.json").read_text(encoding="utf-8"))
-    assert prediction["conversion"] == {"from": "markdown", "version": 1}
+    assert prediction["conversion"] == {"from": "markdown", "version": 2}
     assert all("polygon" not in r for r in prediction["regions"])  # no positions are invented
     assert (page / "prediction.txt").read_text(encoding="utf-8") == "\n\n".join(PAGE_TEXTS)
     extra = records["page"]["engine_extra"]
@@ -659,7 +659,7 @@ def test_gpu_smoke_benchmark(tmp_path, lightonocr3_image, preset):
         prediction = json.loads(
             (run.path / "samples" / sid / "attempt-1" / "prediction.json").read_text()
         )
-        assert prediction["conversion"] == {"from": "markdown", "version": 1}
+        assert prediction["conversion"] == {"from": "markdown", "version": 2}
         assert "**" not in prediction["text"]  # markup converted on the host
         if config["params"]["mode"] == "grounding":
             assert prediction["reading_order"]

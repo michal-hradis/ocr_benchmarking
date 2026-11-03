@@ -141,7 +141,7 @@ def test_every_sample_gets_a_record_and_valid_outputs_a_prediction(tmp_path):
     md = attempt_dir(run, "md")
     assert (md / "prediction.txt").read_text(encoding="utf-8") == "md\n\nText of md."
     prediction = json.loads((md / "prediction.json").read_text(encoding="utf-8"))
-    assert prediction["conversion"] == {"from": "markdown", "version": 1}
+    assert prediction["conversion"] == {"from": "markdown", "version": 2}
     assert (md / "output" / "page.md").read_text(encoding="utf-8").startswith("# md")
     record = records(run)["md"]
     assert record["primary"] == "page.md"
