@@ -91,8 +91,7 @@ def parse_params(params: dict[str, Any]) -> dict[str, Any]:
     tokens = merged["max_tokens"]
     if type(tokens) is not int or not 1 <= tokens < CONTEXT:
         raise AdapterError(
-            f"max_tokens must be an integer from 1 to below the {CONTEXT}-token context: "
-            f"{tokens!r}"
+            f"max_tokens must be an integer from 1 to below the {CONTEXT}-token context: {tokens!r}"
         )
     temperature = merged["temperature"]
     if type(temperature) not in (int, float) or not 0 <= temperature <= 2:

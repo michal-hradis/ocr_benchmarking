@@ -100,10 +100,23 @@ def test_markdown_rules(markdown, expected):
         ("| a | <page_number>3</page_number> |\n|---|---|\n| b | c |", [("table", "a\t3\nb\tc")]),
         ("`<page_number>` x", [("text", "<page_number> x")]),  # code stays verbatim
         ("a <b_c d>", [("text", "a <b_c d>")]),  # not a tag: attributes are not matched
+        # an escaped or entity-encoded tag is literal text, not markup
+        (r"\<page_number>14\</page_number>", [("text", "<page_number>14</page_number>")]),
+        (
+            "&lt;page_number&gt;14&lt;/page_number&gt;",
+            [("text", "<page_number>14</page_number>")],
+        ),
+        (r"a \<x_y> <b>c</b>", [("text", "a <x_y> c")]),  # also next to real inline HTML
+        ("&#60;page_number>7", [("text", "<page_number>7")]),
         # text between <img> and an explicit </img> is a description or caption: nothing
         ("<img>A drawing of a horse</img>", []),
         ("Vor <img>Bild *eines* Pferdes</img> nach", [("text", "Vor nach")]),
         ("<img src=x>after", [("text", "after")]),  # a void <img> still ends at once
+        # a second </img> closes nothing and drops nothing
+        (
+            "Before <img>description</img> Important text </img> After",
+            [("text", "Before Important text After")],
+        ),
         (
             "text\n\n<img>\nmultiline\ndescription\n</img>\n\nnext",
             [
@@ -125,6 +138,13 @@ def test_markdown_semantic_tags_and_image_text(markdown, expected):
         ("<img>x <b>y</b></img>Z", "Z"),
         ("<p><page_number>7</page_number></p>", "7"),
         ("<p>a</img>b</p>", "ab"),  # a stray </img> drops nothing
+        # an <img> already closed is not closed again by a later </img>
+        (
+            "<p>Before <img>description</img> Important text </img> After</p>",
+            "Before Important text After",
+        ),
+        ("<p>A <img src='x.png'/> B</img> C</p>", "A B C"),
+        ("<p><img>a</img> b <img>c</img> d</img> e</p>", "b d e"),
     ],
 )
 def test_html_image_text_and_underscore_tags(content, expected):
