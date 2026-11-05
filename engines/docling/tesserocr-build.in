@@ -1,0 +1,6 @@
+# Build requirements of tesserocr 2.12.0 (setup_requires Cython>=3.1.8,<3.4.0; a setuptools build),
+# used only in the Dockerfile's tesserocr build stage, which compiles it against Ubuntu's
+# libtesseract 5.3.4 (README.md#versions). Nothing from this file reaches the engine image.
+Cython==3.3.0
+setuptools==80.9.0
+wheel==0.45.1

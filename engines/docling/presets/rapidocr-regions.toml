@@ -3,8 +3,8 @@
 # (../README.md#ocr-modes; format: docs/RUNNER.md). Run with --cache <dir> holding the models
 # from make docling-model.
 name = "docling-rapidocr-regions"
-engine_version = "1"
-image = "ocrbench/engine-docling:2.145.0-v1"
+engine_version = "2"
+image = "ocrbench/engine-docling:2.145.0-v2"
 model = "docling-2.145.0@layout-heron-8f39ad3c,tableformer-accurate-fc0f2d45,rapidocr-3.10.0-PP-OCRv5-latin-mobile"
 
 [params]

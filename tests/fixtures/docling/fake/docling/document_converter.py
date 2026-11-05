@@ -5,13 +5,25 @@ out-of-memory error; 777: a failed conversion; 888: a partial conversion (blank 
 page whose size is the image turned by 90 degrees; 910: a blank page with one OCR cell in a
 cluster that no item uses; any other width: the blank page with that
 image size. The input must be a TIFF at 72 x ocr_scale DPI, and every conversion logs a warning.
-The pipeline's RapidOCR reader has RapidOCR 3.10.0's settings and the pinned models; the OCR model
-is asked for its crops once per page: the whole page in full_page mode, else the layout clusters.
-RapidOCR preprocesses each crop of non-zero area at 3 pixels per point, without resizing it.
+
+With RapidOCR, the outputs are those of preset docling (../../<name>/). The pipeline's RapidOCR
+reader has RapidOCR 3.10.0's settings and the pinned models; the OCR model is asked for its crops
+once per page: the whole page in full_page mode, else the layout clusters. RapidOCR preprocesses
+each crop of non-zero area at 3 pixels per point, without resizing it.
+
+With the Tesseract command line (tesseract) or the tesserocr bindings, the outputs are those of
+preset docling-tesseract-cli (../../tesseract-cli/<name>/) or docling-tesserocr
+(../../tesserocr/<name>/) for page, paragraph, newspaper and table, else blank. The OCR model
+reports the languages in TESSDATA_PREFIX and the Tesseract version FAKE_TESSERACT_VERSION (default
+5.3.4). The command line is called once per call recorded in tesseract.json, with that call's
+image size, OSD orientation and TSV rows; at width 555 the call fails, which Docling logs and
+skips. The bindings read the whole page once, with one OSD pass, finding the page's OCR cells.
 """
 
 import json
 import logging
+import os
+import tempfile
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -21,6 +33,7 @@ from docling.datamodel.base_models import ConversionStatus, InputFormat
 
 FIXTURES = Path(__file__).resolve().parents[2]
 RESULTS = {900: "page", 520: "paragraph", 1000: "columns", 1500: "newspaper", 1200: "table"}
+TESSERACT_RESULTS = {"tesseract": "tesseract-cli", "tesserocr": "tesserocr"}
 RAPIDOCR = {
     "Global": {
         "text_score": 0.5,
@@ -83,35 +96,133 @@ class _Document:
         return "\n\n".join(t["text"] for t in self.data["texts"])
 
 
+class _Rows:
+    """The part of a pandas DataFrame of TSV rows that the adapter reads."""
+
+    def __init__(self, records):
+        self.records = records
+
+    def __len__(self):
+        return len(self.records)
+
+    def to_dict(self, orient):
+        assert orient == "records"
+        return [dict(record) for record in self.records]
+
+
+class _Reader:
+    """A tesserocr PyTessBaseAPI: an image, its text lines and the settings it was made with."""
+
+    def __init__(self, options, lines, osd=False):
+        self.options, self.lines, self.osd = options, lines, osd
+
+    def SetImage(self, image):
+        self.image = image
+
+    def DetectOrientationScript(self):
+        assert self.osd
+        return {"orient_deg": 0, "script_name": "Latin"}
+
+    def GetComponentImages(self, level, text_only):
+        return [None] * self.lines()
+
+    def GetDatapath(self):
+        return self.options.path + "/"
+
+    def GetInitLanguagesAsString(self):
+        return "osd" if self.osd else "+".join(self.options.lang)
+
+    def GetPageSegMode(self):
+        return 0 if self.osd else self.options.psm
+
+    def oem(self):
+        return 3
+
+
 class DocumentConverter:
     def __init__(self, allowed_formats, format_options):
         assert allowed_formats == [InputFormat.IMAGE]
         self.options = format_options[InputFormat.IMAGE].pipeline_options
-        assert (
-            self.options.ocr_options.rapidocr_params["EngineConfig.onnxruntime.use_cuda"] is False
-        )
+        self.kind = self.options.ocr_options.kind
+        if self.kind == "rapidocr":
+            params = self.options.ocr_options.rapidocr_params
+            assert params["EngineConfig.onnxruntime.use_cuda"] is False
         self.initialized = False
         reader = SimpleNamespace(cfg=None, preprocess_img=lambda image: (image, {}))
         self.ocr_model = SimpleNamespace(reader=reader, get_ocr_rects=None)
+        self.calls = []
 
     def initialize_pipeline(self, input_format):
         assert input_format == InputFormat.IMAGE
         self.initialized = True
-        cfg = {section: dict(values) for section, values in RAPIDOCR.items()}
-        for values in cfg.values():
-            if "model_path" in values:
-                values["model_path"] = Path(self.options.artifacts_path) / values["model_path"]
-        self.ocr_model.reader.cfg = cfg
-        self.ocr_model.get_ocr_rects = self._ocr_rects
+        model = self.ocr_model
+        model.get_ocr_rects = self._ocr_rects
+        if self.kind == "rapidocr":
+            cfg = {section: dict(values) for section, values in RAPIDOCR.items()}
+            for values in cfg.values():
+                if "model_path" in values:
+                    values["model_path"] = Path(self.options.artifacts_path) / values["model_path"]
+            model.reader.cfg = cfg
+            return
+        options = self.options.ocr_options
+        tessdata = Path(os.environ["TESSDATA_PREFIX"])
+        assert Path(options.path) == tessdata
+        model.options = options
+        model._auto_script = not options.lang
+        model._tesseract_vocabulary = sorted(p.stem for p in tessdata.glob("*.traineddata"))
+        if self.kind == "tesseract":
+            version = os.environ.get("FAKE_TESSERACT_VERSION", "5.3.4")
+            model._get_name_and_version = lambda: ("tesseract", version)
+            model._safe_tesseract_cmd = options.tesseract_cmd
+            model._safe_tessdata_path = str(Path(options.path).resolve())
+            model._native_codes = list(options.lang)
+            model._run_tesseract = self._run_tesseract
+        else:
+            model._reader = _Reader(options, lambda: self.lines)
+            model._osd_reader = _Reader(options, lambda: 0, osd=True)
 
     def _ocr_rects(self, page):
+        size = page["size"]
         if self.options.ocr_options.mode.value == "full_page":
-            size = page["size"]
             boxes = [{"l": 0, "t": 0, "r": size["width"], "b": size["height"]}]
+        elif self.kind != "rapidocr":  # one crop per recorded call, the bindings: the page once
+            crops = len(self.calls) if self.kind == "tesseract" else int(bool(page["clusters"]))
+            boxes = [{"l": 0, "t": 0, "r": size["width"], "b": size["height"]}] * crops
         else:
             boxes = [cluster["bbox"] for cluster in page["clusters"]]
         origin = SimpleNamespace(value="TOPLEFT")
         return [SimpleNamespace(coord_origin=origin, **{k: b[k] for k in "ltrb"}) for b in boxes]
+
+    def _run_tesseract(self, filename, osd):
+        if self.width == 555:
+            raise RuntimeError("tesseract returned non-zero exit status 1 (fake)")
+        return _Rows(self.rows.pop(0))
+
+    def _tesseract_ocr(self, page):
+        """Docling's Tesseract models: per crop, OSD, then the command line or the bindings."""
+        model = self.ocr_model
+        for rect, call in zip(model.get_ocr_rects(page), self.calls or [None], strict=False):
+            size = (round((rect.r - rect.l) * 3), round((rect.b - rect.t) * 3))
+            if self.kind == "tesserocr":
+                image = Image.new("L", size, 255)
+                model._osd_reader.SetImage(image)
+                model._osd_reader.DetectOrientationScript()
+                model._reader.SetImage(image)
+                self.lines = sum(len(c["cells"]) for c in page["clusters"])
+                model._reader.GetComponentImages(None, True)
+                continue
+            orientation = call["osd_orientation"]
+            osd = None
+            if orientation is not None:
+                osd = {"key": ["Orientation in degrees"], "value": [f" {orientation}"]}
+            with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as file:
+                Image.new("L", call["image"], 255).save(file, format="PNG")
+            try:
+                model._run_tesseract(file.name, osd)
+            except RuntimeError as error:
+                logging.getLogger("docling.fake").error("tesseract OCR failed: %s", error)
+            finally:
+                os.remove(file.name)
 
     def _get_pipeline(self, input_format):
         assert self.initialized
@@ -133,8 +244,20 @@ class DocumentConverter:
             error = SimpleNamespace(component_type="pipeline", error_message="fake failure")
             return SimpleNamespace(status=ConversionStatus.FAILURE, errors=[error])
         name = RESULTS.get(width, "blank")
-        document = json.loads((FIXTURES / name / "docling.json").read_text(encoding="utf-8"))
-        layout = json.loads((FIXTURES / name / "docling_layout.json").read_text(encoding="utf-8"))
+        directory = FIXTURES / name
+        self.width, self.calls, self.rows = width, [], []
+        if self.kind != "rapidocr":
+            directory = FIXTURES / TESSERACT_RESULTS[self.kind] / name
+            if not directory.is_dir():
+                name, directory = "blank", directory.parent / "blank"
+        document = json.loads((directory / "docling.json").read_text(encoding="utf-8"))
+        layout = json.loads((directory / "docling_layout.json").read_text(encoding="utf-8"))
+        if self.kind == "tesseract":
+            native = json.loads((directory / "tesseract.json").read_text(encoding="utf-8"))
+            self.calls = native["calls"]
+            self.rows = [call["rows"] for call in self.calls]
+            if width == 555:  # a failing call on an otherwise blank page
+                self.calls = [{"image": [width, height], "osd_orientation": 0, "rows": []}]
         if name == "blank":
             size = {"width": width * 72 / dpi, "height": height * 72 / dpi}
             if width == 999:
@@ -156,7 +279,9 @@ class DocumentConverter:
                     }
                 ]
         page = layout["pages"][0]
-        for rect in self.ocr_model.get_ocr_rects(page):
+        if self.kind != "rapidocr":
+            self._tesseract_ocr(page)
+        for rect in self.ocr_model.get_ocr_rects(page) if self.kind == "rapidocr" else []:
             crop = (round((rect.b - rect.t) * 3), round((rect.r - rect.l) * 3), 3)
             if crop[0] and crop[1]:
                 self.ocr_model.reader.preprocess_img(SimpleNamespace(shape=crop))
