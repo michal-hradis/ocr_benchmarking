@@ -3,19 +3,22 @@
 It follows the engine protocol in docs/RUNNER.md: read $OCRBENCH_INPUT/job.json, check the pinned
 models in the /cache volume, build one Docling DocumentConverter for image input with the standard
 pipeline (layout analysis, OCR of the layout regions or of the full page, TableFormer, reading
-order) and convert every sample image in job order. Each image is decoded as stored (EXIF
-orientation not applied) and handed to Docling as an uncompressed TIFF at a fixed nominal resolution
-of 72 x ocr_scale DPI, so that Docling crops the original pixels 1:1 for OCR whatever the file's own
-DPI says; result.json records the crops and how RapidOCR resized each. Every sample directory
-gets the native DoclingDocument (docling.json), its Markdown export (docling.md), Docling's layout
-clusters with their OCR cells (docling_layout.json), the standardized prediction.json and, last,
-result.json.
+order) and convert every sample image in job order. The OCR engine is RapidOCR, Tesseract
+through its command line or Tesseract through the tesserocr bindings, Docling's own integrations
+of each. Each image is decoded as stored (EXIF orientation not applied) and handed to Docling as an
+uncompressed TIFF at a fixed nominal resolution of 72 x ocr_scale DPI, so that Docling crops the
+original pixels 1:1 for OCR whatever the file's own DPI says; result.json records the crops and
+what the OCR engine made of each. Every sample directory gets the native DoclingDocument
+(docling.json), its Markdown export (docling.md), Docling's layout clusters with their OCR cells
+(docling_layout.json), with the Tesseract command line also the TSV rows Tesseract returned for
+every crop (tesseract.json), the standardized prediction.json and, last, result.json.
 
 The prediction (``to_prediction``) has one region per provenance box of every DoclingDocument
 item, in the document's reading order, and as lines the OCR cells of the layout cluster the box
 came from: their raw OCR text and their boxes, mapped from Docling's page coordinates (points) to
-the pixels of the input image. Docling's own item text, which joins the lines, removes hyphens at
-line ends and replaces typographic quotes, stays in the native files.
+the pixels of the input image. The Tesseract command line gives Docling one cell per word; those
+are grouped into Tesseract's own lines (``tesseract_lines``). Docling's own item text, which joins
+the lines, removes hyphens at line ends and replaces typographic quotes, stays in the native files.
 """
 
 from __future__ import annotations
@@ -27,6 +30,7 @@ import logging
 import math
 import os
 import re
+import shutil
 import sys
 import time
 from importlib import metadata
@@ -37,6 +41,19 @@ from typing import Any
 CACHE = Path(os.environ.get("OCRBENCH_DOCLING_CACHE", "/cache"))
 MODELS_DIR = "models/docling"  # relative to the cache: Docling's artifacts_path
 CHECKSUMS = Path(os.environ.get("OCRBENCH_DOCLING_CHECKSUMS", "/opt/ocrbench/models.sha256"))
+# The tessdata_best models of engines/tesseract, read from the same place in the cache (make
+# tesseract-best), with a copy of that engine's checksums; the osd model and Tesseract's output
+# configs come from the image's tessdata (tessdata.sha256, checked when the image is built).
+TESSDATA_BEST_REVISION = "e12c65a915945e4c28e237a9b52bc4a8f39a0cec"
+TESSDATA_BEST_DIR = f"models/tesseract/tessdata_best/{TESSDATA_BEST_REVISION}"  # below the cache
+TESSDATA_CHECKSUMS = Path(
+    os.environ.get("OCRBENCH_DOCLING_TESSDATA_CHECKSUMS", "/opt/ocrbench/tessdata_best.sha256")
+)
+SYSTEM_TESSDATA = Path(
+    os.environ.get("OCRBENCH_DOCLING_SYSTEM_TESSDATA", "/usr/share/tesseract-ocr/5/tessdata")
+)
+# The tessdata directory Tesseract is given: links to exactly the preset's models, osd and configs.
+TESSDATA = Path(os.environ.get("OCRBENCH_DOCLING_TESSDATA", "/tmp/ocrbench-tessdata"))
 # Engine parameters (job.json "params"), README.md.
 DEFAULT_PARAMS: dict[str, Any] = {
     "device": "cuda:0",
@@ -47,17 +64,30 @@ DEFAULT_PARAMS: dict[str, Any] = {
     "table_structure": True,
     "document_timeout": None,
     "num_threads": 4,
+    "psm": None,
 }
-OCR_ENGINES = ("rapidocr",)  # further OCR engines come with their presets (#79-#81)
-# RapidOCR languages whose recognition model is pinned in models.sha256 (PP-OCRv5 Latin).
-OCR_LANGS = ("latin",)
-# The pipeline identity of the pinned Docling version and model bundle; the engine
+# Docling's OCR engines (the ``kind`` of their options): RapidOCR, the Tesseract command line and
+# the tesserocr bindings. Further engines come with their presets (#80, #81).
+OCR_ENGINES = ("rapidocr", "tesseract", "tesserocr")
+TESSERACT_ENGINES = ("tesseract", "tesserocr")
+# Languages whose recognition model is pinned: RapidOCR's PP-OCRv5 Latin (models.sha256, one
+# language) and the tessdata_best models (tessdata_best.sha256, one or more, joined by Tesseract).
+TESSERACT_LANGS = ("ces", "deu", "deu_latf", "eng")
+OCR_LANGS = {"rapidocr": ("latin",), "tesseract": TESSERACT_LANGS, "tesserocr": TESSERACT_LANGS}
+# Tesseract page segmentation modes that recognize text (0 and 2 do not).
+TESSERACT_PSMS = (1, *range(3, 14))
+# The pipeline identity of the pinned Docling version and models per OCR engine; the engine
 # configuration's ``model`` must name exactly this, so results cannot be attributed to other
 # models than the ones that ran.
-MODEL = (
-    "docling-2.145.0@layout-heron-8f39ad3c,tableformer-accurate-fc0f2d45,"
-    "rapidocr-3.10.0-PP-OCRv5-latin-mobile"
-)
+_LAYOUT = "docling-2.145.0@layout-heron-8f39ad3c,tableformer-accurate-fc0f2d45"
+MODELS = {
+    "rapidocr": f"{_LAYOUT},rapidocr-3.10.0-PP-OCRv5-latin-mobile",
+    "tesseract": f"{_LAYOUT},tesseract-5.3.4-cli-tessdata_best-e12c65a",
+    "tesserocr": f"{_LAYOUT},tesserocr-2.12.0-tesseract-5.3.4-tessdata_best-e12c65a",
+}
+MODEL = MODELS["rapidocr"]
+TESSERACT_VERSION = "5.3.4"
+TESSEROCR_VERSION = "2.12.0"
 OCR_MODES = ("default", "layout_regions", "full_page")
 # The RapidOCR model each stage must load, relative to the models directory: Docling resolves
 # them from artifacts_path, and anything else (a fallback, a download) fails the run.
@@ -131,14 +161,34 @@ def parse_params(params: dict[str, Any]) -> dict[str, Any]:
     device = merged["device"]
     if not isinstance(device, str) or not re.fullmatch(r"cuda:[0-9]+|cpu", device):
         raise AdapterError(f"device must be 'cuda:<n>' or 'cpu': {device!r}")
-    if merged["ocr_engine"] not in OCR_ENGINES:
-        raise AdapterError(f"ocr_engine must be one of {OCR_ENGINES}: {merged['ocr_engine']!r}")
-    lang = merged["ocr_lang"]
-    if not isinstance(lang, list) or len(lang) != 1 or lang[0] not in OCR_LANGS:
+    engine = merged["ocr_engine"]
+    if engine not in OCR_ENGINES:
+        raise AdapterError(f"ocr_engine must be one of {OCR_ENGINES}: {engine!r}")
+    lang, langs = merged["ocr_lang"], OCR_LANGS[engine]
+    if engine == "rapidocr":
+        if not isinstance(lang, list) or len(lang) != 1 or lang[0] not in langs:
+            raise AdapterError(
+                f"ocr_lang must be one of {[[code] for code in langs]} (the recognizers with "
+                f"pinned models): {lang!r}"
+            )
+    elif (
+        not isinstance(lang, list)
+        or not lang
+        or len(set(lang)) != len(lang)
+        or any(code not in langs for code in lang)
+    ):
+        # An empty list would make Tesseract detect the script itself; the language is part of
+        # the frozen configuration instead.
         raise AdapterError(
-            f"ocr_lang must be one of {[[code] for code in OCR_LANGS]} (the recognizers with "
-            f"pinned models): {lang!r}"
+            f"ocr_lang must be a non-empty list of distinct tessdata_best models {langs} for "
+            f"{engine}: {lang!r}"
         )
+    psm = merged["psm"]
+    if engine in TESSERACT_ENGINES:
+        if type(psm) is not int or psm not in TESSERACT_PSMS:
+            raise AdapterError(f"psm must be one of {TESSERACT_PSMS} for {engine}: {psm!r}")
+    elif psm is not None:
+        raise AdapterError(f"psm is a Tesseract setting and must be null for {engine}: {psm!r}")
     if merged["ocr_mode"] not in OCR_MODES:
         raise AdapterError(f"ocr_mode must be one of {OCR_MODES}: {merged['ocr_mode']!r}")
     scale = merged["ocr_scale"]
@@ -157,10 +207,11 @@ def parse_params(params: dict[str, Any]) -> dict[str, Any]:
     return merged
 
 
-def check_model(model: Any) -> None:
-    """The job's model identity must be the pinned bundle this image and models.sha256 run."""
-    if model != MODEL:
-        raise AdapterError(f"model must be {MODEL!r}, the pinned Docling models: {model!r}")
+def check_model(model: Any, params: dict[str, Any]) -> None:
+    """The job's model identity must be the pinned bundle this image runs with the OCR engine."""
+    expected = MODELS[params["ocr_engine"]]
+    if model != expected:
+        raise AdapterError(f"model must be {expected!r}, the pinned Docling models: {model!r}")
 
 
 def nominal_dpi(params: dict[str, Any]) -> float:
@@ -176,29 +227,88 @@ def sha256(path: Path) -> str:
     return digest.hexdigest()
 
 
-def pinned_checksums() -> dict[str, str]:
-    """``<file below the artifacts directory>``: SHA-256, from models.sha256."""
-    lines = CHECKSUMS.read_text(encoding="utf-8").splitlines()
+def read_checksums(path: Path) -> dict[str, str]:
+    """``<file name>``: SHA-256, from a ``sha256sum`` file."""
+    lines = path.read_text(encoding="utf-8").splitlines()
     return {name: digest for digest, name in (line.split() for line in lines if line.strip())}
 
 
-def model_files() -> dict[str, str]:
-    """SHA-256 of every pinned model file; raises AdapterError unless all are present and match."""
+def pinned_checksums() -> dict[str, str]:
+    """``<file below the artifacts directory>``: SHA-256, from models.sha256."""
+    return read_checksums(CHECKSUMS)
+
+
+def verified(directory: Path, checksums: dict[str, str], source: str) -> dict[str, str]:
+    """SHA-256 of the files; raises AdapterError unless all are present and match ``source``."""
+    files, bad = {}, []
+    for name, digest in checksums.items():
+        path = directory / name
+        files[name] = sha256(path) if path.is_file() else None
+        if files[name] != digest:
+            bad.append(name)
+    if bad:
+        raise AdapterError(f"model files missing or not matching {source}: {bad}")
+    return files
+
+
+def model_files(params: dict[str, Any]) -> dict[str, str]:
+    """SHA-256 of the pinned Docling model files the preset uses (RapidOCR's only with RapidOCR).
+
+    Raises AdapterError unless all are present and match models.sha256.
+    """
     directory = CACHE / MODELS_DIR
     if not directory.is_dir():
         raise AdapterError(
             f"model directory {directory} does not exist; download the models with "
             "make docling-model and run with --cache (README.md)"
         )
-    files, bad = {}, []
-    for name, digest in pinned_checksums().items():
-        path = directory / name
-        files[name] = sha256(path) if path.is_file() else None
-        if files[name] != digest:
-            bad.append(name)
-    if bad:
-        raise AdapterError(f"model files missing or not matching models.sha256: {bad}")
-    return files
+    checksums = {
+        name: digest
+        for name, digest in pinned_checksums().items()
+        if params["ocr_engine"] == "rapidocr" or not name.startswith("RapidOcr/")
+    }
+    return verified(directory, checksums, "models.sha256")
+
+
+def tessdata_files(params: dict[str, Any]) -> dict[str, str]:
+    """SHA-256 of the tessdata_best models in ``ocr_lang``.
+
+    Raises AdapterError unless they are present and match tessdata_best.sha256.
+    """
+    directory = CACHE / TESSDATA_BEST_DIR
+    if not directory.is_dir():
+        raise AdapterError(
+            f"tessdata directory {directory} does not exist; download the models with "
+            "make tesseract-best and run with --cache (README.md)"
+        )
+    pinned = read_checksums(TESSDATA_CHECKSUMS)
+    names = [f"{code}.traineddata" for code in params["ocr_lang"]]
+    unknown = [name for name in names if name not in pinned]
+    if unknown:
+        raise AdapterError(f"models not in tessdata_best.sha256: {unknown}")
+    return verified(directory, {name: pinned[name] for name in names}, "tessdata_best.sha256")
+
+
+def tessdata_directory(params: dict[str, Any]) -> Path:
+    """The tessdata directory for Tesseract, with only the preset's models, osd and configs.
+
+    Links to the verified tessdata_best files in the cache, the image's osd model (Docling runs
+    orientation detection on every crop) and its output configs (the command line's ``tsv``).
+    TESSDATA_PREFIX points to it as well, because Docling lists the languages and runs the
+    orientation detection of the command line without ``--tessdata-dir``.
+    """
+    if TESSDATA.exists():
+        shutil.rmtree(TESSDATA)
+    TESSDATA.mkdir(parents=True)
+    for code in params["ocr_lang"]:
+        name = f"{code}.traineddata"
+        (TESSDATA / name).symlink_to(CACHE / TESSDATA_BEST_DIR / name)
+    for name in ("osd.traineddata", "configs"):
+        if not (SYSTEM_TESSDATA / name).exists():
+            raise AdapterError(f"{SYSTEM_TESSDATA / name} is missing from the image")
+        (TESSDATA / name).symlink_to(SYSTEM_TESSDATA / name)
+    os.environ["TESSDATA_PREFIX"] = str(TESSDATA)
+    return TESSDATA
 
 
 def environment(device: str) -> dict[str, Any]:
@@ -227,28 +337,45 @@ def environment(device: str) -> dict[str, Any]:
     return info
 
 
-def pipeline_options(params: dict[str, Any]) -> Any:
+def pipeline_options(params: dict[str, Any], tessdata: Path | None = None) -> Any:
     """Docling's standard pipeline options for the preset; everything else keeps the defaults.
 
     The models come from the artifacts directory only, remote services and external plugins are
     off, and RapidOCR runs on the CPU (onnxruntime) whatever the layout device is: the image has
-    the CPU build of onnxruntime, and Docling would otherwise ask it for CUDA.
+    the CPU build of onnxruntime, and Docling would otherwise ask it for CUDA. Tesseract (CPU
+    only) reads the models in ``tessdata`` with the preset's languages and page segmentation.
     """
     from docling.datamodel.accelerator_options import AcceleratorOptions
-    from docling.datamodel.pipeline_options import OcrMode, PdfPipelineOptions, RapidOcrOptions
-
-    ocr = RapidOcrOptions(
-        lang=params["ocr_lang"],
-        backend="onnxruntime",
-        mode=OcrMode(params["ocr_mode"]),
-        scale=params["ocr_scale"],
-        rapidocr_params={
-            "EngineConfig.onnxruntime.use_cuda": False,
-            "Det.use_cuda": False,
-            "Cls.use_cuda": False,
-            "Rec.use_cuda": False,
-        },
+    from docling.datamodel.pipeline_options import (
+        OcrMode,
+        PdfPipelineOptions,
+        RapidOcrOptions,
+        TesseractCliOcrOptions,
+        TesseractOcrOptions,
     )
+
+    common = {
+        "lang": params["ocr_lang"],
+        "mode": OcrMode(params["ocr_mode"]),
+        "scale": params["ocr_scale"],
+    }
+    if params["ocr_engine"] == "rapidocr":
+        ocr = RapidOcrOptions(
+            **common,
+            backend="onnxruntime",
+            rapidocr_params={
+                "EngineConfig.onnxruntime.use_cuda": False,
+                "Det.use_cuda": False,
+                "Cls.use_cuda": False,
+                "Rec.use_cuda": False,
+            },
+        )
+    elif params["ocr_engine"] == "tesseract":
+        ocr = TesseractCliOcrOptions(
+            **common, tesseract_cmd="tesseract", path=str(tessdata), psm=params["psm"]
+        )
+    else:
+        ocr = TesseractOcrOptions(**common, path=str(tessdata), psm=params["psm"])
     return PdfPipelineOptions(
         artifacts_path=str(CACHE / MODELS_DIR),
         accelerator_options=AcceleratorOptions(
@@ -263,20 +390,20 @@ def pipeline_options(params: dict[str, Any]) -> Any:
     )
 
 
-def load_converter(params: dict[str, Any]) -> tuple[Any, Any]:
+def load_converter(params: dict[str, Any], tessdata: Path | None = None) -> tuple[Any, Any]:
     """A DocumentConverter for image input only, with the pipeline loaded now, not on first use.
 
-    Also returns the pipeline's OCR model (Docling 2.145.0's internal ``RapidOcrModel``), whose
-    ``reader.cfg`` is the configuration RapidOCR runs with (an OmegaConf DictConfig).
+    Also returns the pipeline's OCR model, one of Docling 2.145.0's internal ``RapidOcrModel``
+    (whose ``reader.cfg`` is the configuration RapidOCR runs with, an OmegaConf DictConfig),
+    ``TesseractOcrCliModel`` or ``TesseractOcrModel`` (tesserocr).
     """
     from docling.datamodel.base_models import InputFormat
     from docling.document_converter import DocumentConverter, ImageFormatOption
 
+    options = pipeline_options(params, tessdata)
     converter = DocumentConverter(
         allowed_formats=[InputFormat.IMAGE],
-        format_options={
-            InputFormat.IMAGE: ImageFormatOption(pipeline_options=pipeline_options(params))
-        },
+        format_options={InputFormat.IMAGE: ImageFormatOption(pipeline_options=options)},
     )
     converter.initialize_pipeline(InputFormat.IMAGE)
     return converter, converter._get_pipeline(InputFormat.IMAGE).ocr_model
@@ -306,6 +433,64 @@ def rapidocr_settings(cfg: Any) -> dict[str, Any]:
         wrong["Rec.rec_keys_path"] = settings["Rec"]["rec_keys_path"]
     if wrong:
         raise AdapterError(f"RapidOCR does not run the pinned models {RAPIDOCR_MODELS}: {wrong}")
+    return settings
+
+
+def tesseract_settings(ocr_model: Any, params: dict[str, Any], tessdata: Path) -> dict[str, Any]:
+    """The Tesseract that Docling's OCR model runs, its languages, data directory and PSM.
+
+    Raises AdapterError unless it is the pinned Tesseract (and tesserocr) version reading exactly
+    the preset's languages from ``tessdata``, so no other model or Tesseract can run.
+    """
+    lang = "+".join(params["ocr_lang"])
+    if params["ocr_engine"] == "tesseract":
+        name, version = ocr_model._get_name_and_version()
+        settings: dict[str, Any] = {
+            "tesseract": version,
+            "command": ocr_model._safe_tesseract_cmd,
+            "tessdata": ocr_model._safe_tessdata_path,
+            "lang": "+".join(ocr_model._native_codes),
+            "psm": ocr_model.options.psm,
+            "installed": sorted(ocr_model._tesseract_vocabulary or []),
+        }
+        wrong = {
+            key: value
+            for key, value, expected in (
+                ("tesseract", f"{name} {version}", f"tesseract {TESSERACT_VERSION}"),
+                ("tessdata", settings["tessdata"], str(tessdata.resolve())),
+            )
+            if value != expected
+        }
+    else:
+        import tesserocr
+
+        reader = ocr_model._reader
+        settings = {
+            "tesseract": tesserocr.tesseract_version().split()[1],
+            "tesserocr": tesserocr.__version__,
+            "tessdata": reader.GetDatapath(),
+            "lang": reader.GetInitLanguagesAsString(),
+            "psm": int(reader.GetPageSegMode()),
+            "oem": int(reader.oem()),
+            "installed": sorted(ocr_model._tesseract_vocabulary),
+        }
+        wrong = {
+            key: value
+            for key, value, expected in (
+                ("tesseract", settings["tesseract"], TESSERACT_VERSION),
+                ("tesserocr", settings["tesserocr"], TESSEROCR_VERSION),
+                ("tessdata", settings["tessdata"].rstrip("/"), str(tessdata)),
+            )
+            if value != expected
+        }
+    if settings["lang"] != lang:
+        wrong["lang"] = settings["lang"]
+    if settings["psm"] != params["psm"]:
+        wrong["psm"] = settings["psm"]
+    if ocr_model._auto_script:
+        wrong["auto_script"] = True
+    if wrong:
+        raise AdapterError(f"Tesseract does not run the pinned setup ({lang}): {wrong}")
     return settings
 
 
@@ -429,8 +614,59 @@ def match_cluster(
     return candidates[0] if candidates else None
 
 
+def tesseract_lines(native: dict[str, Any]) -> list[tuple[tuple[int, int, int, int], str]]:
+    """The Tesseract line and the text of every word cell, by Docling cell index.
+
+    ``native`` is tesseract.json: the TSV rows the Tesseract command line returned for each
+    crop, as Docling read them (words with text only). Docling makes one OCR cell of every row,
+    in this order, and numbers the cells of a page from 0 (``post_process_cells``). A line is
+    identified by the crop and its Tesseract block, paragraph and line numbers.
+    """
+    return [
+        ((call, row["block_num"], row["par_num"], row["line_num"]), row["text"])
+        for call, crop in enumerate(native["calls"])
+        for row in crop["rows"]
+    ]
+
+
+def group_words(
+    cells: list[tuple[int, dict[str, Any]]], words: list[tuple[tuple[int, ...], str]]
+) -> list[dict[str, Any]]:
+    """Lines of one region from its word cells ``(cell index, line)``, by their Tesseract line.
+
+    The words of a line keep Docling's cell order (Tesseract's word order) and are joined by one
+    space. The line's box is the bounding box of its words' boxes and its confidence their mean.
+    Raises AdapterError when a cell is not the recorded Tesseract word of its index.
+    """
+    groups: dict[tuple[int, ...], list[tuple[int, dict[str, Any]]]] = {}
+    for index, line in cells:
+        if index >= len(words) or words[index][1] != line["text"]:
+            raise AdapterError(f"OCR cell {index} is not the Tesseract word recorded for it")
+        groups.setdefault(words[index][0], []).append((index, line))
+    lines = []
+    for key, members in groups.items():
+        points = [point for _, word in members for point in word["polygon"]]
+        xs, ys = [x for x, _ in points], [y for _, y in points]
+        left, top, right, bottom = min(xs), min(ys), max(xs), max(ys)
+        line: dict[str, Any] = {
+            "id": f"l{members[0][0]}",
+            "text": " ".join(word["text"] for _, word in members),
+            "polygon": [[left, top], [right, top], [right, bottom], [left, bottom]],
+        }
+        confidences = [word["confidence"] for _, word in members if "confidence" in word]
+        if confidences:
+            line["confidence"] = round(sum(confidences) / len(confidences), 4)
+        line["extra"] = {"words": len(members), "tesseract_line": list(key)}
+        lines.append(line)
+    return lines
+
+
 def to_prediction(
-    document: dict[str, Any], layout: dict[str, Any], sample_id: str, size: tuple[int, int]
+    document: dict[str, Any],
+    layout: dict[str, Any],
+    sample_id: str,
+    size: tuple[int, int],
+    tesseract: dict[str, Any] | None = None,
 ) -> tuple[dict[str, Any], dict[str, int]]:
     """Standardized prediction (docs/PREDICTIONS.md) from Docling's native output.
 
@@ -439,10 +675,13 @@ def to_prediction(
     (in ``walk`` order) becomes a region with the item's label as native type; the box is
     matched to the layout cluster it came from, and the region's lines are that cluster's OCR
     cells with non-blank text (in Docling's cell order), except cells that belong to a child
-    cluster which is itself an item's box (text inside a picture). Positions are converted from
-    Docling's page coordinates to input pixels by ``size / page size`` on each axis. Also
-    returns counts of regions, lines and of OCR cells not in any region.
+    cluster which is itself an item's box (text inside a picture). With ``tesseract`` (the
+    command line's tesseract.json), the cells are words and are grouped into Tesseract's lines
+    (``group_words``). Positions are converted from Docling's page coordinates to input pixels
+    by ``size / page size`` on each axis. Also returns counts of regions, lines, OCR cells and of
+    OCR cells not in any region.
     """
+    words = tesseract_lines(tesseract) if tesseract is not None else None
     width, height = size
     if len(document["pages"]) != 1 or len(layout["pages"]) != 1:
         raise AdapterError(f"expected one page, got {len(document['pages'])}")
@@ -482,7 +721,7 @@ def to_prediction(
         return cells
 
     # Pass 2: regions and lines.
-    regions, assigned = [], set()
+    regions, assigned, line_count = [], set(), 0
     for number, (item, prov_number, (left, top, right, bottom), cluster) in enumerate(boxes):
         excluded = owned(cluster)
         region: dict[str, Any] = {
@@ -496,7 +735,7 @@ def to_prediction(
                 pixels(left, bottom),
             ],
         }
-        lines = []
+        region_cells = []
         for cell in cluster["cells"]:
             if cell["index"] in excluded or not cell["text"].strip():
                 continue
@@ -510,7 +749,12 @@ def to_prediction(
             }
             if cell.get("confidence") is not None:
                 line["confidence"] = round(float(cell["confidence"]), 4)
-            lines.append(line)
+            region_cells.append((cell["index"], line))
+        if words is not None:
+            lines = group_words(region_cells, words)
+        else:
+            lines = [line for _, line in region_cells]
+        line_count += len(lines)
         if lines:
             region["lines"] = lines
         region["extra"] = {
@@ -538,7 +782,7 @@ def to_prediction(
     cells = {cell["index"] for c in clusters for cell in c["cells"] if cell["text"].strip()}
     counts = {
         "regions": len(regions),
-        "lines": len(assigned),
+        "lines": line_count,
         "cells": len(cells),
         "cells_outside_regions": len(cells - assigned),
     }
@@ -557,45 +801,142 @@ def check_page_size(document: dict[str, Any], size: tuple[int, int], dpi: float)
             )
 
 
+def osd_orientation(osd: Any) -> int | None:
+    """The orientation (degrees, clockwise) in the command line's OSD table, None without one."""
+    if osd is None:
+        return None
+    for key, value in zip(osd["key"], osd["value"], strict=True):
+        if key == "Orientation in degrees":
+            return int(str(value).strip())
+    return None
+
+
+def plain(value: Any) -> Any:
+    """A JSON value from a pandas/numpy scalar."""
+    return value.item() if hasattr(value, "item") else value
+
+
+class _Recording:
+    """Forwards to ``target``; calls ``hooks[name](result, *args)`` after the named methods."""
+
+    def __init__(self, target: Any, hooks: dict[str, Any]) -> None:
+        self._target, self._hooks = target, hooks
+
+    def __getattr__(self, name: str) -> Any:
+        attribute = getattr(self._target, name)
+        hook = self._hooks.get(name)
+        if hook is None:
+            return attribute
+
+        def call(*args: Any, **kwargs: Any) -> Any:
+            result = attribute(*args, **kwargs)
+            hook(result, *args)
+            return result
+
+        return call
+
+
 class OcrCrops:
-    """Records the boxes Docling hands RapidOCR for each page and what RapidOCR made of them.
+    """Records the boxes Docling hands the OCR engine for each page and what it made of them.
 
     The OCR mode decides the boxes (``get_ocr_rects``, README.md#ocr-modes): the merged layout
     clusters or the whole page. Docling skips a box of zero area and otherwise crops it from the
-    page and calls RapidOCR once (orientation detection is off). RapidOCR's ``preprocess_img``
-    then resizes the crop: down to ``max_side_len`` and up to ``min_side_len``, each side rounded
-    to a multiple of 32. Both are recorded as they happen, not recomputed.
+    page and calls the OCR engine once:
+
+    - RapidOCR (orientation detection off): its ``preprocess_img`` resizes the crop, down to
+      ``max_side_len`` and up to ``min_side_len``, each side rounded to a multiple of 32.
+    - Tesseract (both backends): Docling first runs Tesseract's orientation and script detection
+      (OSD) on the crop and turns it when OSD reports an orientation other than 0. Tesseract then
+      reads the crop as it is, without resizing. The command line's TSV rows are kept
+      (``tsv``, written as tesseract.json); a failed call is recorded and Docling skips the crop.
+
+    Everything is recorded as it happens, not recomputed; the results are not changed.
     """
 
-    def __init__(self, ocr_model: Any) -> None:
+    def __init__(self, ocr_model: Any, engine: str = "rapidocr") -> None:
+        self.engine = engine
         self.boxes: list[tuple[str, float, float, float, float]] = []
-        self.calls: list[tuple[int, int, int, int]] = []  # crop width, height; resized
-        rects, reader = ocr_model.get_ocr_rects, ocr_model.reader
-        preprocess = reader.preprocess_img
+        self.calls: list[Any] = []
+        self.tsv: list[dict[str, Any]] = []
+        rects = ocr_model.get_ocr_rects
 
         def recording_rects(page: Any) -> Any:
             result = rects(page)
             self.boxes += [(r.coord_origin.value, r.l, r.t, r.r, r.b) for r in result]
             return result
 
-        def recording_preprocess(image: Any) -> Any:
-            resized, record = preprocess(image)
-            self.calls.append((*image.shape[1::-1], *resized.shape[1::-1]))
-            return resized, record
-
         ocr_model.get_ocr_rects = recording_rects
-        reader.preprocess_img = recording_preprocess
+        if engine == "rapidocr":
+            reader = ocr_model.reader
+            preprocess = reader.preprocess_img
+
+            def recording_preprocess(image: Any) -> Any:
+                resized, record = preprocess(image)
+                self.calls.append((*image.shape[1::-1], *resized.shape[1::-1]))
+                return resized, record
+
+            reader.preprocess_img = recording_preprocess
+        elif engine == "tesseract":
+            run = ocr_model._run_tesseract
+
+            def recording_run(filename: str, osd: Any) -> Any:
+                from PIL import Image
+
+                with Image.open(filename) as image:
+                    call: dict[str, Any] = {"image": list(image.size)}
+                call["osd_orientation"] = osd_orientation(osd)
+                self.calls.append(call)
+                try:
+                    rows = run(filename, osd)
+                except Exception:
+                    call["failed"] = True
+                    self.tsv.append({**call, "rows": []})
+                    raise
+                call["cells"] = len(rows)
+                records = [
+                    {key: plain(value) for key, value in row.items()}
+                    for row in rows.to_dict("records")
+                ]
+                self.tsv.append({**call, "rows": records})
+                return rows
+
+            ocr_model._run_tesseract = recording_run
+        else:  # tesserocr: one OSD image, one reader image and its text lines per crop
+
+            def osd_image(result: Any, image: Any) -> None:
+                self.calls.append({"image": list(image.size), "osd_orientation": None})
+
+            def osd_result(result: Any) -> None:
+                if result is not None:
+                    self.calls[-1]["osd_orientation"] = int(result["orient_deg"])
+
+            def reader_image(result: Any, image: Any) -> None:
+                self.calls[-1]["image"] = list(image.size)
+
+            def reader_lines(result: Any, *args: Any) -> None:
+                self.calls[-1]["cells"] = len(result or [])
+
+            ocr_model._osd_reader = _Recording(
+                ocr_model._osd_reader,
+                {"SetImage": osd_image, "DetectOrientationScript": osd_result},
+            )
+            ocr_model._reader = _Recording(
+                ocr_model._reader, {"SetImage": reader_image, "GetComponentImages": reader_lines}
+            )
 
     def clear(self) -> None:
         self.boxes.clear()
         self.calls.clear()
+        self.tsv.clear()
 
     def summary(self, page_size: dict[str, float], size: tuple[int, int]) -> dict[str, Any]:
-        """The boxes in input pixels (top-left origin), each with RapidOCR's crop and resize.
+        """The boxes in input pixels (top-left origin), each with what the OCR engine did.
 
-        ``page_size`` (points) and ``size`` (pixels) map a box to the input image. ``resize`` is
-        the resized crop's width and height over the crop's (< 1: shrunk). If the RapidOCR calls
-        do not pair up with the boxes of non-zero area, they are listed apart (``calls``).
+        ``page_size`` (points) and ``size`` (pixels) map a box to the input image. RapidOCR: the
+        crop, the resized crop and ``resize``, the resized crop's width and height over the
+        crop's (< 1: shrunk). Tesseract: the image it read (turned when ``osd_orientation`` is
+        not 0; None when OSD failed), the number of OCR cells and whether the call failed. If the
+        calls do not pair up with the boxes of non-zero area, they are listed apart (``calls``).
         """
         sx, sy = size[0] / page_size["width"], size[1] / page_size["height"]
         crops: list[dict[str, Any]] = []
@@ -604,26 +945,33 @@ class OcrCrops:
                 top, bottom = page_size["height"] - top, page_size["height"] - bottom
             box = [round(v, 1) for v in (left * sx, top * sy, right * sx, bottom * sy)]
             crops.append({"box": box, "skipped": (right - left) * (bottom - top) == 0})
-        calls = [
-            {
-                "crop": [width, height],
-                "resized": [new_width, new_height],
-                "resize": [round(new_width / width, 4), round(new_height / height, 4)],
-            }
-            for width, height, new_width, new_height in self.calls
-        ]
         read = [crop for crop in crops if not crop["skipped"]]
-        factors = [f for call in calls for f in call["resize"]]
-        summary: dict[str, Any] = {
-            "boxes": len(crops),
-            "skipped": len(crops) - len(read),
-            "rapidocr_calls": len(calls),
-            "shrunk": sum(min(call["resize"]) < 1 for call in calls),
-            "enlarged": sum(max(call["resize"]) > 1 for call in calls),
-            "min_resize": min(factors, default=1.0),
-            "paired": len(read) == len(calls),
-            "crops": crops,
-        }
+        summary: dict[str, Any] = {"boxes": len(crops), "skipped": len(crops) - len(read)}
+        if self.engine == "rapidocr":
+            calls = [
+                {
+                    "crop": [width, height],
+                    "resized": [new_width, new_height],
+                    "resize": [round(new_width / width, 4), round(new_height / height, 4)],
+                }
+                for width, height, new_width, new_height in self.calls
+            ]
+            factors = [f for call in calls for f in call["resize"]]
+            summary |= {
+                "rapidocr_calls": len(calls),
+                "shrunk": sum(min(call["resize"]) < 1 for call in calls),
+                "enlarged": sum(max(call["resize"]) > 1 for call in calls),
+                "min_resize": min(factors, default=1.0),
+            }
+        else:
+            calls = [dict(call) for call in self.calls]
+            summary |= {
+                "tesseract_calls": len(calls),
+                "failed": sum(bool(call.get("failed")) for call in calls),
+                "osd_failed": sum(call["osd_orientation"] is None for call in calls),
+                "rotated": sum(call["osd_orientation"] not in (None, 0) for call in calls),
+            }
+        summary |= {"paired": len(read) == len(calls), "crops": crops}
         if summary["paired"]:
             for crop, call in zip(read, calls, strict=True):
                 crop.update(call)
@@ -696,8 +1044,15 @@ def process(
     (out / "docling_layout.json").write_text(
         json.dumps(layout, ensure_ascii=False), encoding="utf-8"
     )
+    tesseract = None
+    if params["ocr_engine"] == "tesseract":
+        # Tesseract's own TSV of every crop, which holds the lines the word cells belong to.
+        tesseract = {"calls": list(crops.tsv)}
+        (out / "tesseract.json").write_text(
+            json.dumps(tesseract, ensure_ascii=False), encoding="utf-8"
+        )
     check_page_size(document, size, dpi)
-    prediction, counts = to_prediction(document, layout, sample["id"], size)
+    prediction, counts = to_prediction(document, layout, sample["id"], size, tesseract)
     (out / "prediction.json").write_text(
         json.dumps(prediction, ensure_ascii=False, indent=1), encoding="utf-8"
     )
@@ -705,8 +1060,17 @@ def process(
     page_size = next(iter(document["pages"].values()))["size"]
     extra["ocr_crops"] = crops.summary(page_size, size)
     notes = []
-    if result.status is ConversionStatus.PARTIAL_SUCCESS:
+    partial = result.status is ConversionStatus.PARTIAL_SUCCESS
+    if partial:
         notes.append("; ".join(errors) or "Docling reported a partial conversion")
+    failed = extra["ocr_crops"].get("failed", 0)
+    if failed:
+        # Docling logs a failed Tesseract call and goes on without that crop's text.
+        partial = True
+        notes.append(
+            f"Tesseract failed on {failed} of {extra['ocr_crops']['tesseract_calls']} OCR crops, "
+            "whose text is missing"
+        )
     if counts["cells_outside_regions"]:
         # Docling recognized text that no DoclingDocument item uses; it is not invented into
         # the prediction, but reported (it stays in docling_layout.json).
@@ -714,7 +1078,7 @@ def process(
             f"{counts['cells_outside_regions']} of {counts['cells']} non-blank OCR cells are in "
             "no DoclingDocument item and are left out"
         )
-    status = "partial" if result.status is ConversionStatus.PARTIAL_SUCCESS else "ok"
+    status = "partial" if partial else "ok"
     output = {"status": status, "primary": "prediction.json", "extra": extra}
     if notes:
         output["message"] = "; ".join(notes)[:2000]
@@ -732,23 +1096,32 @@ def main() -> None:
     target = Path(os.environ["OCRBENCH_OUTPUT"])
     job = json.loads((source / "job.json").read_text(encoding="utf-8"))
     start = time.monotonic()
-    converter, params, info, files, options, rapidocr = None, None, {}, None, None, None
-    crops, init_error = None, None
+    converter, params, info, files, options = None, None, {}, None, None
+    tessdata_info, rapidocr, tesseract, crops, init_error = None, None, None, None, None
     try:
         params = parse_params(job.get("params") or {})
-        check_model(job.get("model"))
+        check_model(job.get("model"), params)
         info = environment(params["device"])
-        files = model_files()
-        converter, ocr_model = load_converter(params)
-        rapidocr = rapidocr_settings(ocr_model.reader.cfg)
-        crops = OcrCrops(ocr_model)
-        options = json.loads(pipeline_options(params).model_dump_json())
+        files = model_files(params)
+        tessdata = None
+        if params["ocr_engine"] in TESSERACT_ENGINES:
+            tessdata_info = tessdata_files(params)
+            tessdata = tessdata_directory(params)
+        converter, ocr_model = load_converter(params, tessdata)
+        if params["ocr_engine"] == "rapidocr":
+            rapidocr = rapidocr_settings(ocr_model.reader.cfg)
+        else:
+            tesseract = tesseract_settings(ocr_model, params, tessdata)
+        crops = OcrCrops(ocr_model, params["ocr_engine"])
+        options = json.loads(pipeline_options(params, tessdata).model_dump_json())
     except AdapterError as error:
         init_error = str(error)
     except Exception as error:
         init_error = f"cannot load Docling: {type(error).__name__}: {error}"
     info["load_seconds"] = round(time.monotonic() - start, 3)
     model_info = {"files": files, "job_model": job.get("model")}
+    if tessdata_info is not None:
+        model_info["tessdata_best"] = tessdata_info
     for sample in job["samples"]:
         out = target / sample["id"]
         out.mkdir()
@@ -767,8 +1140,11 @@ def main() -> None:
             models=model_info,
             params=params,
             pipeline_options=options,
-            rapidocr=rapidocr,
         )
+        if params is None or params["ocr_engine"] == "rapidocr":
+            result["extra"]["rapidocr"] = rapidocr
+        else:
+            result["extra"]["tesseract"] = tesseract
         write_result(out, result)
     print(f"docling adapter processed {len(job['samples'])} samples", file=sys.stderr)
 

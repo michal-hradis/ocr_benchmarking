@@ -1,0 +1,28 @@
+# Docling standard image pipeline, preset docling-tesseract-cli (#79): the docling preset
+# (../engine.toml) with Docling's Tesseract command-line backend (TesseractCliOcrOptions) instead
+# of RapidOCR, reading the layout regions with tessdata_best ces+deu+eng, PSM 3
+# (../README.md#tesseract; format: docs/RUNNER.md). Run with --cache <dir> holding the models
+# from make docling-model and make tesseract-best.
+name = "docling-tesseract-cli"
+engine_version = "2"
+image = "ocrbench/engine-docling:2.145.0-v2"
+model = "docling-2.145.0@layout-heron-8f39ad3c,tableformer-accurate-fc0f2d45,tesseract-5.3.4-cli-tessdata_best-e12c65a"
+
+[params]
+device = "cuda:0"  # layout and TableFormer; Tesseract runs on the CPU
+ocr_engine = "tesseract"
+ocr_lang = ["ces", "deu", "eng"]  # tessdata_best e12c65a, joined by + in this order
+ocr_mode = "layout_regions"  # Tesseract on each (deduplicated) layout cluster crop
+ocr_scale = 3.0  # nominal 216 DPI: Docling crops the input pixels 1:1; Tesseract does not resize
+psm = 3  # Tesseract's fully automatic page segmentation within each crop
+table_structure = true  # TableFormer, accurate mode
+
+[resources]
+cpus = 4
+memory = "16g"
+gpus = "all"
+shm_size = "2g"
+
+[timeouts]
+sample = 600
+startup = 300

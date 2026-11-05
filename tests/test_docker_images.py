@@ -38,7 +38,10 @@ def test_base_dockerfiles_exist():
 @pytest.mark.parametrize("dockerfile", DOCKERFILES, ids=lambda p: str(p.parent.relative_to(ROOT)))
 def test_parent_images_are_pinned(dockerfile):
     text = dockerfile.read_text()
-    refs = re.findall(r"^FROM\s+(\S+)", text, re.M) + re.findall(r"COPY\s+--from=(\S+)", text)
+    # A named build stage of the same Dockerfile is no image; its own FROM is checked below.
+    stages = set(re.findall(r"^FROM\s+\S+\s+AS\s+(\S+)", text, re.M | re.I))
+    copies = [ref for ref in re.findall(r"COPY\s+--from=(\S+)", text) if ref not in stages]
+    refs = re.findall(r"^FROM\s+(\S+)", text, re.M) + copies
     assert refs
     for ref in refs:
         assert DIGEST_REF.search(ref) or LOCAL_BASE_REF.match(ref), (

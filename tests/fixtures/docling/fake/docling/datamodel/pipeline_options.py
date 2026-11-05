@@ -28,7 +28,15 @@ class _Options:
 
 
 class RapidOcrOptions(_Options):
-    pass
+    kind = "rapidocr"
+
+
+class TesseractCliOcrOptions(_Options):
+    kind = "tesseract"
+
+
+class TesseractOcrOptions(_Options):
+    kind = "tesserocr"
 
 
 class PdfPipelineOptions(_Options):

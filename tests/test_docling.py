@@ -6,8 +6,10 @@ real Docling 2.145.0 results of preset ``docling`` (docling.json and docling_lay
 synthetic pages rendered by tests/synthetic.py: ``page`` (PAGE), ``paragraph`` (PARAGRAPH, a
 crop that Docling's layout takes for a picture with text inside), ``columns`` (COLUMNS),
 ``newspaper`` (NEWSPAPER), ``table`` (TABLE_PAGE: a table, a picture and a caption) and
-``blank``. The opt-in GPU test builds the engine image and runs real Docling through
-``ocrbench run``, ``evaluate`` and ``report``.
+``blank``; and the results of presets ``docling-tesseract-cli`` (with Tesseract's TSV,
+tesseract.json) and ``docling-tesserocr`` for ``page``, ``paragraph``, ``newspaper``, ``table``
+and ``blank`` (tesseract-cli/<name>, tesserocr/<name>). The opt-in GPU test builds the engine
+image and runs real Docling through ``ocrbench run``, ``evaluate`` and ``report``.
 """
 
 import copy
@@ -15,6 +17,7 @@ import hashlib
 import importlib.util
 import json
 import os
+import re
 import subprocess
 import sys
 import tomllib
@@ -51,6 +54,11 @@ PRESETS = {
     name: tomllib.loads((ENGINE_DIR / "presets" / f"{name}.toml").read_text(encoding="utf-8"))
     for name in ("rapidocr-regions", "rapidocr-fullpage")
 }
+TESSERACT_PRESETS = {
+    name: tomllib.loads((ENGINE_DIR / "presets" / f"{name}.toml").read_text(encoding="utf-8"))
+    for name in ("tesseract-cli", "tesseract-cli-deu-latf", "tesserocr")
+}
+TESSERACT_ROOT = ROOT / "engines" / "tesseract"
 SIZES = {
     "page": (900, 420),
     "paragraph": (520, 120),
@@ -425,9 +433,19 @@ def test_undecodable_image_is_an_adapter_error(tmp_path):
 @pytest.mark.parametrize(
     ("params", "message"),
     [
-        ({"psm": 3}, "unknown parameters: psm"),
+        ({"tessdata": "best"}, "unknown parameters: tessdata"),
+        ({"psm": 3}, "psm is a Tesseract setting and must be null for rapidocr: 3"),
         ({"device": "gpu:0"}, "device must be 'cuda:<n>' or 'cpu'"),
-        ({"ocr_engine": "tesseract"}, "ocr_engine must be one of"),
+        ({"ocr_engine": "easyocr"}, "ocr_engine must be one of"),
+        ({"ocr_engine": "tesseract", "psm": 3}, "ocr_lang must be a non-empty list of distinct"),
+        ({"ocr_engine": "tesserocr", "ocr_lang": [], "psm": 3}, "ocr_lang must be a non-empty"),
+        ({"ocr_engine": "tesseract", "ocr_lang": ["ces", "ces"], "psm": 3}, "distinct"),
+        ({"ocr_engine": "tesseract", "ocr_lang": ["frk"], "psm": 3}, "tessdata_best models"),
+        ({"ocr_engine": "tesseract", "ocr_lang": "ces", "psm": 3}, "ocr_lang must be"),
+        ({"ocr_engine": "tesseract", "ocr_lang": ["ces"]}, "psm must be one of .* None"),
+        ({"ocr_engine": "tesserocr", "ocr_lang": ["ces"], "psm": 0}, "psm must be one of"),
+        ({"ocr_engine": "tesseract", "ocr_lang": ["ces"], "psm": "3"}, "psm must be one of"),
+        ({"ocr_engine": "tesseract", "ocr_lang": ["ces"], "psm": True}, "psm must be one of"),
         ({"ocr_lang": "latin"}, r"ocr_lang must be one of \[\['latin'\]\]"),
         ({"ocr_lang": ["latin", "en"]}, "ocr_lang must be one of"),
         ({"ocr_lang": ["iso:cs"]}, "the recognizers with pinned models"),
@@ -446,7 +464,8 @@ def test_invalid_params_are_rejected(params, message):
 
 def test_preset_is_the_adapter_default_written_out():
     assert dl.parse_params(CONFIG["params"]) == dl.DEFAULT_PARAMS
-    assert set(CONFIG["params"]) == set(dl.DEFAULT_PARAMS) - {"document_timeout", "num_threads"}
+    defaults = {"document_timeout", "num_threads", "psm"}  # TOML has no null
+    assert set(CONFIG["params"]) == set(dl.DEFAULT_PARAMS) - defaults
     assert dl.nominal_dpi(dl.DEFAULT_PARAMS) == 216.0
     assert CONFIG["model"] == dl.MODEL
     assert CONFIG["image"].startswith("ocrbench/engine-docling:2.145.0-")
@@ -455,9 +474,9 @@ def test_preset_is_the_adapter_default_written_out():
 
 
 def test_rapidocr_presets_differ_from_docling_only_in_name_and_ocr_mode():
-    assert sorted(p.name for p in (ENGINE_DIR / "presets").iterdir()) == [
-        f"{name}.toml" for name in sorted(PRESETS)
-    ]
+    assert sorted(p.name for p in (ENGINE_DIR / "presets").iterdir()) == sorted(
+        f"{name}.toml" for name in PRESETS | TESSERACT_PRESETS
+    )
     modes = {name: (p["name"], p["params"]["ocr_mode"]) for name, p in PRESETS.items()}
     assert modes == {
         "rapidocr-regions": ("docling-rapidocr-regions", "layout_regions"),
@@ -820,7 +839,7 @@ def test_cpu_device_reaches_docling(tmp_path):
 @pytest.mark.parametrize(
     ("params", "env", "message"),
     [
-        ({"psm": 3}, {}, "unknown parameters: psm"),
+        ({"psm": 3}, {}, "psm is a Tesseract setting"),
         ({}, {"FAKE_TORCH_GPUS": "0"}, "cuda:0 requested but 0 CUDA devices are visible"),
         ({}, "no-cache", "does not exist; download the models with make docling-model"),
         ({}, "corrupt", "not matching models.sha256: ['RapidOcr/rec.onnx']"),
@@ -840,6 +859,490 @@ def test_setup_errors_fail_every_sample_explicitly(tmp_path, params, env, messag
     assert all(message in r["message"] for r in records.values())
 
 
+# Tesseract: presets, models, conversion and protocol --------------------------------------------
+
+
+def tesseract_native(backend, name):
+    directory = FIXTURES / backend / name
+    files = ["docling.json", "docling_layout.json"]
+    if backend == "tesseract-cli":
+        files.append("tesseract.json")
+    return [json.loads((directory / f).read_text(encoding="utf-8")) for f in files]
+
+
+def tesseract_convert(backend, name):
+    document, layout, *tesseract = tesseract_native(backend, name)
+    return dl.to_prediction(document, layout, "s1", SIZES[name], *tesseract)
+
+
+def test_tesseract_presets_change_one_thing_each():
+    cli = TESSERACT_PRESETS["tesseract-cli"]
+    assert cli["params"] == {
+        "device": "cuda:0",
+        "ocr_engine": "tesseract",
+        "ocr_lang": ["ces", "deu", "eng"],  # the order of the standalone tesseract-best-psm3
+        "ocr_mode": "layout_regions",
+        "ocr_scale": 3.0,
+        "psm": 3,
+        "table_structure": True,
+    }
+    # Against docling-rapidocr-regions: only the OCR engine with its models and settings.
+    rapidocr = PRESETS["rapidocr-regions"]
+    changed = {"ocr_engine": "rapidocr", "ocr_lang": ["latin"]}
+    params = {k: v for k, v in cli["params"].items() if k != "psm"} | changed
+    same = {"name", "model", "image", "engine_version"}
+    assert {k: v for k, v in rapidocr.items() if k not in same} == {
+        k: v for k, v in cli.items() if k not in same
+    } | {"params": params}
+    # Fraktur: only the language; the bindings: only the backend (and its model identity).
+    latf = TESSERACT_PRESETS["tesseract-cli-deu-latf"]
+    assert latf == cli | {
+        "name": "docling-tesseract-cli-deu-latf",
+        "params": cli["params"] | {"ocr_lang": ["deu_latf"]},
+    }
+    bindings = TESSERACT_PRESETS["tesserocr"]
+    assert bindings == cli | {
+        "name": "docling-tesserocr",
+        "model": dl.MODELS["tesserocr"],
+        "params": cli["params"] | {"ocr_engine": "tesserocr"},
+    }
+    for preset in TESSERACT_PRESETS.values():
+        assert preset["model"] == dl.MODELS[preset["params"]["ocr_engine"]]
+        assert dl.parse_params(preset["params"]) == dl.DEFAULT_PARAMS | preset["params"]
+        assert preset["image"] == "ocrbench/engine-docling:2.145.0-v2"
+
+
+def test_tessdata_is_the_standalone_tesseract_engines():
+    spec = importlib.util.spec_from_file_location(
+        "tesseract_engine", TESSERACT_ROOT / "tesseract_engine.py"
+    )
+    tesseract = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(tesseract)
+    assert dl.TESSDATA_BEST_DIR == tesseract.BEST_DIR  # make tesseract-best fills it
+    for name in ("tessdata_best.sha256",):
+        assert (ENGINE_DIR / name).read_bytes() == (TESSERACT_ROOT / name).read_bytes()
+    pinned = dl.read_checksums(ENGINE_DIR / "tessdata_best.sha256")
+    assert sorted(pinned) == [f"{code}.traineddata" for code in dl.TESSERACT_LANGS]
+    osd = dl.read_checksums(ENGINE_DIR / "tessdata.sha256")
+    assert osd == {
+        "osd.traineddata": dl.read_checksums(TESSERACT_ROOT / "tessdata.sha256")["osd.traineddata"]
+    }
+    dockerfile = (ENGINE_DIR / "Dockerfile").read_text(encoding="utf-8")
+    assert f"tesseract-ocr={dl.TESSERACT_VERSION}-1build5" in dockerfile
+    assert f"libtesseract-dev={dl.TESSERACT_VERSION}-1build5" in dockerfile
+    assert f"tesserocr-{dl.TESSEROCR_VERSION}.tar.gz" in dockerfile
+
+
+def tessdata_cache(root, corrupt=None):
+    """A cache with fake tessdata_best models, their checksums and an image tessdata directory."""
+    models = root / "cache" / dl.TESSDATA_BEST_DIR
+    models.mkdir(parents=True, exist_ok=True)
+    lines = []
+    for code in dl.TESSERACT_LANGS:
+        path = models / f"{code}.traineddata"
+        path.write_text(f"fake {code}", encoding="utf-8")
+        lines.append(f"{hashlib.sha256(path.read_bytes()).hexdigest()}  {path.name}")
+    if corrupt:
+        (models / corrupt).write_text("changed", encoding="utf-8")
+    checksums = root / "tessdata_best.sha256"
+    checksums.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    system = root / "system-tessdata"
+    (system / "configs").mkdir(parents=True, exist_ok=True)
+    (system / "configs" / "tsv").write_text("tessedit_create_tsv 1\n", encoding="utf-8")
+    (system / "osd.traineddata").write_text("fake osd", encoding="utf-8")
+    (system / "eng.traineddata").write_text("tessdata_fast eng, not used", encoding="utf-8")
+    return {
+        "OCRBENCH_DOCLING_TESSDATA_CHECKSUMS": str(checksums),
+        "OCRBENCH_DOCLING_SYSTEM_TESSDATA": str(system),
+        "OCRBENCH_DOCLING_TESSDATA": str(root / "tessdata"),
+    }
+
+
+@pytest.fixture
+def tessdata_env(tmp_path, monkeypatch):
+    env = tessdata_cache(tmp_path)
+    monkeypatch.setattr(dl, "CACHE", tmp_path / "cache")
+    monkeypatch.setattr(dl, "TESSDATA_CHECKSUMS", Path(env["OCRBENCH_DOCLING_TESSDATA_CHECKSUMS"]))
+    monkeypatch.setattr(dl, "SYSTEM_TESSDATA", Path(env["OCRBENCH_DOCLING_SYSTEM_TESSDATA"]))
+    monkeypatch.setattr(dl, "TESSDATA", Path(env["OCRBENCH_DOCLING_TESSDATA"]))
+    monkeypatch.delenv("TESSDATA_PREFIX", raising=False)
+    return tmp_path
+
+
+def test_tessdata_directory_holds_only_the_presets_models(tessdata_env, monkeypatch):
+    params = dl.parse_params(TESSERACT_PRESETS["tesseract-cli-deu-latf"]["params"])
+    files = dl.tessdata_files(params)
+    assert list(files) == ["deu_latf.traineddata"]
+    directory = dl.tessdata_directory(params)
+    assert os.environ["TESSDATA_PREFIX"] == str(directory)
+    links = {p.name: p.resolve() for p in directory.iterdir()}
+    cache = tessdata_env / "cache" / dl.TESSDATA_BEST_DIR
+    system = tessdata_env / "system-tessdata"
+    assert links == {
+        "deu_latf.traineddata": cache / "deu_latf.traineddata",
+        "osd.traineddata": system / "osd.traineddata",
+        "configs": system / "configs",
+    }
+    # Made afresh for every run: no model of an earlier preset stays.
+    params = dl.parse_params(TESSERACT_PRESETS["tesseract-cli"]["params"])
+    names = sorted(p.name for p in dl.tessdata_directory(params).iterdir())
+    assert names == ["ces.traineddata", "configs", "deu.traineddata", "eng.traineddata"] + [
+        "osd.traineddata"
+    ]
+    (system / "configs").rename(system / "other")
+    with pytest.raises(dl.AdapterError, match="configs is missing from the image"):
+        dl.tessdata_directory(params)
+
+
+def test_tessdata_must_be_downloaded_and_unchanged(tessdata_env, monkeypatch):
+    params = dl.parse_params(TESSERACT_PRESETS["tesseract-cli"]["params"])
+    models = tessdata_env / "cache" / dl.TESSDATA_BEST_DIR
+    (models / "deu.traineddata").write_text("changed", encoding="utf-8")
+    with pytest.raises(dl.AdapterError, match=r"not matching tessdata_best.sha256: \['deu"):
+        dl.tessdata_files(params)
+    monkeypatch.setattr(dl, "CACHE", tessdata_env / "nowhere")
+    with pytest.raises(dl.AdapterError, match="make tesseract-best and run with --cache"):
+        dl.tessdata_files(params)
+
+
+def test_model_files_need_rapidocrs_models_only_with_rapidocr(tmp_path, monkeypatch):
+    env = model_cache(tmp_path, corrupt="RapidOcr/rec.onnx")
+    monkeypatch.setattr(dl, "CACHE", Path(env["OCRBENCH_DOCLING_CACHE"]))
+    monkeypatch.setattr(dl, "CHECKSUMS", Path(env["OCRBENCH_DOCLING_CHECKSUMS"]))
+    params = dl.parse_params(TESSERACT_PRESETS["tesserocr"]["params"])
+    assert list(dl.model_files(params)) == [
+        "docling-project--docling-layout-heron/model.safetensors"
+    ]
+    with pytest.raises(dl.AdapterError, match="RapidOcr/rec.onnx"):
+        dl.model_files(dl.DEFAULT_PARAMS)
+
+
+def cli_model(**changes):
+    """Docling's TesseractOcrCliModel as the adapter inspects it."""
+    tessdata = changes.pop("tessdata", "/tmp/ocrbench-tessdata")
+    model = SimpleNamespace(
+        _get_name_and_version=lambda: ("tesseract", changes.pop("version", "5.3.4")),
+        _safe_tesseract_cmd="tesseract",
+        _safe_tessdata_path=tessdata,
+        _native_codes=["ces", "deu", "eng"],
+        options=SimpleNamespace(psm=3),
+        _tesseract_vocabulary=["ces", "deu", "eng", "osd"],
+        _auto_script=False,
+    )
+    for key, value in changes.items():
+        setattr(model, key, value)
+    return model
+
+
+def test_tesseract_settings_are_checked_against_the_preset():
+    params = dl.parse_params(TESSERACT_PRESETS["tesseract-cli"]["params"])
+    tessdata = Path("/tmp/ocrbench-tessdata")
+    assert dl.tesseract_settings(cli_model(), params, tessdata) == {
+        "tesseract": "5.3.4",
+        "command": "tesseract",
+        "tessdata": "/tmp/ocrbench-tessdata",
+        "lang": "ces+deu+eng",
+        "psm": 3,
+        "installed": ["ces", "deu", "eng", "osd"],
+    }
+    for changes, wrong in (
+        ({"version": "5.5.0"}, "'tesseract': 'tesseract 5.5.0'"),
+        ({"tessdata": "/usr/share/tesseract-ocr/5/tessdata"}, "'tessdata'"),
+        ({"_native_codes": ["eng"]}, "'lang': 'eng'"),
+        ({"options": SimpleNamespace(psm=None)}, "'psm': None"),
+        ({"_auto_script": True}, "'auto_script': True"),
+    ):
+        with pytest.raises(dl.AdapterError, match="does not run the pinned setup"):
+            dl.tesseract_settings(cli_model(**changes), params, tessdata)
+        with pytest.raises(dl.AdapterError, match=re.escape(wrong)):
+            dl.tesseract_settings(cli_model(**changes), params, tessdata)
+
+
+@pytest.mark.parametrize("name", ["page", "paragraph", "newspaper", "table"])
+@pytest.mark.parametrize("backend", ["tesseract-cli", "tesserocr"])
+def test_tesseract_results_become_regions_in_document_order(backend, name):
+    prediction, counts = tesseract_convert(backend, name)
+    assert errors(prediction, SIZES[name]) == []
+    document = tesseract_native(backend, name)[0]
+    items = dl.walk(document)
+    assert [r["extra"]["self_ref"] for r in prediction["regions"]] == [i["self_ref"] for i in items]
+    assert counts["cells_outside_regions"] == 0
+    if backend == "tesserocr":  # Docling's bindings backend gives one cell per text line
+        assert counts["lines"] == counts["cells"]
+
+
+def test_tesseract_cli_words_are_grouped_into_tesseracts_lines(tmp_path):
+    """One OCR cell per word; the prediction has Tesseract's lines, boxed around their words."""
+    prediction, counts = tesseract_convert("tesseract-cli", "page")
+    rendered = render(tmp_path / "page.png", PAGE, SIZES["page"])
+    assert prediction["text"] == "\n\n".join("\n".join(t for t, _ in r) for r in rendered)
+    assert (counts["lines"], counts["cells"]) == (5, len(prediction["text"].split()))
+    lines = [line for region in prediction["regions"] for line in region["lines"]]
+    boxes = [box for region in rendered for _, box in region]
+    for line, (x0, y0, x1, y1) in zip(lines, boxes, strict=True):
+        xs, ys = [x for x, _ in line["polygon"]], [y for _, y in line["polygon"]]
+        assert [min(xs), max(xs)] == pytest.approx([x0, x1], abs=6)
+        assert [min(ys), max(ys)] == pytest.approx([y0, y1], abs=10)
+        assert line["extra"]["words"] == len(line["text"].split())
+    # The line box is the union of its word cells' boxes, which stay in the native layout.
+    _, layout, tesseract = tesseract_native("tesseract-cli", "page")
+    page_h = layout["pages"][0]["size"]["height"]
+    cells = {
+        c["index"]: c for cl in dl.flatten(layout["pages"][0]["clusters"]) for c in cl["cells"]
+    }
+    words = dl.tesseract_lines(tesseract)
+    first = lines[0]
+    members = [
+        i for i, (key, _) in enumerate(words) if key == tuple(first["extra"]["tesseract_line"])
+    ]
+    assert first["id"] == f"l{members[0]}"
+    points = [p for i in members for p in dl.rect_points(cells[i]["rect"], page_h)]
+    scale = SIZES["page"][0] / layout["pages"][0]["size"]["width"]
+    assert first["polygon"][0] == pytest.approx(
+        [min(x for x, _ in points) * scale, min(y for _, y in points) * scale], abs=1e-3
+    )
+    confidences = [cells[i]["confidence"] for i in members]
+    assert first["confidence"] == pytest.approx(sum(confidences) / len(confidences), abs=1e-4)
+
+
+def test_a_tesseract_line_split_between_regions_stays_in_both():
+    words = [((0, 1, 1, 1), "Left"), ((0, 1, 1, 1), "right"), ((0, 1, 1, 2), "next")]
+    tesseract = {
+        "calls": [
+            {
+                "rows": [
+                    {"block_num": b, "par_num": p, "line_num": n, "text": text}
+                    for (_, b, p, n), text in words
+                ]
+            }
+        ]
+    }
+    document, layout = native(
+        [
+            item("#/texts/0", "text", [(0, 0, 50, 30)]),
+            item("#/texts/1", "text", [(60, 0, 150, 30)]),
+        ],
+        [
+            cluster(0, "text", (0, 0, 50, 30), [cell(0, "Left", (10, 10, 40, 20))]),
+            cluster(
+                1,
+                "text",
+                (60, 0, 150, 30),
+                [cell(1, "right", (70, 10, 100, 20)), cell(2, "next", (70, 22, 95, 29))],
+            ),
+        ],
+    )
+    prediction, counts = dl.to_prediction(document, layout, "s1", (200, 100), tesseract)
+    assert [[line["text"] for line in r["lines"]] for r in prediction["regions"]] == [
+        ["Left"],
+        ["right", "next"],
+    ]
+    assert [line["id"] for r in prediction["regions"] for line in r["lines"]] == ["l0", "l1", "l2"]
+    assert prediction["regions"][1]["lines"][0]["polygon"] == [
+        [70.0, 10.0],
+        [100.0, 10.0],
+        [100.0, 20.0],
+        [70.0, 20.0],
+    ]
+    assert counts == {"regions": 2, "lines": 3, "cells": 3, "cells_outside_regions": 0}
+    for broken in (
+        {"calls": [{"rows": tesseract["calls"][0]["rows"][:2]}]},
+        {"calls": [{"rows": [dict(r, text="x") for r in tesseract["calls"][0]["rows"]]}]},
+    ):
+        with pytest.raises(dl.AdapterError, match="is not the Tesseract word recorded for it"):
+            dl.to_prediction(document, layout, "s1", (200, 100), broken)
+
+
+class FakeRows:
+    def __init__(self, records):
+        self.records = records
+
+    def __len__(self):
+        return len(self.records)
+
+    def to_dict(self, orient):
+        return self.records
+
+
+def test_ocr_crops_record_the_tesseract_command_line(tmp_path):
+    image = tmp_path / "crop.png"
+    Image.new("L", (300, 120), 255).save(image)
+    rows = [{"block_num": 1, "par_num": 1, "line_num": 1, "text": "Wort", "conf": 96.5}]
+
+    def run(filename, osd):
+        if osd is None:
+            raise subprocess.CalledProcessError(1, "tesseract")
+        return FakeRows(rows)
+
+    model = SimpleNamespace(
+        get_ocr_rects=lambda page: [rect("TOPLEFT", 0, 0, 100, 40), rect("TOPLEFT", 0, 0, 0, 9)],
+        _run_tesseract=run,
+    )
+    crops = dl.OcrCrops(model, "tesseract")
+    model.get_ocr_rects(None)
+    turned = {"key": ["Page number", "Orientation in degrees"], "value": [" 0", " 90"]}
+    assert model._run_tesseract(str(image), turned).records == rows  # results unchanged
+    with pytest.raises(subprocess.CalledProcessError):  # Docling logs it and skips the crop
+        model._run_tesseract(str(image), None)
+    summary = crops.summary({"width": 100.0, "height": 40.0}, (300, 120))
+    assert {k: v for k, v in summary.items() if k not in ("crops", "calls")} == {
+        "boxes": 2,
+        "skipped": 1,
+        "tesseract_calls": 2,
+        "failed": 1,
+        "osd_failed": 1,
+        "rotated": 1,
+        "paired": False,  # two calls for one box of non-zero area
+    }
+    assert crops.tsv == [
+        {"image": [300, 120], "osd_orientation": 90, "cells": 1, "rows": rows},
+        {"image": [300, 120], "osd_orientation": None, "failed": True, "rows": []},
+    ]
+    crops.clear()
+    assert (crops.boxes, crops.calls, crops.tsv) == ([], [], [])
+
+
+def test_ocr_crops_record_the_tesserocr_bindings():
+    class Reader:
+        def SetImage(self, image):
+            self.image = image
+
+        def DetectOrientationScript(self):
+            return {"orient_deg": 180, "script_name": "Latin"}
+
+        def GetComponentImages(self, level, text_only):
+            return [None, None, None]
+
+        def GetPageSegMode(self):
+            return 3
+
+    model = SimpleNamespace(
+        get_ocr_rects=lambda page: [rect("BOTTOMLEFT", 0, 40, 100, 0)],
+        _reader=Reader(),
+        _osd_reader=Reader(),
+    )
+    crops = dl.OcrCrops(model, "tesserocr")
+    model.get_ocr_rects(None)
+    image = Image.new("L", (300, 120))
+    model._osd_reader.SetImage(image)
+    assert model._osd_reader.DetectOrientationScript()["orient_deg"] == 180
+    model._reader.SetImage(image.rotate(180, expand=True))
+    assert len(model._reader.GetComponentImages(None, True)) == 3
+    assert model._reader.GetPageSegMode() == 3  # other methods are forwarded unchanged
+    summary = crops.summary({"width": 100.0, "height": 40.0}, (300, 120))
+    assert summary["crops"] == [
+        {
+            "box": [0.0, 0.0, 300.0, 120.0],
+            "skipped": False,
+            "image": [300, 120],
+            "osd_orientation": 180,
+            "cells": 3,
+        }
+    ]
+    assert (summary["rotated"], summary["paired"], summary["failed"]) == (1, True, 0)
+
+
+def run_tesseract_adapter(tmp_path, preset, widths, env=None):
+    params = TESSERACT_PRESETS[preset]["params"]
+    env = {**tessdata_cache(tmp_path), **(env or {})}
+    return run_adapter(tmp_path, widths, params, env, TESSERACT_PRESETS[preset]["model"])
+
+
+def test_tesseract_cli_follows_the_engine_protocol(tmp_path):
+    run, records = run_tesseract_adapter(
+        tmp_path, "tesseract-cli", {"page": 900, "news": 1500, "blank": 300, "bad": 555}
+    )
+    got = {sid: (r["status"], r["reason"]) for sid, r in records.items()}
+    assert got == {
+        "page": ("success", None),
+        "news": ("success", None),
+        "blank": ("success", None),
+        "bad": ("partial", None),  # Docling skips the crop: the text is missing, not empty
+    }
+    assert records["bad"]["message"] == (
+        "Tesseract failed on 1 of 1 OCR crops, whose text is missing"
+    )
+    assert "tesseract OCR failed" in records["bad"]["engine_extra"]["warnings"][1]
+    page = run.path / "samples" / "page" / "attempt-1"
+    outputs = {o["path"] for o in records["page"]["outputs"]}
+    assert "tesseract.json" in outputs
+    native = json.loads((page / "output" / "tesseract.json").read_text(encoding="utf-8"))
+    assert native == tesseract_native("tesseract-cli", "page")[2]
+    expected, counts = tesseract_convert("tesseract-cli", "page")
+    assert (page / "prediction.txt").read_text(encoding="utf-8") == expected["text"]
+    extra = records["page"]["engine_extra"]
+    assert extra["counts"] == counts
+    assert "rapidocr" not in extra
+    assert extra["tesseract"] == {
+        "tesseract": "5.3.4",
+        "command": "tesseract",
+        "tessdata": str((tmp_path / "tessdata").resolve()),
+        "lang": "ces+deu+eng",
+        "psm": 3,
+        "installed": ["ces", "deu", "eng", "osd"],
+    }
+    assert set(extra["models"]["files"]) == {
+        "docling-project--docling-layout-heron/model.safetensors"
+    }
+    assert set(extra["models"]["tessdata_best"]) == {
+        "ces.traineddata",
+        "deu.traineddata",
+        "eng.traineddata",
+    }
+    ocr = extra["pipeline_options"]["ocr_options"]
+    assert (ocr["lang"], ocr["mode"], ocr["psm"], ocr["tesseract_cmd"]) == (
+        ["ces", "deu", "eng"],
+        "layout_regions",
+        3,
+        "tesseract",
+    )
+    crops = extra["ocr_crops"]
+    assert (crops["tesseract_calls"], crops["failed"], crops["paired"]) == (1, 0, True)
+    assert crops["crops"][0]["cells"] == counts["cells"]
+    assert main(["evaluate", str(run.path)]) == 0
+
+
+def test_tesserocr_follows_the_engine_protocol(tmp_path):
+    run, records = run_tesseract_adapter(tmp_path, "tesserocr", {"table": 1200, "blank": 300})
+    assert {r["status"] for r in records.values()} == {"success"}
+    extra = records["table"]["engine_extra"]
+    assert extra["tesseract"] == {
+        "tesseract": "5.3.4",
+        "tesserocr": "2.12.0",
+        "tessdata": str(tmp_path / "tessdata") + "/",
+        "lang": "ces+deu+eng",
+        "psm": 3,
+        "oem": 3,
+        "installed": ["ces", "deu", "eng", "osd"],
+    }
+    expected, counts = tesseract_convert("tesserocr", "table")
+    assert extra["counts"] == counts
+    assert extra["ocr_crops"]["crops"][0]["cells"] == counts["cells"]
+    outputs = {o["path"] for o in records["table"]["outputs"]}
+    assert "tesseract.json" not in outputs  # the bindings give Docling lines, not a TSV
+
+
+@pytest.mark.parametrize(
+    ("preset", "env", "message"),
+    [
+        ("tesserocr", {"FAKE_TESSERACT_VERSION": "5.5.1"}, "'tesseract': '5.5.1'"),
+        ("tesseract-cli", {"FAKE_TESSERACT_VERSION": "4.1.1"}, "'tesseract 4.1.1'"),
+        ("tesseract-cli", "corrupt", "not matching tessdata_best.sha256: ['ces.traineddata']"),
+        ("tesserocr", "model", "model must be 'docling-2.145.0@layout-heron-8f39ad3c,"),
+    ],
+)
+def test_tesseract_setup_errors_fail_every_sample(tmp_path, preset, env, message):
+    model = TESSERACT_PRESETS[preset]["model"]
+    corrupt = "ces.traineddata" if env == "corrupt" else None
+    if env == "model":  # the command line's model identity for the bindings
+        model = dl.MODELS["tesseract"]
+    params = TESSERACT_PRESETS[preset]["params"]
+    env = {**tessdata_cache(tmp_path, corrupt), **(env if isinstance(env, dict) else {})}
+    _, records = run_adapter(tmp_path, {"a": 900, "b": 300}, params, env, model)
+    assert {(r["status"], r["reason"]) for r in records.values()} == {("failure", "engine-error")}
+    assert all(message in r["message"] for r in records.values())
+
+
 # Opt-in GPU smoke benchmark ----------------------------------------------------------------------
 
 
@@ -849,6 +1352,9 @@ def docling_image():
     for line in (ENGINE_DIR / "models.sha256").read_text(encoding="utf-8").splitlines():
         if not (cache / dl.MODELS_DIR / line.split()[1]).is_file():
             pytest.fail(f"models missing in {cache}: run make docling-model first")
+    for name in dl.read_checksums(ENGINE_DIR / "tessdata_best.sha256"):
+        if not (cache / dl.TESSDATA_BEST_DIR / name).is_file():
+            pytest.fail(f"tessdata_best missing in {cache}: run make tesseract-best first")
     subprocess.run(
         ["docker", "build", "-q", "-t", CONFIG["image"], str(ENGINE_DIR)],
         capture_output=True,
@@ -954,3 +1460,63 @@ def test_gpu_smoke_benchmark(tmp_path, docling_image):
     records = [latest_record(run, s.id) for s in run.samples]
     assert {(r["status"], r["reason"]) for r in records} == {("failure", "engine-error")}
     assert all("cuda:7" in r["message"] for r in records)
+
+
+@pytest.mark.docker
+@pytest.mark.gpu
+def test_gpu_smoke_tesseract_presets(tmp_path, docling_image):
+    """Docling's Tesseract command line and bindings on the synthetic pages, through the runner."""
+    manifest = smoke_dataset(tmp_path / "data")
+    runs = tmp_path / "runs"
+    pinned = dl.read_checksums(ENGINE_DIR / "tessdata_best.sha256")
+    paths = []
+    for name, preset in TESSERACT_PRESETS.items():
+        config = str(ENGINE_DIR / "presets" / f"{name}.toml")
+        args = ["run", "start", "--engine", config, "--dataset", str(manifest)]
+        args += ["--runs-dir", str(runs), "--cache", str(docling_image), "--run-id", name]
+        assert main(args) == 0
+        run = load_run(runs / name)
+        paths.append(str(run.path))
+        records = {s.id: latest_record(run, s.id) for s in run.samples}
+        assert {sid: r["status"] for sid, r in records.items()} == dict.fromkeys(
+            ("page-1", "para-1", "blank-1", "columns-1", "news-1", "table-1", "exif-1"), "success"
+        )
+        engine = preset["params"]["ocr_engine"]
+        extra = records["page-1"]["engine_extra"]
+        assert extra["tesseract"]["tesseract"] == dl.TESSERACT_VERSION
+        assert extra["tesseract"]["lang"] == "+".join(preset["params"]["ocr_lang"])
+        assert extra["tesseract"]["psm"] == 3
+        assert extra["environment"]["docling-slim"] == "2.145.0"
+        tessdata = extra["models"]["tessdata_best"]
+        assert tessdata == {
+            n: pinned[n] for n in (f"{c}.traineddata" for c in preset["params"]["ocr_lang"])
+        }
+        for sid, record in records.items():
+            crops = record["engine_extra"]["ocr_crops"]
+            assert crops["paired"], sid  # one Tesseract call per crop
+            assert crops["failed"] == 0, sid
+            assert crops["rotated"] == 0, sid  # OSD finds the synthetic pages upright
+            output = run.path / "samples" / sid / "attempt-1" / "output"
+            assert (output / "tesseract.json").is_file() == (engine == "tesseract")
+            if sid != "blank-1":  # a genuine empty result has an info finding
+                assert not record["findings"], sid  # positions fit the input image
+        page = (run.path / "samples" / "page-1" / "attempt-1" / "prediction.json").read_text()
+        exif = (run.path / "samples" / "exif-1" / "attempt-1" / "prediction.json").read_text()
+        lines = [sum(json.loads(p)["regions"][1]["lines"][0]["polygon"], []) for p in (page, exif)]
+        assert lines[1] == pytest.approx(lines[0], abs=4)  # the stored pixels, not the EXIF view
+        if engine == "tesseract":  # words grouped into Tesseract's lines
+            first = json.loads(page)["regions"][1]["lines"][0]
+            assert first["extra"]["words"] == len(first["text"].split()) > 1
+
+        assert main(["evaluate", str(run.path)]) == 0
+        scores = json.loads((run.path / "evaluations" / "1" / "scores.json").read_text())
+        rates = {s["sample_id"]: s["chars"]["rate"] for s in scores["samples"]}
+        flexible = {s["sample_id"]: s["flexible_chars"]["rate"] for s in scores["samples"]}
+        for sid in ("page-1", "para-1", "columns-1", "exif-1"):
+            assert rates[sid] < 0.1, (name, sid)
+        assert rates["table-1"] < 0.25, name  # the bindings re-read each table line on its own
+        assert flexible["news-1"] < 0.1, name
+
+    report = tmp_path / "report"
+    assert main(["report", *paths, "-o", str(report), "--inspect"]) == 0
+    assert (report / "index.html").is_file()
