@@ -2,8 +2,8 @@
 # categories and text of the layout elements in reading order (README.md next to this file;
 # format: docs/RUNNER.md). Run with --cache <dir> holding the weights from make dots-mocr-model.
 name = "dots-mocr"
-engine_version = "1"
-image = "ocrbench/engine-dots-mocr:3B-v1"
+engine_version = "2"
+image = "ocrbench/engine-dots-mocr:3B-v2"
 model = "dots-studio/dots.mocr@e539fbb52280393adc081b289ec597430a0f9031"
 
 [params]

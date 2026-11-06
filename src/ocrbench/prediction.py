@@ -368,15 +368,18 @@ class _Validator:
             lines = []
             for l_index, line in enumerate(item.get("lines", [])):
                 line_where = f"{where}/lines/{l_index}"
+                line_text = self.line_markup(line, line_where) if "markup" in line else line["text"]
                 if "id" in line:
                     if line["id"] in line_ids:
                         self.issue(
                             Severity.ERROR, "duplicate-id", f"line id {line['id']!r}", line_where
                         )
                     line_ids.add(line["id"])
+                if line_text is None:  # line markup that converts to no text adds no line
+                    continue
                 lines.append(
                     Line(
-                        text=line["text"],
+                        text=line_text,
                         id=line.get("id"),
                         type=line.get("type"),
                         polygon=self.geometry(geometry, line, "polygon", line_where),
@@ -430,6 +433,24 @@ class _Validator:
         self.markup.add(markup["format"])
         return fragment_text(markup["content"], markup["format"])
 
+    def line_markup(self, line: dict, where: str) -> str | None:
+        """The text of a line's native markup by the shared host converter; None when it is
+        empty, or when the line also has text (an error)."""
+        from ocrbench.convert import line_text  # convert imports this module
+
+        if "text" in line:
+            self.issue(
+                Severity.ERROR,
+                "markup-conflict",
+                "a line with markup must not have text",
+                f"{where}/markup",
+            )
+            return None
+        markup = line["markup"]
+        self.markup.add(markup["format"])
+        text = line_text(markup["content"], markup["format"])
+        return text if text.strip() else None
+
     def markup_conversion(self, conversion: dict[str, Any] | None) -> dict[str, Any] | None:
         from ocrbench.convert import CONVERTER_VERSION
 
@@ -444,7 +465,7 @@ class _Validator:
             self.issue(
                 Severity.ERROR,
                 "markup-conflict",
-                f"region markup mixes formats: {', '.join(sorted(self.markup))}",
+                f"markup mixes formats: {', '.join(sorted(self.markup))}",
                 "/regions",
             )
             return None

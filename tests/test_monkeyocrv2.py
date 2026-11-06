@@ -193,7 +193,7 @@ def test_records_become_positioned_regions_with_markup():
     assert [r.text for r in standardized.regions if r.text] == [
         "The Daily Chronicle", "a\tb", "E = mc^2", "Note"
     ]  # fmt: skip
-    assert standardized.conversion == {"from": "markdown", "version": 2}
+    assert standardized.conversion == {"from": "markdown", "version": 3}
     empty = moe.records_to_prediction([], "s", image)
     assert "regions" not in empty
     assert empty["text"] == ""
@@ -389,7 +389,7 @@ def test_adapter_follows_the_engine_protocol(tmp_path):
     assert "<table>" in markdown
     assert records["page"]["findings"] == []
     prediction = json.loads((page / "prediction.json").read_text(encoding="utf-8"))
-    assert prediction["conversion"] == {"from": "markdown", "version": 2}  # converted on the host
+    assert prediction["conversion"] == {"from": "markdown", "version": 3}  # converted on the host
     regions = prediction["regions"]
     assert [r["text"] for r in regions if "text" in r] == FIXTURE_TEXTS
     assert all("markup" not in r for r in regions)
@@ -616,7 +616,7 @@ def test_gpu_smoke_benchmark(tmp_path, monkeyocrv2_image, preset):
         prediction = json.loads(
             (run.path / "samples" / sid / "attempt-1" / "prediction.json").read_text()
         )
-        assert prediction["conversion"] == {"from": "markdown", "version": 2}
+        assert prediction["conversion"] == {"from": "markdown", "version": 3}
         assert prediction["reading_order"]
         assert all("polygon" in region for region in prediction["regions"])
 

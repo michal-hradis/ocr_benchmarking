@@ -29,7 +29,9 @@ from ocrbench.prediction import (
 
 # Version 2: tags with an underscore in their name (<page_number>) are inline markup in Markdown;
 # text between <img> and an explicit </img> adds nothing.
-CONVERTER_VERSION = 2
+# Version 3: an empty ordered Markdown list item keeps its printed number ("1912." alone), as an
+# empty HTML <ol> item already did.
+CONVERTER_VERSION = 3
 FORMATS = ("text", "markdown", "html")
 SUFFIXES = {".txt": "text", ".md": "markdown", ".markdown": "markdown", ".html": "html"}
 SUFFIXES[".htm"] = "html"
@@ -85,6 +87,13 @@ def fragment_text(content: str, source_format: str) -> str:
     else:
         raise ValueError(f"unknown markup format {source_format!r}; expected markdown or html")
     return LINE_SEPARATOR.join(block.text for block in blocks if block.text.strip())
+
+
+def line_text(content: str, source_format: str) -> str:
+    """Plain text of the markup of one positioned line (docs/PREDICTIONS.md#markup-in-positioned-
+    regions): ``fragment_text`` with its line breaks (from ``<br>`` or block boundaries) joined by
+    single spaces, so the line stays one line."""
+    return " ".join(fragment_text(content, source_format).split(LINE_SEPARATOR))
 
 
 def _tidy(text: str) -> str:
@@ -165,7 +174,9 @@ def _markdown(content: str) -> list[_Block]:
             blocks.append(block)
             items.append((block, prefix))
         elif kind == "list_item_close":
-            items.pop()
+            item, prefix = items.pop()
+            if not item.text and prefix:  # an empty ordered item still prints its number
+                item.text = prefix.strip()
         elif kind == "table_open":
             table = _Block("table", "table", "")
             blocks.append(table)

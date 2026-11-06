@@ -75,7 +75,7 @@ The container runs with `--gpus all` (`[resources]` in `engine.toml`), and the s
 
 ## Conversion to the prediction
 
-`page.md` is the model output, unchanged: the native output and the primary output. The shared Markdown converter turns it into the standardized prediction on the host ([PREDICTIONS.md](../../docs/PREDICTIONS.md#host-side-conversion-of-native-output)). Headings, paragraphs, list items, tables (one row per line, cells separated by tabs), `$$` formulas (TeX source) and HTML embedded in Markdown become typed regions with their text only, without positions and without physical lines. The prediction records `conversion` `{"from": "markdown", "version": 2}`.
+`page.md` is the model output, unchanged: the native output and the primary output. The shared Markdown converter turns it into the standardized prediction on the host ([PREDICTIONS.md](../../docs/PREDICTIONS.md#host-side-conversion-of-native-output)). Headings, paragraphs, list items, tables (one row per line, cells separated by tabs), `$$` formulas (TeX source) and HTML embedded in Markdown become typed regions with their text only, without positions and without physical lines. The prediction records `conversion` `{"from": "markdown", "version": 3}`.
 
 Converter version 2 was added for this model ([#99](https://github.com/michal-hradis/ocr_benchmarking/issues/99)):
 
