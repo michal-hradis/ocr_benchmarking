@@ -340,3 +340,30 @@ def test_conflicting_line_markup_is_an_error(change):
 def test_a_line_needs_text_or_valid_markup(line):
     data = minimal(regions=[{"id": "r1", "lines": [line]}])
     assert codes(validate_prediction(data)[1]) == ["schema-violation"]
+
+
+def test_region_text_is_not_used_when_all_its_marked_up_lines_are_dropped():
+    data = marked_up_lines({"format": "html", "content": "<b></b>"})
+    data["regions"][0]["text"] = "obsolete text"
+    prediction, issues = validate_prediction(data, sample_id="s1", image_size=(100, 100))
+    region = prediction.regions[0]
+    assert (region.text, region.lines, region.content) == (None, (), None)
+    assert prediction.text == ""
+    assert codes(issues) == ["empty-prediction", "region-text-ignored"]
+
+
+def test_page_text_with_a_space_differs_from_converted_no_break_space():
+    data = marked_up_lines({"format": "html", "content": "A B"})
+    data["text"] = "A B"
+    prediction, issues = validate_prediction(data, sample_id="s1", image_size=(100, 100))
+    assert prediction.text == "A B"
+    assert codes(issues) == ["text-mismatch"]
+
+
+def test_page_text_may_differ_from_the_structure_in_ascii_whitespace_only():
+    data = minimal(
+        text="  a \t b\n\n\nc ", regions=[{"id": "r1", "lines": [{"text": "a b"}, {"text": "c"}]}]
+    )
+    prediction, issues = validate_prediction(data)
+    assert codes(issues) == []
+    assert prediction.text == "  a \t b\n\n\nc "

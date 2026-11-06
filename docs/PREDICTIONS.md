@@ -68,9 +68,9 @@ The recommended types are `text`, `heading`, `list-item`, `caption`, `footnote`,
 
 ### Text
 
-- **One text source per region.** A region's text comes from its lines when it has any; otherwise from its own `text`, or from its `markup` converted on the host. A region with both gets a warning, and its own `text` is dropped. A region may have no text at all, such as a figure.
+- **One text source per region.** A region's text comes from its lines when it has any; otherwise from its own `text`, or from its `markup` converted on the host. A region with both gets a warning, and its own `text` is dropped, also when all its lines are dropped as empty after markup conversion. A region may have no text at all, such as a figure.
 - **Lines are optional.** A formula, a table or a paragraph from an image-to-text model can be a region with its own text and no lines. A line is whatever the engine reports; there is no marker for detected versus derived lines.
-- **Page text agrees with the structure.** When any region carries text, the **structure text** is built in reading order: lines of a region joined by `\n`, regions joined by a blank line (`\n\n`). The page text must equal it up to whitespace: the comparison treats any run of whitespace as one separator and ignores leading and trailing whitespace.
+- **Page text agrees with the structure.** When any region carries text, the **structure text** is built in reading order: lines of a region joined by `\n`, regions joined by a blank line (`\n\n`). The page text must equal it up to whitespace: the comparison treats any run of ASCII whitespace (spaces, tabs, line breaks) as one separator and ignores leading and trailing ASCII whitespace. A no-break space or other non-ASCII space is a character, as in the converter.
   - If they agree, the page text is kept as the engine wrote it.
   - If not, there is a `text-mismatch` warning and the **line/region text has priority**: the standardized page text is replaced by the structure text.
 - **No normalization.** Text is kept exactly as produced. Normalization and the way lines are joined for scoring belong to the evaluator ([EVALUATION.md](EVALUATION.md#text-preparation)). The joining above is used only for the agreement check and the rebuilt page text.

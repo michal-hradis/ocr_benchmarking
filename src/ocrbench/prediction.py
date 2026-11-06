@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import json
 import math
+import re
 from dataclasses import dataclass, field
 from functools import cache
 from importlib import resources
@@ -92,9 +93,15 @@ def structure_text(regions: tuple[Region, ...]) -> str | None:
     return REGION_SEPARATOR.join(parts) if parts else None
 
 
+_WORD = re.compile(r"[^ \t\n\r\f\v]+")
+
+
 def same_text(a: str, b: str) -> bool:
-    """Texts agree when they differ only in the amount or kind of whitespace."""
-    return a.split() == b.split()
+    """Texts agree when they differ only in the amount or kind of ASCII whitespace.
+
+    Other whitespace, such as a no-break space, is text: the converter keeps it.
+    """
+    return _WORD.findall(a) == _WORD.findall(b)
 
 
 @cache
@@ -394,7 +401,8 @@ class _Validator:
                     type=region_type,
                     native_type=item.get("native_type"),
                     polygon=self.geometry(geometry, item, "polygon", where),
-                    text=None if lines else text,
+                    # lines take precedence even when all were dropped as empty
+                    text=None if item.get("lines") else text,
                     lines=tuple(lines),
                     confidence=item.get("confidence"),
                     extra=item.get("extra"),
