@@ -30,7 +30,8 @@ from ocrbench.prediction import (
 # Version 2: tags with an underscore in their name (<page_number>) are inline markup in Markdown;
 # text between <img> and an explicit </img> adds nothing.
 # Version 3: an empty ordered Markdown list item keeps its printed number ("1912." alone), as an
-# empty HTML <ol> item already did.
+# empty HTML <ol> item already did; whitespace collapsing keeps no-break spaces (U+00A0) and other
+# non-ASCII spaces, as browsers do.
 CONVERTER_VERSION = 3
 FORMATS = ("text", "markdown", "html")
 SUFFIXES = {".txt": "text", ".md": "markdown", ".markdown": "markdown", ".html": "html"}
@@ -96,9 +97,18 @@ def line_text(content: str, source_format: str) -> str:
     return " ".join(fragment_text(content, source_format).split(LINE_SEPARATOR))
 
 
+# Whitespace that rendering collapses: ASCII only (HTML's definition), never a no-break space.
+_SPACES = re.compile(r"[ \t\n\r\f]+")
+
+
+def _collapse(text: str) -> str:
+    """Runs of whitespace as one space, without leading and trailing whitespace."""
+    return _SPACES.sub(" ", text).strip(" ")
+
+
 def _tidy(text: str) -> str:
     """Collapse spaces as rendering would, strip each line and drop blank lines in a block."""
-    lines = (re.sub(r"[ \t\r\f]+", " ", line).strip() for line in text.split("\n"))
+    lines = (re.sub(r"[ \t\r\f]+", " ", line).strip(" ") for line in text.split("\n"))
     return "\n".join(line for line in lines if line)
 
 
@@ -191,7 +201,7 @@ def _markdown(content: str) -> list[_Block]:
         elif kind == "inline":
             text = _inline(token)
             if row is not None:
-                row.append(" ".join(text.split()))
+                row.append(_collapse(text))
             elif heading:
                 blocks.append(_Block("heading", heading, _tidy(text)))
             elif items:
@@ -308,7 +318,7 @@ def _math_text(node: _Node) -> str:
             if child.tag == "annotation" and "tex" in (child.attrs.get("encoding") or ""):
                 return "".join(c for c in child.children if isinstance(c, str)).strip()
             stack.extend(reversed(child.children))
-    return " ".join(_text(node, pre=False).split())
+    return _collapse(_text(node, pre=False))
 
 
 def _text(node: _Node, *, pre: bool) -> str:
@@ -316,7 +326,7 @@ def _text(node: _Node, *, pre: bool) -> str:
     parts: list[str] = []
     for child in node.children:
         if isinstance(child, str):
-            parts.append(child if pre else re.sub(r"\s+", " ", child))
+            parts.append(child if pre else _SPACES.sub(" ", child))
         elif child.tag in _SKIP or child.tag in ("img", "annotation"):
             continue
         elif child.tag == "br":
@@ -370,7 +380,7 @@ def _walk(node: _Node, blocks: list[_Block]) -> None:
                     blocks.append(_Block("caption", "caption", _tidy(_text(caption, pre=False))))
             cells = [
                 [
-                    " ".join(_text(c, pre=False).split())
+                    _collapse(_text(c, pre=False))
                     for c in row.children
                     if isinstance(c, _Node) and c.tag in ("td", "th")
                 ]
