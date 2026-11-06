@@ -287,3 +287,18 @@ def test_empty_ordered_items_keep_their_number_in_markdown_and_html():
 )
 def test_line_text_keeps_one_line(content, source_format, expected):
     assert line_text(content, source_format) == expected
+
+
+@pytest.mark.parametrize(
+    ("content", "source_format", "expected"),
+    [
+        ("<p>— 253 —</p>", "html", "— 253 —"),
+        ("<p>a   b </p>", "html", "a   b "),
+        ("<table><tr><td>1 000</td><td> x </td></tr></table>", "html", "1 000\tx"),
+        ("— 253 —", "markdown", "— 253 —"),
+        ("| a b | c |\n| --- | --- |\n| d | e |", "markdown", "a b\tc\nd\te"),
+        ("<p>a \t\n  b</p>", "html", "a b"),  # ASCII whitespace still collapses
+    ],
+)
+def test_no_break_spaces_are_kept(content, source_format, expected):
+    assert fragment_text(content, source_format) == expected
