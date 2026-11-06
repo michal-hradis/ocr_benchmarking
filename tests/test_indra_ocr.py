@@ -264,7 +264,8 @@ def test_params_defaults_and_cpu_allocation():
 def test_image_downloads_exactly_the_checksummed_default_models():
     dockerfile = (ENGINE_DIR / "Dockerfile").read_text(encoding="utf-8")
     commit = re.search(r"ARG INDRA_MODEL_COMMIT=([0-9a-f]{40})", dockerfile).group(1)
-    assert CONFIG["model"] == f"datalab-to/indra-ocr@{ie.MODEL_TAG}:{commit}"
+    assert commit == ie.MODEL_COMMIT
+    assert CONFIG["model"] == ie.MODEL_ID == f"datalab-to/indra-ocr@{ie.MODEL_TAG}:{commit}"
     assert "sha256sum --check --strict /opt/ocrbench/models.sha256" in dockerfile
     assert "ORT_DISABLE_TELEMETRY=1" in dockerfile
     assert "HF_HUB_OFFLINE=1" in dockerfile
@@ -314,13 +315,14 @@ def make_dataset(root, sizes):
     return write_manifest(data, samples)
 
 
-def run_adapter(tmp_path, sizes, params=None, env=None):
-    config = dict(CONFIG, params=params if params is not None else CONFIG["params"])
+def run_adapter(tmp_path, sizes, params=None, env=None, model=CONFIG["model"]):
+    config = dict(CONFIG, params=params if params is not None else CONFIG["params"], model=model)
+    if model is None:
+        del config["model"]
     config["timeouts"] = {"sample": 20, "startup": 20}
     del config["resources"]
     env = {
         "PYTHONPATH": str(FIXTURES / "fake"),
-        "OCRBENCH_INDRA_MODEL_COMMIT": "a" * 40,
         **model_dir(tmp_path / "models"),
         **(env or {}),
     }
@@ -392,7 +394,7 @@ def test_adapter_follows_the_engine_protocol(tmp_path):
     models = extra["models"]
     assert models["job_model"] == CONFIG["model"]
     assert (models["repository"], models["tag"]) == ("datalab-to/indra-ocr", "v1.1.0")
-    assert models["commit"] == "a" * 40
+    assert models["commit"] == "a1283c4b42a273c09480ad50e71461daff50fcc7"
     assert set(models["files"]) == set(CHECKSUMS)
     assert extra["params"] == ie.DEFAULT_PARAMS
     assert records["turned"]["engine_extra"]["rotation"] == 90
@@ -430,6 +432,27 @@ def test_setup_errors_fail_every_sample_explicitly(tmp_path, params, models, mes
     _, records = run_adapter(tmp_path, {"a": (900, 420), "b": (300, 200)}, params, env)
     assert {(r["status"], r["reason"]) for r in records.values()} == {("failure", "engine-error")}
     assert all(message in r["message"] for r in records.values())
+
+
+@pytest.mark.parametrize(
+    "model",
+    [
+        "datalab-to/indra-ocr@v1.1.0:0000000000000000000000000000000000000000",
+        "datalab-to/indra-ocr@v1.2.0:a1283c4b42a273c09480ad50e71461daff50fcc7",
+        "other-model@rev1",
+        None,
+    ],
+)
+def test_a_job_for_another_model_fails_every_sample(tmp_path, model):
+    """The image runs only its pinned models; results are never attributed to another one."""
+    log = tmp_path / "load.json"
+    _, records = run_adapter(
+        tmp_path, {"a": (900, 420), "b": (300, 200)}, env={"FAKE_INDRA_LOG": str(log)}, model=model
+    )
+    assert {(r["status"], r["reason"]) for r in records.values()} == {("failure", "engine-error")}
+    expected = f"job model {model!r} is not the pinned model {ie.MODEL_ID!r}"
+    assert all(r["message"] == expected for r in records.values())
+    assert not log.exists()  # Indra is not even loaded
 
 
 def test_load_errors_fail_every_sample_explicitly(tmp_path):
