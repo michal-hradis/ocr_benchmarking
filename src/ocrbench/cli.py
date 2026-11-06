@@ -11,6 +11,7 @@ from pathlib import Path
 
 from PIL import Image
 
+from ocrbench.archer import ArcherImportError, import_archer
 from ocrbench.convert import FORMATS, SUFFIXES, convert_native
 from ocrbench.engine import EngineConfigError, load_engine_config
 from ocrbench.evaluate import (
@@ -65,6 +66,28 @@ def _validate(args: argparse.Namespace) -> int:
         f"{report.count(Severity.INFO)} info{hidden}"
     )
     return 0 if report.ok else 1
+
+
+def _import_archer(args: argparse.Namespace) -> int:
+    src = args.src or args.root / "src"
+    ref = args.ref or args.root / "ref"
+    output = args.output or args.root / "ocrbench"
+    try:
+        manifest, issues = import_archer(src, ref, output, name=args.name, force=args.force)
+    except ArcherImportError as error:
+        for issue in error.issues:
+            if args.verbose or issue.severity is not Severity.INFO:
+                print(issue.format(), file=sys.stderr)
+        print(f"import failed: {error}; nothing written", file=sys.stderr)
+        return 1
+    shown = [i for i in issues if args.verbose or i.severity is not Severity.INFO]
+    for issue in shown:
+        print(issue.format())
+    warnings = sum(i.severity is Severity.WARNING for i in issues)
+    infos = sum(i.severity is Severity.INFO for i in issues)
+    hidden = "" if args.verbose else " (use -v to list info)"
+    print(f"wrote {manifest}; {warnings} warnings, {infos} info{hidden}")
+    return 0
 
 
 def _text(args: argparse.Namespace) -> int:
@@ -304,6 +327,19 @@ def build_parser() -> argparse.ArgumentParser:
     text.add_argument("sample_id")
     text.add_argument("--ids", action="store_true", help="prefix region and line ids")
     text.set_defaults(handler=_text)
+
+    archer = actions.add_parser(
+        "import-archer",
+        help="import ARCHER OCR reference XML as a manifest with PAGE XML references",
+    )
+    archer.add_argument("root", type=Path, help="directory with src/ (images) and ref/ (XML)")
+    archer.add_argument("--src", type=Path, help="image directory (default: ROOT/src)")
+    archer.add_argument("--ref", type=Path, help="reference XML directory (default: ROOT/ref)")
+    archer.add_argument("-o", "--output", type=Path, help="default: ROOT/ocrbench")
+    archer.add_argument("--name", help="dataset name (default: archer-<language>-text-v1)")
+    archer.add_argument("--force", action="store_true", help="replace an earlier import")
+    archer.add_argument("-v", "--verbose", action="store_true", help="also list info findings")
+    archer.set_defaults(handler=_import_archer)
 
     prediction = commands.add_parser("prediction", help="standardized OCR prediction JSON")
     actions = prediction.add_subparsers(dest="action", required=True)

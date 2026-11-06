@@ -83,6 +83,7 @@ make check   # ruff lint + format check, then offline unit tests
 | `make lint` / `make format` | Ruff check and format check / apply fixes and formatting |
 | `make test` | Offline unit tests; select tests with `ARGS`, e.g. `make test ARGS="tests/test_package.py -k version"` |
 | `uv run ocrbench dataset validate <manifest>` | Validate a dataset manifest and its PAGE XML, see [docs/DATASETS.md](docs/DATASETS.md) |
+| `uv run ocrbench dataset import-archer <dir>` | Import ARCHER OCR reference XML (`<dir>/src`, `<dir>/ref`) as a manifest with PAGE XML references, see [docs/DATASETS.md](docs/DATASETS.md#importing-archer-ocr-datasets) |
 | `uv run ocrbench prediction validate\|convert …` | Validate a prediction JSON or convert native text/Markdown/HTML, see [docs/PREDICTIONS.md](docs/PREDICTIONS.md) |
 | `uv run ocrbench run start\|resume\|status …` | Run an engine image over a dataset and record every sample, see [docs/RUNNER.md](docs/RUNNER.md) |
 | `uv run ocrbench evaluate <run-dir> [--config eval.toml]` | Score a finished run against its frozen GT, see [docs/EVALUATION.md](docs/EVALUATION.md#command-and-stored-scores) |

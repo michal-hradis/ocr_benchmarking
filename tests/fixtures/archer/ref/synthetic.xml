@@ -1,0 +1,112 @@
+<?xml version='1.0' encoding='UTF-8'?>
+<!-- Synthetic ARCHER reference (hand-written for tests, no real data): an ordinary printed
+     page, two-column text linked across a figure, handwriting and a table. -->
+<dataset techno="OCR" language="EN">
+  <task id="syn-print">
+    <meta>
+      <source_name>print.png</source_name>
+      <published_at>1998-04-27T00:00:00Z</published_at>
+      <annotated_at>2026-05-21T09:20:32Z</annotated_at>
+    </meta>
+    <data>
+      <image original_width="200" original_height="100">print.png</image>
+    </data>
+    <annotations>
+      <block id="hdr-1" label="Text">
+        <bbox x="10" y="5" width="50" height="10" rotation="0" />
+        <text>(PR)A/RES/1 (E)
+Page 3(/PR)</text>
+      </block>
+      <block id="9body" label="Text">
+        <bbox x="10" y="20" width="80" height="70" rotation="0" />
+        <text>(PR)1.  The Commission welcomed
+the report of 1(YYY)87.
+
+(YYY)(/PR)</text>
+      </block>
+      <block id="blank" label="Text">
+        <bbox x="10" y="92" width="10" height="5" rotation="0" />
+        <text>(PR)(YYY)(/PR)</text>
+      </block>
+      <block id="logo" label="Image">
+        <bbox x="70" y="2" width="20" height="15" rotation="0" />
+      </block>
+      <block id="speck" label="Noise">
+        <bbox x="95" y="95" width="2" height="2" rotation="5" />
+      </block>
+    </annotations>
+  </task>
+  <task id="syn-columns">
+    <meta>
+      <source_name>columns.png</source_name>
+      <annotated_at>2026-05-22T10:00:00Z</annotated_at>
+    </meta>
+    <data>
+      <image original_width="200" original_height="100">columns.png</image>
+    </data>
+    <annotations>
+      <block id="-colB" label="Text">
+        <bbox x="55" y="10" width="40" height="80" rotation="0" />
+        <text>(PR)second column continues
+the story.(/PR)</text>
+      </block>
+      <block id="colA" label="Text">
+        <bbox x="5" y="10" width="40" height="40" rotation="10" />
+        <text>(PR)First column starts
+the story and(/PR)</text>
+      </block>
+      <block id="fig" label="Image">
+        <bbox x="5" y="55" width="40" height="20" rotation="0" />
+      </block>
+      <block id="cap" label="Text">
+        <bbox x="5" y="78" width="40" height="5" rotation="0" />
+        <text>(PR)Fig. 1 caption(/PR)</text>
+      </block>
+      <block id="unplaced" label="Text">
+        <bbox x="0" y="0" width="0" height="0" rotation="0" />
+        <text>(PR)Box without position.(/PR)</text>
+      </block>
+      <relation from="colA" to="-colB" />
+      <relation from="fig" to="cap" />
+      <relation from="colA" to="unplaced" />
+    </annotations>
+  </task>
+  <task id="syn-hand">
+    <meta>
+      <source_name>hand.png</source_name>
+      <annotated_at>2026-05-23T10:00:00Z</annotated_at>
+    </meta>
+    <data>
+      <image original_width="100" original_height="100">hand.png</image>
+    </data>
+    <annotations>
+      <block id="note" label="Text">
+        <bbox x="10" y="10" width="80" height="30" rotation="0" />
+        <text>(PR)Printed line.(/PR) (HW)OK!(/HW)
+(HW)(YYY)ldiers trained(/HW)</text>
+      </block>
+      <block id="scribble" label="Handwritten_annotations">
+        <bbox x="10" y="50" width="30" height="10" rotation="0" />
+        <text>(HW)signature(/HW)</text>
+      </block>
+    </annotations>
+  </task>
+  <task id="syn-table">
+    <meta>
+      <source_name>table.png</source_name>
+      <annotated_at>2026-05-24T10:00:00Z</annotated_at>
+    </meta>
+    <data>
+      <image original_width="100" original_height="100">table.png</image>
+    </data>
+    <annotations>
+      <block id="tab" label="Table">
+        <bbox x="5" y="5" width="90" height="90" rotation="0" />
+        <text>| No. | Name |
+|---|:--:|
+| 61 | Abdel Hadi |
+| 62 |  | a \| b |</text>
+      </block>
+    </annotations>
+  </task>
+</dataset>
