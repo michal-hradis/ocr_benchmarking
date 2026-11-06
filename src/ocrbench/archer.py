@@ -23,6 +23,7 @@ import math
 import os
 import re
 import shutil
+import tempfile
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -40,11 +41,13 @@ TEXT_VIEW = "archer-text-v1"
 PAGE_NAMESPACE = "http://schema.primaresearch.org/PAGE/gts/pagecontent/2019-07-15"
 
 # Labels whose text is transcription, and how each label is represented in PAGE XML.
-TEXT_LABELS = ("Text", "Table", "Handwritten_annotations")
+# Handwritten_annotations are non-textual additions (signatures, arrows, ticks, underlines);
+# transcribable handwriting is in Text blocks with (HW) spans.
+TEXT_LABELS = ("Text", "Table")
 PAGE_REGION = {
     "Text": ("TextRegion", "paragraph"),
     "Table": ("TextRegion", "other"),
-    "Handwritten_annotations": ("TextRegion", "other"),
+    "Handwritten_annotations": ("GraphicRegion", "handwritten-annotation"),
     "Image": ("ImageRegion", None),
     "Noise": ("NoiseRegion", None),
 }
@@ -77,7 +80,7 @@ class ArcherImportError(Exception):
 @dataclass(frozen=True)
 class TextView:
     text: str  # scored text, line breaks kept; empty when nothing is transcribed
-    illegible: int  # (YYY) markers removed
+    illegible: int  # (YYY) markers replaced by a word break
 
 
 def text_view(label: str, raw: str | None) -> TextView:
@@ -86,7 +89,8 @@ def text_view(label: str, raw: str | None) -> TextView:
         return TextView("", 0)
     text = SPAN_TAG_RE.sub("", raw)
     illegible = text.count(ILLEGIBLE)
-    text = text.replace(ILLEGIBLE, "")
+    # A word break, never a join: "1(YYY)87" must not become the untranscribed token "187".
+    text = text.replace(ILLEGIBLE, " ")
     if label == "Table":
         text = "\n".join(_table_line(line) for line in text.split("\n"))
     return TextView(text if text.strip() else "", illegible)
@@ -106,6 +110,11 @@ def _table_line(line: str) -> str:
 def has_geometry(bbox: dict[str, float]) -> bool:
     """False for ARCHER's empty box (zero width or height), which carries no position."""
     return bbox["width"] > 0 and bbox["height"] > 0
+
+
+# PAGE requires Coords on every region. A block without a box gets ARCHER's own empty box
+# x=y=width=height=0 as points, marked "geometry:none" in @custom: it is not a position.
+NO_GEOMETRY_POINTS = "0,0 0,0 0,0 0,0"
 
 
 def rotated_box(bbox: dict[str, float], width: int, height: int) -> list[tuple[int, int]]:
@@ -513,7 +522,18 @@ class _Importer:
                     task.id,
                     where,
                 )
-            exact = sorted({self.src / n for n in names if (self.src / n).is_file()})
+            root = self.src.resolve()
+            outside = [n for n in names if not (self.src / n).resolve().is_relative_to(root)]
+            if outside:
+                self.issue(
+                    Severity.ERROR,
+                    "image-outside-src",
+                    f"image name {outside[0]!r} resolves outside {self.src}",
+                    task.id,
+                    where,
+                )
+                continue
+            exact = sorted({(self.src / n).resolve() for n in names if (self.src / n).is_file()})
             if len(exact) > 1:
                 self.issue(
                     Severity.ERROR,
@@ -600,27 +620,35 @@ def _page_xml(task: _Task, ref_sha256: str) -> bytes:
     )
     if task.relations:
         relations = ET.SubElement(page, f"{ns}Relations")
-        for source, target in task.relations:
+        for number, (source, target) in enumerate(task.relations, 1):
             relation = ET.SubElement(
-                relations, f"{ns}Relation", type="link", custom="archer-relation"
+                relations,
+                f"{ns}Relation",
+                id=f"rel_{number}",
+                type="link",
+                custom="archer-relation",
             )
             ET.SubElement(relation, f"{ns}SourceRegionRef", regionRef=_region_id(source))
             ET.SubElement(relation, f"{ns}TargetRegionRef", regionRef=_region_id(target))
     for block in task.blocks:
         tag, kind = PAGE_REGION[block.label]
+        geometry = "" if has_geometry(block.bbox) else " geometry:none;"
         attrib = {
             "id": _region_id(block.id),
-            "custom": f"archer {{id:{block.id}; label:{block.label};}}",
+            "custom": f"archer {{id:{block.id}; label:{block.label};{geometry}}}",
         }
         if kind:
             attrib["type"] = kind
-        if block.bbox["rotation"]:
+        if block.bbox["rotation"] and tag != "NoiseRegion":  # NoiseRegion has no @orientation
             # PAGE: clockwise rotation that corrects the skew, in (-180, 180]
             attrib["orientation"] = f"{-((block.bbox['rotation'] + 180) % 360 - 180):g}"
         region = ET.SubElement(page, f"{ns}{tag}", attrib)
-        if has_geometry(block.bbox):  # never invent coordinates for a block without a box
+        if has_geometry(block.bbox):
             corners = rotated_box(block.bbox, task.width, task.height)
-            ET.SubElement(region, f"{ns}Coords", points=" ".join(f"{x},{y}" for x, y in corners))
+            points = " ".join(f"{x},{y}" for x, y in corners)
+        else:  # never invent a position for a block without a box
+            points = NO_GEOMETRY_POINTS
+        ET.SubElement(region, f"{ns}Coords", points=points)
         if tag == "TextRegion" and block.view.text:
             equiv = ET.SubElement(region, f"{ns}TextEquiv")
             ET.SubElement(equiv, f"{ns}Unicode").text = block.view.text
@@ -670,59 +698,84 @@ def _relative(path: Path, start: Path) -> str:
     return Path(os.path.relpath(path.resolve(), start.resolve())).as_posix()
 
 
-def import_archer(
-    src: Path, ref: Path, output: Path, name: str | None = None, force: bool = False
-) -> tuple[Path, list[Issue]]:
-    """Validate ARCHER references in ``ref`` against images in ``src`` and write the dataset.
+def _check_output(importer: _Importer, output: Path, force: bool) -> None:
+    """An existing output is replaced only with ``force``, and only if it holds exactly files
+    that its ``import.json`` lists: anything else in it may be someone's work."""
+    if not output.exists() or (output.is_dir() and not any(output.iterdir())):
+        return
+    if not force:
+        importer.issue(
+            Severity.ERROR,
+            "output-exists",
+            "output exists; use --force to replace it",
+            None,
+            str(output),
+        )
+        return
+    try:
+        record = json.loads((output / "import.json").read_text(encoding="utf-8"))
+        listed = set(record["files"]) if record.get("format") == IMPORT_FORMAT else None
+    except (OSError, ValueError, KeyError, TypeError):
+        listed = None
+    if not output.is_dir() or listed is None:
+        importer.issue(
+            Severity.ERROR,
+            "output-not-empty",
+            "output exists and was not written by the ARCHER importer; not replaced",
+            None,
+            str(output),
+        )
+        return
+    present = {p.relative_to(output).as_posix() for p in output.rglob("*") if not p.is_dir()}
+    dirs = {p.relative_to(output).as_posix() for p in output.rglob("*") if p.is_dir()}
+    expected_dirs = {str(Path(f).parent.as_posix()) for f in listed} | {"archer"}
+    unexpected = sorted((present - listed) | (dirs - expected_dirs))
+    if unexpected:
+        shown = ", ".join(unexpected[:5]) + (" …" if len(unexpected) > 5 else "")
+        importer.issue(
+            Severity.ERROR,
+            "output-not-empty",
+            f"output holds {len(unexpected)} file(s) the import did not write ({shown}); "
+            "not replaced",
+            None,
+            str(output),
+        )
 
-    Writes ``output/manifest.json``, ``page/<id>.xml``, ``archer/<id>.json``,
-    ``archer/ref/<file>`` and ``import.json``, deterministically (no timestamps). Raises
-    ``ArcherImportError`` without writing anything if any error is found.
-    """
-    importer = _Importer(Path(src), Path(ref))
-    tasks = importer.read_all()
-    output = Path(output)
-    if output.exists() and any(output.iterdir()):
-        if not (output / "import.json").is_file():
-            importer.issue(
-                Severity.ERROR,
-                "output-not-empty",
-                "output directory exists and was not written by the ARCHER importer",
-                None,
-                str(output),
-            )
-        elif not force:
-            importer.issue(
-                Severity.ERROR,
-                "output-exists",
-                "output exists; use --force to replace it",
-                None,
-                str(output),
-            )
-    if importer.errors():
-        raise ArcherImportError(importer.issues)
 
-    languages = sorted({t.dataset_attrib.get("language", "") for t in tasks} - {""})
-    name = name or "archer-" + ("-".join(languages).lower() or "x") + "-" + TEXT_VIEW.removeprefix(
-        "archer-"
-    )
-    if output.exists():
-        shutil.rmtree(output)
-    (output / "page").mkdir(parents=True)
-    (output / "archer" / "ref").mkdir(parents=True)
+def _swap(stage: Path, output: Path) -> None:
+    """Move the staged import into place; the previous import is removed only afterwards."""
+    if not output.exists():
+        stage.rename(output)
+        return
+    old = Path(tempfile.mkdtemp(prefix=f".{output.name}.old.", dir=output.parent))
+    old.rmdir()
+    output.rename(old)
+    try:
+        stage.rename(output)
+    except BaseException:
+        old.rename(output)
+        shutil.rmtree(stage, ignore_errors=True)
+        raise
+    shutil.rmtree(old)
+
+
+def _write(stage: Path, output: Path, tasks: list[_Task], name: str, issues: list[Issue]) -> None:
+    """Write the dataset into ``stage``; paths in the manifest are relative to ``output``."""
+    (stage / "page").mkdir()
+    (stage / "archer" / "ref").mkdir(parents=True)
     ref_hashes: dict[str, str] = {}
     for path in sorted({t.source for t in tasks}):
-        shutil.copyfile(path, output / "archer" / "ref" / path.name)
+        shutil.copyfile(path, stage / "archer" / "ref" / path.name)
         ref_hashes[path.name] = sha256_file(path)
     samples = []
     for task in sorted(tasks, key=lambda t: t.id):
         assert task.image is not None
         page_file = f"page/{task.id}.xml"
-        (output / page_file).write_bytes(_page_xml(task, ref_hashes[task.source.name]))
+        (stage / page_file).write_bytes(_page_xml(task, ref_hashes[task.source.name]))
         sidecar = _sidecar(
             task, f"archer/ref/{task.source.name}", ref_hashes[task.source.name], page_file
         )
-        (output / "archer" / f"{task.id}.json").write_bytes(_dump(sidecar))
+        (stage / "archer" / f"{task.id}.json").write_bytes(_dump(sidecar))
         sample: dict[str, Any] = {
             "id": task.id,
             "image": _relative(task.image, output),
@@ -736,7 +789,7 @@ def import_archer(
         if re.match(r"^\d{4}-", published):
             sample["year"] = int(published[:4])
         sample["image_sha256"] = sha256_file(task.image)
-        sample["gt_sha256"] = hashlib.sha256((output / page_file).read_bytes()).hexdigest()
+        sample["gt_sha256"] = hashlib.sha256((stage / page_file).read_bytes()).hexdigest()
         samples.append(sample)
     manifest = {
         "format": MANIFEST_FORMAT,
@@ -748,7 +801,7 @@ def import_archer(
         ),
         "samples": samples,
     }
-    (output / "manifest.json").write_bytes(_dump(manifest))
+    (stage / "manifest.json").write_bytes(_dump(manifest))
     record = {
         "format": IMPORT_FORMAT,
         "version": IMPORTER_VERSION,
@@ -763,8 +816,43 @@ def import_archer(
                 "where": i.location,
                 "message": i.message,
             }
-            for i in importer.issues
+            for i in issues
         ],
     }
-    (output / "import.json").write_bytes(_dump(record))
+    files = sorted(p.relative_to(stage).as_posix() for p in stage.rglob("*") if p.is_file())
+    record["files"] = files + ["import.json"]
+    (stage / "import.json").write_bytes(_dump(record))
+
+
+def import_archer(
+    src: Path, ref: Path, output: Path, name: str | None = None, force: bool = False
+) -> tuple[Path, list[Issue]]:
+    """Validate ARCHER references in ``ref`` against images in ``src`` and write the dataset.
+
+    Writes ``output/manifest.json``, ``page/<id>.xml``, ``archer/<id>.json``,
+    ``archer/ref/<file>`` and ``import.json``, deterministically (no timestamps). Raises
+    ``ArcherImportError`` without writing anything if any error is found.
+    """
+    importer = _Importer(Path(src), Path(ref))
+    tasks = importer.read_all()
+    output = Path(output)
+    _check_output(importer, output, force)
+    if importer.errors():
+        raise ArcherImportError(importer.issues)
+
+    languages = sorted({t.dataset_attrib.get("language", "") for t in tasks} - {""})
+    name = name or "archer-" + ("-".join(languages).lower() or "x") + "-" + TEXT_VIEW.removeprefix(
+        "archer-"
+    )
+    output.parent.mkdir(parents=True, exist_ok=True)
+    stage = Path(tempfile.mkdtemp(prefix=f".{output.name}.", dir=output.parent))
+    umask = os.umask(0)
+    os.umask(umask)
+    stage.chmod(0o777 & ~umask)  # mkdtemp creates 0700; the import is an ordinary directory
+    try:
+        _write(stage, output, tasks, name, importer.issues)
+    except BaseException:
+        shutil.rmtree(stage, ignore_errors=True)
+        raise
+    _swap(stage, output)
     return output / "manifest.json", importer.issues
