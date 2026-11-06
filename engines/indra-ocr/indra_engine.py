@@ -29,7 +29,10 @@ CHECKSUMS = Path(os.environ.get("OCRBENCH_INDRA_CHECKSUMS", "/opt/ocrbench/model
 CPU_MAX = Path("/sys/fs/cgroup/cpu.max")
 MODEL_REPOSITORY = "datalab-to/indra-ocr"
 MODEL_TAG = "v1.1.0"  # indra_ocr.models.HF_REVISION of Indra OCR 1.1.2
-MODEL_COMMIT = os.environ.get("OCRBENCH_INDRA_MODEL_COMMIT", "")
+MODEL_COMMIT = "a1283c4b42a273c09480ad50e71461daff50fcc7"  # the Dockerfile's INDRA_MODEL_COMMIT
+# The model identity the engine configuration must request (engine.toml "model"): the models in
+# the image are the only ones the adapter can run, so any other claim is rejected.
+MODEL_ID = f"{MODEL_REPOSITORY}@{MODEL_TAG}:{MODEL_COMMIT}"
 # Engine parameters (job.json "params"), README.md.
 DEFAULT_PARAMS: dict[str, Any] = {"threads": 4}
 # Indra layout block label -> standardized region type (docs/PREDICTIONS.md#region-types); any
@@ -60,6 +63,12 @@ def parse_params(params: dict[str, Any]) -> dict[str, Any]:
     if type(threads) is not int or threads < 1:
         raise AdapterError(f"threads must be an integer of at least 1: {threads!r}")
     return merged
+
+
+def check_model(requested: Any) -> None:
+    """Raises AdapterError unless the job requests the pinned model this image runs."""
+    if requested != MODEL_ID:
+        raise AdapterError(f"job model {requested!r} is not the pinned model {MODEL_ID!r}")
 
 
 def sha256(path: Path) -> str:
@@ -288,6 +297,7 @@ def main() -> None:
     start = time.monotonic()
     converter, params, info, files, init_error = None, None, {}, None, None
     try:
+        check_model(job.get("model"))
         params = parse_params(job.get("params") or {})
         info = environment(params["threads"])
         files = model_files()

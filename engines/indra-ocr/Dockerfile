@@ -9,7 +9,7 @@ COPY requirements.txt /opt/ocrbench/engine-requirements.txt
 RUN uv pip install --require-hashes --no-deps -r /opt/ocrbench/engine-requirements.txt
 
 # The default models of Indra OCR 1.1.2 (Hugging Face datalab-to/indra-ocr, tag v1.1.0 at the
-# commit below; 73 MB, modified OpenRAIL-M license, copied with them), without the optional math
+# commit below, which indra_engine.py's MODEL_COMMIT repeats; 73 MB, modified OpenRAIL-M license, copied with them), without the optional math
 # models. The build fails unless every file matches models.sha256; the adapter checks them again
 # before it loads them.
 ARG INDRA_MODEL_COMMIT=a1283c4b42a273c09480ad50e71461daff50fcc7
@@ -25,7 +25,6 @@ COPY indra_engine.py /opt/ocrbench/indra_engine.py
 # Offline: the models are read from the image only (INDRA_OCR_MODEL_DIR), never downloaded, and
 # ONNX Runtime's telemetry is off.
 ENV OCRBENCH_INDRA_MODELS=/opt/ocrbench/models \
-    OCRBENCH_INDRA_MODEL_COMMIT=${INDRA_MODEL_COMMIT} \
     INDRA_OCR_MODEL_DIR=/opt/ocrbench/models \
     HF_HUB_OFFLINE=1 \
     ORT_DISABLE_TELEMETRY=1
