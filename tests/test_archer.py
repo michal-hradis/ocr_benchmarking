@@ -11,6 +11,7 @@ import xml.etree.ElementTree as ET
 from pathlib import Path
 
 import pytest
+from lxml import etree
 from PIL import Image
 
 from ocrbench.archer import TEXT_VIEW, ArcherImportError, import_archer, text_view
@@ -21,6 +22,7 @@ from ocrbench.pagexml import read_page_xml
 from ocrbench.runner import _job_entry
 
 FIXTURE = Path(__file__).parent / "fixtures" / "archer" / "ref" / "synthetic.xml"
+PAGE_SCHEMA = Path(__file__).parent / "fixtures" / "page-schema" / "pagecontent-2019-07-15.xsd"
 SIZES = {"print.png": (200, 100), "columns.png": (200, 100), "hand.png": (100, 100)}
 SIZES["table.png"] = (100, 100)
 PAGE = "{http://schema.primaresearch.org/PAGE/gts/pagecontent/2019-07-15}"
@@ -56,13 +58,30 @@ def edit_reference(root, old, new, count=1):
 
 
 def test_text_view_removes_structure_tags_and_illegible_markers_only():
-    view = text_view("Text", "(PR)A/RES/1 (E)\nPage 3(/PR) (HW)1(YYY)87(/HW)")
-    assert view.text == "A/RES/1 (E)\nPage 3 187"
-    assert view.illegible == 1
-    assert text_view("Text", "(PR)(YYY)(/PR)").text == ""
+    view = text_view("Text", "(PR)A/RES/1 (E)\nPage 3(/PR) (HW)written(/HW)")
+    assert view.text == "A/RES/1 (E)\nPage 3 written"
+    assert view.illegible == 0
     assert text_view("Image", "caption-like text").text == ""
     assert text_view("Noise", None).text == ""
-    assert text_view("Handwritten_annotations", "(HW)note(/HW)").text == "note"
+    # Non-textual handwritten additions (signatures, ticks, arrows) are never scored.
+    assert text_view("Handwritten_annotations", "(HW)note(/HW)").text == ""
+
+
+@pytest.mark.parametrize(
+    ("raw", "scored"),
+    [
+        ("1(YYY)87", "1 87"),  # inside a word: never fused into the untranscribed "187"
+        ("(YYY)ldiers trained", " ldiers trained"),
+        ("www.(YYY).org.uk", "www. .org.uk"),
+        ("before (YYY) after", "before   after"),  # standalone
+        ("(YYY)", ""),
+        ("(PR)(YYY)(/PR)", ""),
+    ],
+)
+def test_illegible_markers_become_word_breaks(raw, scored):
+    view = text_view("Text", raw)
+    assert view.text == scored
+    assert view.illegible == raw.count("(YYY)")
 
 
 def test_text_view_flattens_table_rows_and_drops_rules():
@@ -93,7 +112,7 @@ def test_import_writes_a_valid_dataset_with_the_text_view(root):
     # Annotation order, each text block once; image, noise and the tag-only block contribute none.
     assert lines("syn-print") == [
         "A/RES/1 (E)\nPage 3",
-        "1.  The Commission welcomed\nthe report of 187.\n\n",
+        "1.  The Commission welcomed\nthe report of 1 87.\n\n ",
     ]
     # Linked columns are not reordered; the block without a box keeps its text.
     assert lines("syn-columns") == [
@@ -102,12 +121,13 @@ def test_import_writes_a_valid_dataset_with_the_text_view(root):
         "Fig. 1 caption",
         "Box without position.",
     ]
-    assert lines("syn-hand") == ["Printed line. OK!\nldiers trained"]
+    assert lines("syn-hand") == ["Printed line. OK!\n ldiers trained"], "not the signature"
     assert lines("syn-table") == ["No. Name\n\n61 Abdel Hadi\n62 a | b"]
     codes = {(i.code, i.location.rsplit("/", 1)[-1]) for i in issues}
     assert ("illegible-removed", "9body") in codes
     assert ("empty-text", "blank") in codes
     assert ("no-geometry", "unplaced") in codes
+    assert ("text-not-scored", "scribble") in codes
 
 
 def test_page_xml_keeps_geometry_without_inventing_it(root):
@@ -121,7 +141,9 @@ def test_page_xml_keeps_geometry_without_inventing_it(root):
     assert regions["b_colA"].find(f"{PAGE}Coords").get("points") == "10,10 89,24 82,63 3,49"
     assert regions["b_colA"].get("orientation") == "-10"
     assert regions["b_-colB"].find(f"{PAGE}Coords").get("points") == "110,10 190,10 190,90 110,90"
-    assert regions["b_unplaced"].find(f"{PAGE}Coords") is None
+    assert regions["b_unplaced"].find(f"{PAGE}Coords").get("points") == "0,0 0,0 0,0 0,0"
+    assert "geometry:none" in regions["b_unplaced"].get("custom")
+    assert "geometry" not in regions["b_colA"].get("custom")
     assert "id:-colB" in regions["b_-colB"].get("custom")
     relations = [
         (
@@ -131,9 +153,24 @@ def test_page_xml_keeps_geometry_without_inventing_it(root):
         for r in page.iter(f"{PAGE}Relation")
     ]
     assert relations == [("b_colA", "b_-colB"), ("b_fig", "b_cap"), ("b_colA", "b_unplaced")]
+    assert [r.get("id") for r in page.iter(f"{PAGE}Relation")] == ["rel_1", "rel_2", "rel_3"]
     gt, issues = read_page_xml(root / "out" / "page" / "syn-columns.xml")
-    assert gt.regions[-1].coords is None
+    assert gt.regions[-1].coords == ((0, 0),) * 4
     assert not [i for i in issues if i.severity != "info"]
+
+
+def test_page_xml_is_valid_against_the_page_2019_schema(root):
+    run_import(root)
+    schema = etree.XMLSchema(etree.parse(str(PAGE_SCHEMA)))
+    pages = sorted((root / "out" / "page").glob("*.xml"))
+    assert len(pages) == 4
+    for path in pages:
+        document = etree.parse(str(path))
+        assert schema.validate(document), (path.name, [str(e) for e in schema.error_log])
+    hand = etree.parse(str(root / "out" / "page" / "syn-hand.xml")).getroot()
+    [graphic] = hand.iter(f"{PAGE}GraphicRegion")
+    assert graphic.get("type") == "handwritten-annotation"
+    assert graphic.find(f"{PAGE}TextEquiv") is None
 
 
 def test_sidecar_and_original_copy_are_lossless(root):
@@ -194,6 +231,63 @@ def test_refuses_to_overwrite_a_foreign_directory(root):
         run_import(root, force=True)
     assert [i.code for i in raised.value.issues if i.severity == "error"] == ["output-not-empty"]
     assert (root / "out" / "keep.txt").exists()
+
+
+def test_force_never_deletes_files_the_import_did_not_write(root):
+    run_import(root)
+    (root / "out" / "notes.txt").write_text("mine")
+    (root / "out" / "page" / "extra.xml").write_text("<x/>")
+    with pytest.raises(ArcherImportError) as raised:
+        run_import(root, force=True)
+    [error] = [i for i in raised.value.issues if i.severity == "error"]
+    assert error.code == "output-not-empty"
+    assert "notes.txt" in error.message
+    assert "page/extra.xml" in error.message
+    assert (root / "out" / "notes.txt").read_text() == "mine"
+    assert (root / "out" / "page" / "extra.xml").exists()
+
+
+def test_force_rejects_an_import_record_without_a_file_list(root):
+    run_import(root)
+    record = json.loads((root / "out" / "import.json").read_text(encoding="utf-8"))
+    del record["files"]
+    (root / "out" / "import.json").write_text(json.dumps(record), encoding="utf-8")
+    with pytest.raises(ArcherImportError) as raised:
+        run_import(root, force=True)
+    assert [i.code for i in raised.value.issues if i.severity == "error"] == ["output-not-empty"]
+    assert (root / "out" / "manifest.json").exists()
+
+
+def test_force_replaces_stale_generated_files_and_leaves_no_staging(root):
+    run_import(root)
+    edit_reference(root, '<task id="syn-table">', '<task id="syn-table2">')
+    run_import(root, force=True)
+    assert not (root / "out" / "page" / "syn-table.xml").exists()
+    assert (root / "out" / "page" / "syn-table2.xml").exists()
+    assert sorted(p.name for p in root.iterdir()) == ["out", "ref", "src"]
+    record = json.loads((root / "out" / "import.json").read_text(encoding="utf-8"))
+    on_disk = sorted(
+        p.relative_to(root / "out").as_posix() for p in (root / "out").rglob("*") if p.is_file()
+    )
+    assert sorted(record["files"]) == on_disk
+
+
+def test_an_empty_output_directory_is_used(root):
+    (root / "out").mkdir()
+    manifest_path, _ = run_import(root)
+    assert manifest_path.is_file()
+
+
+@pytest.mark.parametrize("name", ["../outside.png", "ABSOLUTE"])
+def test_image_names_must_stay_inside_src(root, name):
+    outside = root / "outside.png"
+    Image.new("L", (100, 100), 255).save(outside)
+    name = str(outside) if name == "ABSOLUTE" else name
+    edit_reference(root, ">hand.png</image>", f">{name}</image>")
+    edit_reference(
+        root, "<source_name>hand.png</source_name>", f"<source_name>{name}</source_name>"
+    )
+    assert failure_codes(root) == ["image-outside-src"]
 
 
 def test_missing_image_names_a_same_stem_candidate(root):

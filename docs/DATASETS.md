@@ -93,7 +93,7 @@ uv run ocrbench dataset import-archer dev_data/archer_examples/en      # reads s
 uv run ocrbench dataset validate dev_data/archer_examples/en/ocrbench/manifest.json
 ```
 
-`--src`, `--ref` and `-o` override the default `ROOT/src`, `ROOT/ref` and `ROOT/ocrbench`; `--name` overrides the dataset name (default `archer-<language>-text-v1`, so the text-view version appears in run IDs and reports). An existing import is replaced only with `--force`; a directory not written by the importer is never replaced. Keep the output under `dev_data/`: it contains real reference text.
+`--src`, `--ref` and `-o` override the default `ROOT/src`, `ROOT/ref` and `ROOT/ocrbench`; `--name` overrides the dataset name (default `archer-<language>-text-v1`, so the text-view version appears in run IDs and reports). An existing import is replaced only with `--force`, and only if it contains exactly the files its `import.json` lists. A directory holding anything else (another tool's output or files added later) is never replaced, and the new import is written to a staging directory and moved into place only when it is complete. Keep the output under `dev_data/`: it contains real reference text.
 
 **This scores an ARCHER dataset with OCRbench metrics** (strict and flexible CER/WER, bag-of-words, ROUGE-2). It is **not** the official ARCHER block-reconstruction CER/WER, which matches, splits and merges semantic blocks along the relation graph; fCER/fWER on an imported dataset must not be reported as ARCHER scores.
 
@@ -104,6 +104,7 @@ Each `task` becomes one page sample with ID `task/@id`. Its image is the file in
 | Error (`code`) | Cause |
 | --- | --- |
 | `missing-image` | Neither name exists; a file with the same stem and another suffix is named as a hint |
+| `image-outside-src` | An image name is absolute or uses `..` (or a symlink) to leave the image directory |
 | `ambiguous-image` | `data/image` and `meta/source_name` name two different existing files (if only one exists, the difference is a `source-name-differs` warning) |
 | `image-reused`, `duplicate-task-id` | Two tasks share an image or an ID, also across reference files |
 | `image-unreadable`, `image-size-mismatch`, `invalid-dimensions` | The image cannot be read, its size differs from `original_width`/`original_height`, or these are not positive integers |
@@ -120,19 +121,19 @@ Warnings and info findings (`source-name-differs`, unknown elements or attribute
 | `page/<id>.xml` | PAGE 2019 evaluation reference, described below |
 | `archer/<id>.json` | Lossless sidecar: source file, its SHA-256 and task position; dataset attributes; `meta`; every block's ID, label, raw `bbox` attributes, raw text, scored text and pixel polygon; all relations in document order |
 | `archer/ref/<file>` | Unchanged copies of the original reference files |
-| `import.json` | Importer and text-view versions, reference hashes and all findings |
+| `import.json` | Importer and text-view versions, reference hashes, all findings and the list of files written |
 
 The output is deterministic: no timestamps, and a re-import of the same files is byte-identical. The PAGE files' `gt_sha256` (frozen in every run) and their `Metadata/Comments` identify the source file, its hash and the text view.
 
-**PAGE XML reference.** Every block becomes a region with ID `b_<block id>` (block IDs need not be valid XML IDs) and the original ID and label in `@custom`, in **annotation order**; no `ReadingOrder` is invented, so the reader reports `no-reading-order` and keeps that order. `Text` blocks are `TextRegion type="paragraph"`, `Table` and `Handwritten_annotations` blocks `TextRegion type="other"`, `Image` an `ImageRegion` and `Noise` a `NoiseRegion`. The scored text is the region's own `TextEquiv`, with its line breaks, so each block is one reference unit: flexible matching can reorder whole blocks but does not split them, and no line coordinates are invented. Boxes are converted to pixel corners, rotated clockwise by `rotation` degrees about the top-left corner (the region's `@orientation` is the correcting angle). ARCHER writes an all-zero box for a block without a position: such a region keeps its text but has **no `Coords`**. The relations are mirrored as PAGE `Relation type="link"` elements for reference only; the evaluator does not use them.
+**PAGE XML reference.** Every block becomes a region with ID `b_<block id>` (block IDs need not be valid XML IDs) and the original ID and label in `@custom`, in **annotation order**; no `ReadingOrder` is invented, so the reader reports `no-reading-order` and keeps that order. `Text` blocks are `TextRegion type="paragraph"`, `Table` blocks `TextRegion type="other"`, `Handwritten_annotations` a `GraphicRegion type="handwritten-annotation"`, `Image` an `ImageRegion` and `Noise` a `NoiseRegion`. The scored text is the region's own `TextEquiv`, with its line breaks, so each block is one reference unit: flexible matching can reorder whole blocks but does not split them, and no line coordinates are invented. Boxes are converted to pixel corners, rotated clockwise by `rotation` degrees about the top-left corner (the region's `@orientation`, where PAGE allows one, is the correcting angle). ARCHER writes an all-zero box for a block without a position. Such a region keeps its text. Because PAGE requires `Coords`, the region carries ARCHER's own empty box as `points="0,0 0,0 0,0 0,0"`, marked `geometry:none` in `@custom`. This is **not a position**: the sidecar's `polygon` is `null`, and code that uses reference geometry must skip such regions. The relations are mirrored as PAGE `Relation type="link"` elements (IDs `rel_1`, `rel_2`, … in document order) for reference only; the evaluator does not use them. The generated files validate against the PAGE 2019-07-15 schema (`tests/test_archer.py`).
 
 ### Text view `archer-text-v1`
 
 The scored text of each block, applied identically to every sample:
 
-- **Labels.** `Text`, `Table` and `Handwritten_annotations` blocks are transcription. `Image` and `Noise` blocks are never scored (text on them would be a `text-not-scored` warning).
+- **Labels.** Only `Text` and `Table` blocks are transcription. `Handwritten_annotations` (non-textual handwritten additions such as signatures, arrows, ticks and underlines; transcribable handwriting is in `Text` blocks with `(HW)` spans), `Image` and `Noise` blocks are never scored. Any text on them stays in the sidecar and is reported as a `text-not-scored` warning.
 - **Span tags.** Exactly `(PR)`, `(/PR)`, `(HW)` and `(/HW)` are removed. Printed and handwritten text are both scored; other parenthesized text, such as `(E)` in a UN document symbol, is kept.
-- **Illegible text.** Each `(YYY)` marker is removed, so `1(YYY)87` becomes `187` and an engine's reading of the illegible characters counts as insertions. No legible text is substituted. A block that becomes empty contributes no reference text (`empty-text`).
+- **Illegible text.** Each `(YYY)` marker is replaced by a **word break** (a space), so the text around it is never fused: `1(YYY)87` becomes `1 87`, not the untranscribed token `187`. A standalone marker leaves only spaces, which the evaluator collapses. No legible text is substituted, and an engine's reading of the illegible material counts against it as edits. Masking these spans out of scoring would need scorer support and is left to a future scorer. A block that becomes empty contributes no reference text (`empty-text`).
 - **Tables** (`Table` blocks only). A pipe row `| a | b |` becomes its non-empty cells joined by single spaces (`a b`), `\|` becomes `|`, and a Markdown rule row such as `|---|:--:|` becomes an empty line. Other lines are kept.
 - Nothing else changes: whitespace, Unicode and line breaks are kept and normalized only by the evaluator.
 

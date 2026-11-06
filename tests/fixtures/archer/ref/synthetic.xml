@@ -32,7 +32,7 @@ the report of 1(YYY)87.
         <bbox x="70" y="2" width="20" height="15" rotation="0" />
       </block>
       <block id="speck" label="Noise">
-        <bbox x="95" y="95" width="2" height="2" rotation="0" />
+        <bbox x="95" y="95" width="2" height="2" rotation="5" />
       </block>
     </annotations>
   </task>
@@ -87,6 +87,7 @@ the story and(/PR)</text>
       </block>
       <block id="scribble" label="Handwritten_annotations">
         <bbox x="10" y="50" width="30" height="10" rotation="0" />
+        <text>(HW)signature(/HW)</text>
       </block>
     </annotations>
   </task>
