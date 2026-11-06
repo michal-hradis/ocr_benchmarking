@@ -1,0 +1,101 @@
+{
+ "file": "page-1.png",
+ "page": 0,
+ "source": "ocr",
+ "rotation": 0,
+ "skew": 0.0,
+ "vertical": false,
+ "note": "order=model",
+ "lines": [
+  {
+   "box": [
+    42.1,
+    38.1,
+    290.1,
+    62.2
+   ],
+   "text": "The Daily Chronicle",
+   "conf": 0.9981
+  },
+  {
+   "box": [
+    40.1,
+    117.6,
+    446.8,
+    143.2
+   ],
+   "text": "The quick brown fox jumps over",
+   "conf": 0.9983
+  },
+  {
+   "box": [
+    38.4,
+    157.7,
+    376.5,
+    183.0
+   ],
+   "text": "the lazy dog near the river.",
+   "conf": 0.9987
+  },
+  {
+   "box": [
+    38.5,
+    238.4,
+    480.0,
+    262.9
+   ],
+   "text": "A second paragraph and more text",
+   "conf": 0.9886
+  },
+  {
+   "box": [
+    37.2,
+    277.9,
+    416.3,
+    299.4
+   ],
+   "text": "with numbers 1923 and 2026.",
+   "conf": 0.9889
+  }
+ ],
+ "markdown": "## The Daily Chronicle\n\nThe quick brown fox jumps over the lazy dog near the river.\n\nA second paragraph and more text with numbers 1923 and 2026.",
+ "blocks": [
+  {
+   "label": "Section-Header",
+   "bbox": [
+    42.1,
+    38.1,
+    290.1,
+    62.2
+   ],
+   "text": "The Daily Chronicle"
+  },
+  {
+   "label": "Text",
+   "bbox": [
+    38.4,
+    117.6,
+    446.8,
+    183.0
+   ],
+   "text": "The quick brown fox jumps over\nthe lazy dog near the river."
+  },
+  {
+   "label": "Text",
+   "bbox": [
+    37.2,
+    238.4,
+    480.0,
+    299.4
+   ],
+   "text": "A second paragraph and more text\nwith numbers 1923 and 2026."
+  }
+ ],
+ "timings": {
+  "orient_ms": 38.31276157870889,
+  "det_ms": 27.639126870781183,
+  "rec_ms": 66.18188973516226,
+  "order_ms": 52.18551540747285,
+  "total_ms": 146.0104319266975
+ }
+}

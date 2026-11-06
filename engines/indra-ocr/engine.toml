@@ -1,0 +1,21 @@
+# Indra OCR image pipeline on the CPU: orientation, line detection, recognition, layout blocks and
+# reading order on ONNX Runtime, OCR mode without math (README.md next to this file; format:
+# docs/RUNNER.md). The models are in the image.
+name = "indra-ocr"
+engine_version = "1"
+image = "ocrbench/engine-indra-ocr:1.1.2-v1"
+model = "datalab-to/indra-ocr@v1.1.0:a1283c4b42a273c09480ad50e71461daff50fcc7"  # models.sha256
+
+[params]
+threads = 4  # ONNX Runtime, OpenCV and Indra's page threads; one page at a time
+
+[env]
+OMP_NUM_THREADS = "4"  # matching threads and cpus
+
+[resources]
+cpus = 4
+memory = "4g"
+
+[timeouts]
+sample = 300
+startup = 60

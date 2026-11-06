@@ -1,0 +1,121 @@
+{
+ "file": "columns-1.png",
+ "page": 0,
+ "source": "ocr",
+ "rotation": 0,
+ "skew": 0.0,
+ "vertical": false,
+ "note": "order=model",
+ "lines": [
+  {
+   "box": [
+    48.2,
+    43.7,
+    393.2,
+    86.7
+   ],
+   "text": "Two Columns",
+   "conf": 0.9979
+  },
+  {
+   "box": [
+    39.9,
+    150.0,
+    313.6,
+    170.2
+   ],
+   "text": "The left column starts",
+   "conf": 0.9915
+  },
+  {
+   "box": [
+    37.9,
+    188.6,
+    309.7,
+    209.1
+   ],
+   "text": "with this first line and",
+   "conf": 0.9931
+  },
+  {
+   "box": [
+    40.0,
+    228.3,
+    254.9,
+    247.9
+   ],
+   "text": "ends here at last.",
+   "conf": 0.9629
+  },
+  {
+   "box": [
+    521.6,
+    149.6,
+    814.3,
+    174.7
+   ],
+   "text": "The right column holds",
+   "conf": 0.9996
+  },
+  {
+   "box": [
+    517.8,
+    189.1,
+    761.5,
+    213.4
+   ],
+   "text": "another short story",
+   "conf": 0.9994
+  },
+  {
+   "box": [
+    518.5,
+    227.9,
+    754.9,
+    247.7
+   ],
+   "text": "about the harbour.",
+   "conf": 0.9903
+  }
+ ],
+ "markdown": "## Two Columns\n\nThe left column starts with this first line and ends here at last.\n\nThe right column holds another short story about the harbour.",
+ "blocks": [
+  {
+   "label": "Section-Header",
+   "bbox": [
+    48.2,
+    43.7,
+    393.2,
+    86.7
+   ],
+   "text": "Two Columns"
+  },
+  {
+   "label": "Text",
+   "bbox": [
+    37.9,
+    150.0,
+    313.6,
+    247.9
+   ],
+   "text": "The left column starts\nwith this first line and\nends here at last."
+  },
+  {
+   "label": "Text",
+   "bbox": [
+    517.8,
+    149.6,
+    814.3,
+    247.7
+   ],
+   "text": "The right column holds\nanother short story\nabout the harbour."
+  }
+ ],
+ "timings": {
+  "orient_ms": 71.6609968803823,
+  "det_ms": 24.938237853348255,
+  "rec_ms": 68.1976587511599,
+  "order_ms": 6.038967054337263,
+  "total_ms": 99.17854377999902
+ }
+}

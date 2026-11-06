@@ -1,0 +1,30 @@
+{
+ "file": "line.png",
+ "page": 0,
+ "source": "ocr",
+ "rotation": 0,
+ "skew": 0.0,
+ "vertical": false,
+ "note": "order=model",
+ "lines": [
+  {
+   "box": [
+    39.1,
+    37.7,
+    280.8,
+    60.0
+   ],
+   "text": "A single line of text",
+   "conf": 0.9904
+  }
+ ],
+ "markdown": "A single line of text",
+ "blocks": [],
+ "timings": {
+  "orient_ms": 74.86816262826324,
+  "det_ms": 7.334746886044741,
+  "rec_ms": 6.493526976555586,
+  "order_ms": 0.10976893827319145,
+  "total_ms": 13.941782526671886
+ }
+}

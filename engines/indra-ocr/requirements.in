@@ -1,0 +1,4 @@
+# Indra OCR 1.1.2 (PyPI release of tag v1.1.2) with ONNX Runtime, OpenCV, pypdfium2 and
+# huggingface_hub; pypdfium2 and huggingface_hub are imported only for PDFs and model downloads,
+# which the adapter never uses (README.md).
+indra-ocr==1.1.2
