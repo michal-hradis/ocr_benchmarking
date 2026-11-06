@@ -19,7 +19,7 @@
         lightonocr3-model lightonocr3-smoke docker-mistral-ocr mistral-ocr-smoke \
         docker-openrouter openrouter-smoke docker-docling docling-model docling-smoke \
         docker-monkeyocrv2 monkeyocrv2-model monkeyocrv2-smoke docker-nanonets-ocr2 \
-        nanonets-ocr2-model nanonets-ocr2-smoke
+        nanonets-ocr2-model nanonets-ocr2-smoke docker-indra-ocr indra-ocr-smoke
 
 UV ?= uv
 BASE_VERSION ?= 1
@@ -41,6 +41,7 @@ OVISOCR2_IMAGE := ocrbench/engine-ovisocr2:0.8B-v1
 INFINITYPARSER2_IMAGE := ocrbench/engine-infinityparser2:flash-v1
 PERO_IMAGE := ocrbench/engine-pero:0.7.0-81b496e-v1
 OCRD_CALAMARI_IMAGE := ocrbench/engine-ocrd-calamari:2.1.0-v1
+INDRA_OCR_IMAGE := ocrbench/engine-indra-ocr:1.1.2-v1
 SURYA_IMAGE := ocrbench/engine-surya:0.17.1-v2
 DOCTR_IMAGE := ocrbench/engine-doctr:1.1.0-v1
 DOCLING_IMAGE := ocrbench/engine-docling:2.145.0-v2
@@ -195,6 +196,8 @@ docker-lock:  ## Re-lock the hashed requirements of the CUDA bases and the Pytho
 	$(LOCK) engines/docling/tesserocr-build.in --index-url https://pypi.org/simple \
 		-o engines/docling/tesserocr-build.txt
 	$(LOCK_PY311) engines/ocrd-calamari/requirements.in -o engines/ocrd-calamari/requirements.txt
+	$(LOCK) engines/indra-ocr/requirements.in --index-url https://pypi.org/simple \
+		-o engines/indra-ocr/requirements.txt
 	$(LOCK_PYLAIA) engines/pylaia/pylaia-requirements.in --index-url https://pypi.org/simple \
 		-o engines/pylaia/pylaia-requirements.txt
 
@@ -241,6 +244,13 @@ docker-ocrd-calamari:  ## Build the standalone OCR-D/Calamari CPU engine image, 
 
 ocrd-calamari-smoke:  ## Build the OCR-D/Calamari image and run, evaluate and report a synthetic dataset on the CPU (opt-in)
 	$(UV) run --locked pytest -m docker --run-docker tests/test_ocrd_calamari.py
+
+docker-indra-ocr:  ## Build the Indra OCR CPU engine image, with its 73 MB of models, and print its image ID
+	docker build -t $(INDRA_OCR_IMAGE) engines/indra-ocr
+	@docker image inspect --format '$(INDRA_OCR_IMAGE) {{.Id}}' $(INDRA_OCR_IMAGE)
+
+indra-ocr-smoke:  ## Build the Indra OCR image and run, evaluate and report a synthetic dataset on the CPU (opt-in)
+	$(UV) run --locked pytest -m docker --run-docker tests/test_indra_ocr.py
 
 docker-kraken:  ## Build the Kraken engine image (needs the torch base) and print its image ID
 	docker build -t $(KRAKEN_IMAGE) engines/kraken

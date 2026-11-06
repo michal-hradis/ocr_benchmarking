@@ -1,0 +1,281 @@
+{
+ "file": "news-1.png",
+ "page": 0,
+ "source": "ocr",
+ "rotation": 0,
+ "skew": 0.0,
+ "vertical": false,
+ "note": "order=model",
+ "lines": [
+  {
+   "box": [
+    38.1,
+    42.4,
+    366.2,
+    81.6
+   ],
+   "text": "Evening Gazette",
+   "conf": 0.9997
+  },
+  {
+   "box": [
+    37.9,
+    123.3,
+    252.2,
+    144.3
+   ],
+   "text": "Rain fell over the city",
+   "conf": 0.9899
+  },
+  {
+   "box": [
+    37.9,
+    154.3,
+    266.7,
+    174.8
+   ],
+   "text": "for the third day while",
+   "conf": 0.9923
+  },
+  {
+   "box": [
+    38.0,
+    185.7,
+    240.3,
+    205.9
+   ],
+   "text": "the river kept rising.",
+   "conf": 0.961
+  },
+  {
+   "box": [
+    40.9,
+    247.6,
+    269.6,
+    267.8
+   ],
+   "text": "Shops near the bridge",
+   "conf": 0.9971
+  },
+  {
+   "box": [
+    38.0,
+    278.4,
+    281.4,
+    298.7
+   ],
+   "text": "closed early and moved",
+   "conf": 0.9777
+  },
+  {
+   "box": [
+    38.0,
+    309.4,
+    249.1,
+    329.3
+   ],
+   "text": "their goods upstairs.",
+   "conf": 0.9874
+  },
+  {
+   "box": [
+    527.2,
+    123.6,
+    814.6,
+    144.0
+   ],
+   "text": "The council met on Monday",
+   "conf": 0.9981
+  },
+  {
+   "box": [
+    524.9,
+    154.6,
+    743.7,
+    171.0
+   ],
+   "text": "to discuss a new road",
+   "conf": 0.9819
+  },
+  {
+   "box": [
+    524.3,
+    185.9,
+    764.8,
+    206.1
+   ],
+   "text": "along the northern hill.",
+   "conf": 0.9993
+  },
+  {
+   "box": [
+    524.9,
+    247.4,
+    767.1,
+    264.0
+   ],
+   "text": "Members voted to fund",
+   "conf": 0.989
+  },
+  {
+   "box": [
+    524.3,
+    278.7,
+    735.4,
+    298.9
+   ],
+   "text": "the work next spring",
+   "conf": 0.9996
+  },
+  {
+   "box": [
+    524.3,
+    309.3,
+    726.7,
+    329.6
+   ],
+   "text": "after a long debate.",
+   "conf": 0.9829
+  },
+  {
+   "box": [
+    1010.7,
+    123.9,
+    1192.4,
+    143.9
+   ],
+   "text": "A travelling circus",
+   "conf": 0.9935
+  },
+  {
+   "box": [
+    1011.1,
+    154.9,
+    1224.2,
+    172.0
+   ],
+   "text": "arrived at the market",
+   "conf": 0.9778
+  },
+  {
+   "box": [
+    1010.6,
+    185.9,
+    1239.4,
+    206.1
+   ],
+   "text": "square with six horses.",
+   "conf": 0.9954
+  },
+  {
+   "box": [
+    1011.2,
+    247.5,
+    1197.8,
+    264.2
+   ],
+   "text": "Tickets are sold at",
+   "conf": 0.9983
+  },
+  {
+   "box": [
+    1011.0,
+    278.5,
+    1262.4,
+    296.4
+   ],
+   "text": "the town hall from noon",
+   "conf": 0.9954
+  },
+  {
+   "box": [
+    1010.8,
+    309.5,
+    1195.2,
+    328.5
+   ],
+   "text": "until late evening.",
+   "conf": 0.9991
+  }
+ ],
+ "markdown": "## Evening Gazette\n\nRain fell over the city for the third day while the river kept rising.\n\nShops near the bridge closed early and moved their goods upstairs.\n\nThe council met on Monday to discuss a new road along the northern hill.\n\nMembers voted to fund the work next spring after a long debate.\n\nA travelling circus arrived at the market square with six horses.\n\nTickets are sold at the town hall from noon until late evening.",
+ "blocks": [
+  {
+   "label": "Section-Header",
+   "bbox": [
+    38.1,
+    42.4,
+    366.2,
+    81.6
+   ],
+   "text": "Evening Gazette"
+  },
+  {
+   "label": "Text",
+   "bbox": [
+    37.9,
+    123.3,
+    266.7,
+    205.9
+   ],
+   "text": "Rain fell over the city\nfor the third day while\nthe river kept rising."
+  },
+  {
+   "label": "Text",
+   "bbox": [
+    38.0,
+    247.6,
+    281.4,
+    329.3
+   ],
+   "text": "Shops near the bridge\nclosed early and moved\ntheir goods upstairs."
+  },
+  {
+   "label": "Text",
+   "bbox": [
+    524.3,
+    123.6,
+    814.6,
+    206.1
+   ],
+   "text": "The council met on Monday\nto discuss a new road\nalong the northern hill."
+  },
+  {
+   "label": "Text",
+   "bbox": [
+    524.3,
+    247.4,
+    767.1,
+    329.6
+   ],
+   "text": "Members voted to fund\nthe work next spring\nafter a long debate."
+  },
+  {
+   "label": "Text",
+   "bbox": [
+    1010.6,
+    123.9,
+    1239.4,
+    206.1
+   ],
+   "text": "A travelling circus\narrived at the market\nsquare with six horses."
+  },
+  {
+   "label": "Text",
+   "bbox": [
+    1010.8,
+    247.5,
+    1262.4,
+    328.5
+   ],
+   "text": "Tickets are sold at\nthe town hall from noon\nuntil late evening."
+  }
+ ],
+ "timings": {
+  "orient_ms": 31.641425099223852,
+  "det_ms": 66.85893889516592,
+  "rec_ms": 99.38715398311615,
+  "order_ms": 3.678488079458475,
+  "total_ms": 169.92888087406754
+ }
+}

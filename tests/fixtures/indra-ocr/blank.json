@@ -1,0 +1,19 @@
+{
+ "file": "blank-1.png",
+ "page": 0,
+ "source": "ocr",
+ "rotation": 0,
+ "skew": 0.0,
+ "vertical": false,
+ "note": "order=model",
+ "lines": [],
+ "markdown": "",
+ "blocks": [],
+ "timings": {
+  "orient_ms": 74.87085508182645,
+  "det_ms": 39.156352169811726,
+  "rec_ms": 0.06478000432252884,
+  "order_ms": 0.045740045607089996,
+  "total_ms": 39.270312525331974
+ }
+}
