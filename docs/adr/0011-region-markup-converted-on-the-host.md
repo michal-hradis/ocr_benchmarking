@@ -16,6 +16,13 @@ Layout models such as Surya 2 and Chandra OCR 2 return positioned blocks whose t
 - The engine keeps its native output and writes the markup unchanged; an empty page text is rebuilt from the converted regions.
 - Rules are in [PREDICTIONS.md](../PREDICTIONS.md#markup-in-positioned-regions). The field is optional and additive; prediction format version 1 is kept.
 
+### Amendment: line markup (2026-11-06, [#91](https://github.com/michal-hradis/ocr_benchmarking/issues/91))
+
+- A positioned **line** may carry `markup` instead of `text`, for engines whose recognizer writes inline markup into line text (Surya's `<b>`, `<sup>`, `<br>`, entities). The host converts it with `ocrbench.convert.line_text`: `fragment_text` with its line breaks joined by single spaces, so a line stays one line.
+- A line whose converted text is empty is dropped from the standardized prediction on the host; the other lines keep their IDs and order. A line with both `markup` and `text` is a `markup-conflict` error, and the one-format rule covers region and line markup together.
+- dots.mocr writes every element's text as `markdown` region markup: its HTML tables are HTML blocks and its `$$…$$` formulas math blocks of the Markdown, so one format per prediction suffices. Its `Picture` elements get no markup, because the prompt asks for no text there (engine semantics, not conversion).
+- The field is optional and additive; prediction format version 1 is kept.
+
 ## Alternatives considered
 
 - *Whole-document host conversion (Chandra OCR 2).* Keeps the shared rules but drops the boxes from the prediction.
@@ -24,6 +31,6 @@ Layout models such as Surya 2 and Chandra OCR 2 return positioned blocks whose t
 
 ## Consequences and verification
 
-- Engines with positioned markup need no conversion code. Surya 2 ([#67](https://github.com/michal-hradis/ocr_benchmarking/issues/67)) is the first. dots.mocr (region Markdown) and Surya (inline tags in line text) still convert in their adapters and must move to region `markup` in separate changes; Chandra OCR 2 already converts on the host and can keep its boxes the same way.
+- Engines with positioned markup need no conversion code. Surya 2 ([#67](https://github.com/michal-hradis/ocr_benchmarking/issues/67)) is the first; dots.mocr (region Markdown) and Surya (line markup) followed in [#91](https://github.com/michal-hradis/ocr_benchmarking/issues/91). Chandra OCR 2 already converts on the host and can keep its boxes the same way.
 - A converter rule change re-converts stored predictions when they are validated again; `conversion.version` identifies the rules used.
 - `tests/test_convert.py` checks `fragment_text` against the document rules, and `tests/test_prediction.py` checks the conversion, the kept positions and reading order, the rebuilt page text and the conflicts.

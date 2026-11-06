@@ -22,9 +22,10 @@ import pytest
 from PIL import Image
 
 from ocrbench.cli import main
+from ocrbench.convert import CONVERTER_VERSION
 from ocrbench.engine import parse_engine_config
 from ocrbench.issues import Severity
-from ocrbench.prediction import validate_prediction
+from ocrbench.prediction import prediction_to_json, validate_prediction
 from ocrbench.runner import ProcessLauncher, create_run, execute, latest_record, load_run
 from synthetic import (
     COLUMNS,
@@ -70,6 +71,13 @@ def errors(prediction, size):
     return [i for i in issues if i.severity is not Severity.INFO]
 
 
+def converted(prediction, size):
+    """The standardized prediction as JSON: line markup converted on the host."""
+    standardized, issues = validate_prediction(prediction, sample_id="s1", image_size=size)
+    assert standardized is not None, [i.format() for i in issues]
+    return prediction_to_json(standardized)
+
+
 def box(x1, y1, x2, y2):
     return [[x1, y1], [x2, y1], [x2, y2], [x1, y2]]
 
@@ -102,8 +110,11 @@ def native(blocks, lines, size=(900, 420)):
 @pytest.mark.parametrize("name", ["page", "columns", "newspaper"])
 def test_blocks_become_regions_in_reading_order_with_their_lines(tmp_path, name):
     """The page text follows the rendered reading order, column by column."""
-    prediction, counts = su.result_to_prediction(NATIVE[name], "s1", SIZES[name])
-    assert errors(prediction, SIZES[name]) == []
+    engine, counts = su.result_to_prediction(NATIVE[name], "s1", SIZES[name])
+    assert errors(engine, SIZES[name]) == []
+    assert engine["text"] == ""  # built on the host
+    prediction = converted(engine, SIZES[name])
+    assert prediction["conversion"] == {"from": "html", "version": CONVERTER_VERSION}
     regions = rendered(name, tmp_path)
     assert prediction["text"] == "\n\n".join("\n".join(t for t, _ in r) for r in regions)
     assert [[line["text"] for line in r["lines"]] for r in prediction["regions"]] == [
@@ -138,6 +149,7 @@ def test_columns_are_not_interleaved_like_the_detection_order(tmp_path, name):
     texts = [line["text"] for line in NATIVE[name]["recognition"]["text_lines"]]
     assert texts[1:3] != first_column[:2]  # the native line order interleaves the columns
     prediction, _ = su.result_to_prediction(NATIVE[name], "s1", SIZES[name])
+    prediction = converted(prediction, SIZES[name])
     assert [line["text"] for line in prediction["regions"][1]["lines"]] == first_column
 
 
@@ -152,11 +164,16 @@ def test_line_polygons_cover_the_rendered_lines_in_input_image_pixels(tmp_path):
         assert max(xs) - min(xs) < (x1 - x0) * 1.2
 
 
-def test_inline_formatting_is_removed_from_the_text_but_kept_natively():
+def test_line_text_is_written_unchanged_as_html_markup():
     heading = NATIVE["newspaper"]["recognition"]["text_lines"][0]["text"]
     assert heading == "<b>Evening Gazette</b>"  # what Surya wrote
     prediction, _ = su.result_to_prediction(NATIVE["newspaper"], "s1", SIZES["newspaper"])
-    assert prediction["regions"][0]["lines"][0]["text"] == "Evening Gazette"
+    line = prediction["regions"][0]["lines"][0]
+    assert line["markup"] == {"format": "html", "content": "<b>Evening Gazette</b>"}
+    assert "text" not in line
+    standardized = converted(prediction, SIZES["newspaper"])
+    assert standardized["regions"][0]["lines"][0]["text"] == "Evening Gazette"
+    assert standardized["regions"][0]["lines"][0]["id"] == line["id"]
 
 
 @pytest.mark.parametrize(
@@ -165,13 +182,42 @@ def test_inline_formatting_is_removed_from_the_text_but_kept_natively():
         ("<b>Bold</b> and <i>italic</i>", "Bold and italic"),
         ("x<sup>2</sup> H<sub>2</sub>O", "x2 H2O"),
         ("<u>a</u><del>b</del><mark>c</mark><s>d</s><small>e</small>", "abcde"),
-        ("one<br>two<br/>three<BR />four", "one two three four"),
+        ("one<br>two<br/>three<BR />four", "one two three four"),  # one line
         ("Fish &amp; chips &lt;3", "Fish & chips <3"),
-        ("<math>x^2</math> <bold>", "<math>x^2</math> <bold>"),  # other tags are text
+        ("a < b", "a < b"),
+        ("<math>x^2</math>", "x^2"),  # math_mode: the TeX source
+        ("\n    Vy, kteří na reky jste zapomněli,\n", "Vy, kteří na reky jste zapomněli,"),
     ],
 )
-def test_plain_text(text, expected):
-    assert su.plain_text(text) == expected
+def test_line_markup_is_converted_on_the_host(text, expected):
+    prediction, _ = su.result_to_prediction(
+        native([("Text", (0, 0, 900, 100))], [(text, (10, 10, 200, 30))]), "s1", (900, 420)
+    )
+    assert converted(prediction, (900, 420))["regions"][0]["lines"][0]["text"] == expected
+
+
+def test_lines_without_text_after_conversion_are_dropped_on_the_host():
+    lines = [
+        ("<b></b>", (10, 10, 200, 30)),
+        ("kept", (10, 50, 200, 70)),
+        ("<br>", (10, 80, 200, 95)),
+    ]
+    prediction, counts = su.result_to_prediction(
+        native([("Text", (0, 0, 900, 100))], lines), "s1", (900, 420)
+    )
+    assert counts["lines"] == 3  # not blank natively
+    assert errors(prediction, (900, 420)) == []
+    standardized = converted(prediction, (900, 420))
+    assert [(line["id"], line["text"]) for line in standardized["regions"][0]["lines"]] == [
+        ("l2", "kept")
+    ]
+    assert standardized["text"] == "kept"
+
+
+def test_adapter_has_no_conversion_code():
+    source = ADAPTER_PATH.read_text(encoding="utf-8")
+    for name in ("import html", "unescape", "FORMATTING_TAGS", "def plain_text"):
+        assert name not in source
 
 
 def test_region_types_follow_the_layout_labels():
@@ -221,6 +267,7 @@ def test_lines_outside_every_block_follow_in_their_own_region():
     ]
     prediction, counts = su.result_to_prediction(native(blocks, lines), "s1", (900, 420))
     assert errors(prediction, (900, 420)) == []
+    prediction = converted(prediction, (900, 420))
     assert [[line["text"] for line in r.get("lines", [])] for r in prediction["regions"]] == [
         ["Second paragraph"],
         ["Heading"],
@@ -254,6 +301,7 @@ def test_lines_of_a_block_are_ordered_by_visual_line_then_left_to_right():
     prediction, _ = su.result_to_prediction(
         native([("Text", (0, 0, 900, 100))], lines), "s1", (900, 420)
     )
+    prediction = converted(prediction, (900, 420))
     assert [line["text"] for line in prediction["regions"][0]["lines"]] == [
         "left",
         "right",
@@ -405,7 +453,12 @@ def test_adapter_follows_the_engine_protocol(tmp_path):
     assert outputs == {"surya.json", "prediction.json", "result.json"}
     assert json.loads((news / "output" / "surya.json").read_text()) == NATIVE["newspaper"]
     expected, counts = su.result_to_prediction(NATIVE["newspaper"], "news", SIZES["newspaper"])
-    assert (news / "prediction.txt").read_text(encoding="utf-8") == expected["text"]
+    assert json.loads((news / "output" / "prediction.json").read_text()) == expected
+    standardized, _ = validate_prediction(expected, sample_id="news")
+    assert (news / "prediction.txt").read_text(encoding="utf-8") == standardized.text
+    assert standardized.text.startswith("Evening Gazette\n")
+    host = json.loads((news / "prediction.json").read_text(encoding="utf-8"))
+    assert host["conversion"] == {"from": "html", "version": CONVERTER_VERSION}
     extra = records["news"]["engine_extra"]
     assert {k: extra[k] for k in counts} == counts
     assert extra["surya_seconds"] >= 0

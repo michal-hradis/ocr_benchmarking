@@ -71,7 +71,7 @@
       }
     },
     "markup": {
-      "description": "The region's native Markdown or HTML, converted to its text on the host; used instead of text and lines.",
+      "description": "Native Markdown or HTML of a region (instead of text and lines) or of a line (instead of text), converted to its text on the host.",
       "type": "object",
       "required": ["format", "content"],
       "additionalProperties": false,
@@ -82,12 +82,13 @@
     },
     "line": {
       "type": "object",
-      "required": ["text"],
+      "anyOf": [{ "required": ["text"] }, { "required": ["markup"] }],
       "additionalProperties": false,
       "properties": {
         "id": { "$ref": "#/$defs/id" },
         "type": { "$ref": "#/$defs/label" },
         "text": { "type": "string" },
+        "markup": { "$ref": "#/$defs/markup" },
         "polygon": { "$ref": "#/$defs/polygon" },
         "baseline": { "$ref": "#/$defs/polyline" },
         "confidence": { "type": "number" },

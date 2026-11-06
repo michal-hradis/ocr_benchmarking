@@ -53,12 +53,12 @@ uv run ocrbench prediction convert page.md --sample-id <id> [-o pred.json]   # .
 | `image` | when positions are given | `width` and `height` of the original input image in pixels. |
 | `regions` | no | A **flat** list of regions; regions are never nested. Absent or empty for a text-only result. |
 | `reading_order` | no | Region IDs in reading order. Absent means the engine gave **no explicit reading order**, and regions are read in array order. |
-| `conversion` | no | `{"from": "markdown", "version": 2}` when the prediction was converted on the host from a native output, or from region markup (see below). |
+| `conversion` | no | `{"from": "markdown", "version": 3}` when the prediction was converted on the host from a native output, or from region markup (see below). |
 | `extra` | no | Engine-specific data. Allowed on the prediction, regions and lines; never used by metrics. |
 
 **Region:** `id` (required, unique among regions), `type`, `native_type` (the engine's own label), `polygon`, `text`, `markup` (native Markdown or HTML to be converted on the host, [below](#markup-in-positioned-regions)), `lines`, `confidence`, `extra`.
 
-**Line:** `text` (required), `id` (optional, unique among lines), `type` (free label, for example `handwritten`), `polygon`, `baseline`, `confidence`, `extra`.
+**Line:** `text` (required unless `markup` is given), `markup` (native line markup converted on the host, [below](#markup-in-positioned-regions)), `id` (optional, unique among lines), `type` (free label, for example `handwritten`), `polygon`, `baseline`, `confidence`, `extra`.
 
 Unknown fields are errors. Confidence values are engine-specific numbers; metrics do not use them.
 
@@ -94,7 +94,7 @@ Converted predictions contain plain text and typed regions **without positions**
 | Plain text (`.txt`) | none | The whole file, unchanged, as page text |
 | Heading (`#`, `<h1>`–`<h6>`) | `heading` | Inline text |
 | Paragraph, loose text in a container | `text` | Inline text; soft and hard line breaks and `<br>` become `\n` |
-| List item | `list-item` | An ordered item keeps its number (`3. `); a bullet marker is dropped. Nested items are separate regions. |
+| List item | `list-item` | An ordered item keeps its number (`3. `), also when it has no text (a page header `1912.` alone is an ordered Markdown item); a bullet marker is dropped. Nested items are separate regions. |
 | Table (Markdown or HTML) | `table` | One row per line, cells separated by a tab; a nested table's text stays in its cell |
 | `<caption>`, `<figcaption>` | `caption` | Inline text |
 | `$$…$$`, block `<math>` | `formula` | TeX source; for MathML the TeX annotation when present, otherwise its text |
@@ -102,7 +102,7 @@ Converted predictions contain plain text and typed regions **without positions**
 
 Inline rules: emphasis, links and other markup keep only their text; inline `$…$` math keeps its TeX source; images (including alt text, and any text between `<img>` and an explicit `</img>`, where Nanonets-OCR2 writes an image description or caption), horizontal rules, `<script>`, `<style>` and `<head>` add nothing; HTML entities and Markdown escapes are decoded. Whitespace is collapsed as a browser would render it (runs of spaces become one space), except in code blocks and `<pre>`. HTML embedded in Markdown uses the HTML rules: an HTML block is converted as HTML, and a paragraph containing inline HTML has its text converted with the HTML inline rules, so the content of inline `<script>` or `<style>` adds nothing while text in tags such as `<span>` is kept. A start or end tag whose name contains an underscore, such as Nanonets-OCR2's `<page_number>14</page_number>`, is inline HTML too (CommonMark does not recognize such names and would keep the tags as text): the tags add nothing and their text is kept, as for `<watermark>` or `<signature>`. Such a tag is recognized in the Markdown source, so an escaped (`\<page_number>`) or entity-encoded (`&lt;page_number&gt;`) one stays literal text. An `</img>` ends only the nearest preceding `<img>` that has no end yet; any other `</img>` is ignored and drops nothing.
 
-Converter version 2 added the underscore-tag and `<img>…</img>` rules ([#99](https://github.com/michal-hradis/ocr_benchmarking/issues/99)); existing runs keep the predictions their runner converted with version 1 (recorded in `conversion.version`) until their native output is converted again. Known limitations of converter version 2: `\[…\]` and `\(…\)` math delimiters are treated as ordinary Markdown escapes, and a whole page wrapped in a code fence stays one `other` region.
+Converter version 2 added the underscore-tag and `<img>…</img>` rules ([#99](https://github.com/michal-hradis/ocr_benchmarking/issues/99)). Version 3 keeps the number of an empty ordered Markdown list item, as HTML `<ol>` items already did ([#91](https://github.com/michal-hradis/ocr_benchmarking/issues/91)). Existing runs keep the predictions their runner converted with an earlier version (recorded in `conversion.version`) until their native output is converted again. Known limitations of converter version 3: `\[…\]` and `\(…\)` math delimiters are treated as ordinary Markdown escapes, and a whole page wrapped in a code fence stays one `other` region.
 
 ### Markup-bearing text in positioned structured outputs
 
@@ -123,9 +123,10 @@ An engine whose positioned regions carry Markdown or HTML writes that markup unc
 
 - `markup.format` is `markdown` or `html`; `markup.content` is the region's native markup.
 - The region text is `ocrbench.convert.fragment_text(content, format)`: the region's blocks by the rules of the table above, joined by line breaks (`\n`). For example, two paragraphs become two lines, a list one line per item, a table one line per row with tab-separated cells, and markup such as `<i>` or `*…*` adds nothing. The block types inside the markup are not kept; the region keeps its own `type`.
-- A region with `markup` must not also have `text` or `lines`, all region markup of a prediction uses one format, and the engine does not set `conversion`. Each of these is an error (`markup-conflict`).
+- **Line markup.** A positioned line whose recognized text carries inline markup (Surya's `<b>`, `<sup>`, `<br>`, entities) writes it as line `markup` instead of `text`, for example `{"id": "l7", "polygon": […], "markup": {"format": "html", "content": "H<sub>2</sub>O &amp; <b>salt</b>"}}`. The line text is `ocrbench.convert.line_text(content, format)`: `fragment_text` with its line breaks joined by single spaces, so a line stays one line (`H2O & salt`). A line whose converted text is empty or only whitespace is dropped from the standardized prediction; the other lines keep their IDs and order.
+- A region with `markup` must not also have `text` or `lines`, a line with `markup` must not also have `text`, all region and line markup of a prediction uses one format, and the engine does not set `conversion`. Each of these is an error (`markup-conflict`).
 - The engine cannot know the converted text, so it may write an empty page `text`: the page text is then built from the converted regions without a `text-mismatch` warning. A non-empty page text is checked as usual.
-- The standardized prediction holds the converted `text` (no `markup`) and `conversion` `{"from": "html", "version": 2}` with the converter version. The engine's own `prediction.json` keeps the markup, so a converter fix means re-validating stored output, not re-running the model.
+- The standardized prediction holds the converted `text` of regions and lines (no `markup`) and `conversion` `{"from": "html", "version": 3}` with the converter version. The engine's own `prediction.json` keeps the markup, so a converter fix means re-validating stored output, not re-running the model.
 
 ## Validation findings
 

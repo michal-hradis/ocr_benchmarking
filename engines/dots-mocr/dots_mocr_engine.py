@@ -6,8 +6,9 @@ sample in job order generate the layout of the image as stored with the official
 prompt_layout_all_en prompt: a JSON list of layout elements, each with a box, a category and its
 text, in reading order. It writes $OCRBENCH_OUTPUT/<id>/ with the model's output unchanged
 (output.json), the standardized prediction.json (the primary output: one region per element, its
-box mapped to input-image pixels) and, last, result.json with the token counts, the stop reason
-and the timing. An output cut off inside the list keeps its complete elements.
+box mapped to input-image pixels and its text as Markdown markup, which the host converts) and,
+last, result.json with the token counts, the stop reason and the timing. An output cut off inside
+the list keeps its complete elements.
 """
 
 from __future__ import annotations
@@ -20,13 +21,9 @@ import re
 import sys
 import time
 import types
-from html.parser import HTMLParser
 from importlib import metadata
 from pathlib import Path
 from typing import Any
-
-from markdown_it import MarkdownIt
-from mdit_py_plugins.dollarmath import dollarmath_plugin
 
 REPOSITORY = "dots-studio/dots.mocr"
 REVISION = "e539fbb52280393adc081b289ec597430a0f9031"
@@ -316,101 +313,6 @@ def parse_layout(text: str) -> tuple[list[Any], bool]:
         elements.append(element)
 
 
-class _TableText(HTMLParser):
-    """Rows of an HTML table as lines, cells separated by tabs, as the host converter does."""
-
-    def __init__(self) -> None:
-        super().__init__(convert_charrefs=True)
-        self.rows: list[list[str]] = []
-        self.cell: list[str] | None = None
-
-    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
-        if tag == "tr":
-            self.rows.append([])
-        elif tag in ("td", "th"):
-            if not self.rows:
-                self.rows.append([])
-            self.cell = []
-        elif tag == "br" and self.cell is not None:
-            self.cell.append(" ")
-
-    def handle_endtag(self, tag: str) -> None:
-        if tag in ("td", "th") and self.cell is not None:
-            self.rows[-1].append(" ".join("".join(self.cell).split()))
-            self.cell = None
-
-    def handle_data(self, data: str) -> None:
-        if self.cell is not None:
-            self.cell.append(data)
-
-
-def table_text(content: str) -> str:
-    """Plain text of a Table element: its HTML table as one line per row with tab-separated
-    cells; content that is not an HTML table is kept."""
-    if "<table" not in content.lower():
-        return content.strip()
-    parser = _TableText()
-    parser.feed(content)
-    parser.close()
-    return "\n".join("\t".join(row) for row in parser.rows if any(row))
-
-
-def formula_text(content: str) -> str:
-    """TeX source of a Formula element, without ``$$``, ``\\[ … \\]`` or ``$`` delimiters."""
-    text = content.strip()
-    for start, end in (("$$", "$$"), ("\\[", "\\]"), ("$", "$")):
-        if len(text) > len(start) + len(end) and text.startswith(start) and text.endswith(end):
-            return text[len(start) : -len(end)].strip()
-    return text
-
-
-HEADING = re.compile(r"#{1,6}[ \t]+")
-BULLET = re.compile(r"[-*+•][ \t]+")
-# The host Markdown converter's parser (src/ocrbench/convert.py, same pinned versions).
-MARKDOWN = MarkdownIt("commonmark").enable(["table", "strikethrough"])
-MARKDOWN.use(dollarmath_plugin, allow_space=True, double_inline=True)
-BREAK = re.compile(r"<br\s*/?>", re.IGNORECASE)
-INLINE_TEXT = ("text", "code_inline", "math_inline", "math_inline_double")
-
-
-def inline_text(content: str) -> str:
-    """Text of inline Markdown by the host converter's inline rules (docs/PREDICTIONS.md):
-    emphasis, links, strikethrough and code keep only their text, inline math its TeX source,
-    escapes and entities are decoded, images and HTML tags add nothing except ``<br>``, a line
-    break; spaces are collapsed and blank lines dropped."""
-    parts = []
-    for child in MARKDOWN.parseInline(content)[0].children or []:
-        if child.type in INLINE_TEXT:
-            parts.append(child.content)
-        elif child.type in ("softbreak", "hardbreak") or (
-            child.type == "html_inline" and BREAK.fullmatch(child.content)
-        ):
-            parts.append("\n")
-    lines = (re.sub(r"[ \t\r\f]+", " ", line).strip() for line in "".join(parts).split("\n"))
-    return "\n".join(line for line in lines if line)
-
-
-def markdown_text(category: str, content: str) -> str:
-    """Plain text of a Markdown element: the heading marks of a Title or Section-header and the
-    bullet of a List-item are removed, then inline Markdown is converted (``inline_text``)."""
-    text = content.strip()
-    if category in ("Title", "Section-header"):
-        text = HEADING.sub("", text, count=1) if HEADING.match(text) else text
-    elif category == "List-item":
-        text = BULLET.sub("", text, count=1) if BULLET.match(text) else text
-    return inline_text(text)
-
-
-def element_text(category: str, content: str) -> str:
-    if category == "Picture":
-        return ""  # the prompt asks for no text; what the model writes is not used
-    if category == "Table":
-        return table_text(content)
-    if category == "Formula":
-        return formula_text(content)
-    return markdown_text(category, content)
-
-
 def box(element: dict[str, Any]) -> list[float] | None:
     """The element's box [x1, y1, x2, y2] in model-image pixels, or None when it is not four
     finite numbers with x1 < x2 and y1 < y2 (the official is_legal_bbox)."""
@@ -435,8 +337,11 @@ def layout_to_prediction(
     Every element becomes a region in output order, which the prompt asks to be the reading
     order. Its box is in pixels of the image the model saw (``model_size``) and is mapped to
     input-image pixels as floats; an element without a valid box becomes a region without a
-    polygon (no box is invented). Its text is the element's ``text`` in plain text
-    (``element_text``). An element that is not a JSON object is skipped.
+    polygon (no box is invented). The element's non-blank ``text`` is written unchanged as the
+    region's Markdown ``markup`` (Markdown text, HTML tables and ``$$`` formulas), which the host
+    converts to plain text (docs/PREDICTIONS.md#markup-in-positioned-regions); the text of a
+    ``Picture``, for which the prompt asks none, is not used. The page text is left empty for the
+    host to build. An element that is not a JSON object is skipped.
     """
     width, height = size
     scale_x, scale_y = width / model_size[0], height / model_size[1]
@@ -465,9 +370,8 @@ def layout_to_prediction(
             x1, y1, x2, y2 = bbox
             x1, x2, y1, y2 = x1 * scale_x, x2 * scale_x, y1 * scale_y, y2 * scale_y
             region["polygon"] = [[x1, y1], [x2, y1], [x2, y2], [x1, y2]]
-        text = element_text(category or "", content)
-        if text:
-            region["text"] = text
+        if content.strip() and category != "Picture":
+            region["markup"] = {"format": "markdown", "content": content}
         if (category, content) == previous and content.strip():
             counts["repeated_elements"] += 1
         previous = (category, content)
@@ -477,7 +381,7 @@ def layout_to_prediction(
         "version": 1,
         "sample_id": sample_id,
         "image": {"width": width, "height": height},
-        "text": "\n\n".join(region["text"] for region in regions if "text" in region),
+        "text": "",  # built on the host from the converted region markup
     }
     if regions:
         prediction["regions"] = regions

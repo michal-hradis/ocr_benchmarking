@@ -4,7 +4,7 @@
 
 | File | Purpose |
 | --- | --- |
-| `Dockerfile` | Engine image `ocrbench/engine-dots-mocr:3B-v1` from `ocrbench/base-cu130-torch:torch2.14.1-py3.12-v1` |
+| `Dockerfile` | Engine image `ocrbench/engine-dots-mocr:3B-v2` from `ocrbench/base-cu130-torch:torch2.14.1-py3.12-v1` |
 | `requirements.in`, `requirements.txt` | transformers and its dependencies, hash-locked against the base (`make docker-lock`) |
 | `models.sha256` | Checksums of the model files at the pinned revision, including the model's own Python code |
 | `fetch_model.py` | Downloads the pinned model files into a host cache directory (`make dots-mocr-model`) |
@@ -82,16 +82,17 @@ This matches the official parser with `--no_fitz_preprocess`. Its default for im
 
 ## Conversion to the prediction
 
-The adapter converts the output into the standardized prediction itself (`prediction.json`, [PREDICTIONS.md](../../docs/PREDICTIONS.md)). Every layout element becomes one region, in output order, which is the model's reading order. The prediction lists the regions in that order in `reading_order`.
+The adapter writes the standardized prediction (`prediction.json`, [PREDICTIONS.md](../../docs/PREDICTIONS.md)). Every layout element becomes one region, in output order, which is the model's reading order. The prediction lists the regions in that order in `reading_order`.
 
 - **Positions.** The box is mapped from the image the model saw to the input image, as float pixel coordinates (the official parser truncates them to integers). A box that is not four numbers with `x1 < x2` and `y1 < y2` is not used: the region has no polygon, the box is kept in the region's `extra.bbox`, and the element is counted in `extra.invalid_boxes`. There are no line positions: an element is a block of text.
 - **Types.** `Title` and `Section-header` become `heading`, `Picture` becomes `figure`, `List-item`, `Page-header` and `Page-footer` become `list-item`, `page-header` and `page-footer`, and the others their lower-case names. The category is kept as `native_type`. An unknown category becomes `other`.
-- **Text.** The element's text, in plain text:
-  - `Table`: the HTML table becomes one line per row, with cells separated by tabs, as the host converter does.
-  - `Formula`: the TeX source without `$$`, `\[ … \]` or `$` delimiters.
-  - `Picture`: no text. The prompt asks for none; anything the model writes is not used.
-  - Other categories: leading heading marks (`#`) of a `Title` or `Section-header` and the bullet (`-`, `*`, `+`, `•`) of a `List-item` are removed; numbers of ordered list items are kept. Inline Markdown is then converted by the [host converter's inline rules](../../docs/PREDICTIONS.md), with the same parser ([markdown-it-py](https://github.com/executablebooks/markdown-it-py) 4.2.0 and its dollar-math plugin, as pinned for the host): emphasis, links, strikethrough and code keep only their text, inline math keeps its TeX source, escapes and HTML entities are decoded, images and HTML tags add nothing (`<br>` is a line break), runs of spaces become one space and blank lines are dropped. A test compares the result with the host converter. The native `output.json` is unchanged.
-- **Page text.** The region texts joined by blank lines.
+- **Text.** The element's text is written unchanged as region **markup** (`{"format": "markdown", "content": …}`), not converted in the container. The prompt asks for Markdown text, HTML tables and LaTeX formulas, and all three are Markdown: a table is an HTML block and a `$$…$$` formula a math block. The host converts the markup with the shared Markdown rules when it validates the prediction ([PREDICTIONS.md](../../docs/PREDICTIONS.md#markup-in-positioned-regions), [ADR 0011](../../docs/adr/0011-region-markup-converted-on-the-host.md)) and records `conversion` `{"from": "markdown", "version": 3}`:
+  - heading marks (`#`) are removed in every category, including headings that the model writes into a `Text` element; emphasis, links and code keep only their text, escapes and entities are decoded, and `<br>` is a line break;
+  - a list item loses its `-`, `*` or `+` bullet; an ordered item keeps its number, also when nothing follows it (a page header `1912.` alone); `•` is not a Markdown bullet and stays as text;
+  - a `Table` becomes one line per row, with cells separated by tabs, and a `$$…$$` formula its TeX source;
+  - a formula written with `\[…\]` instead of `$$` would lose its backslashes, a documented limitation of the shared converter; the model wrote `$$` in every formula of the outputs checked ([#91](https://github.com/michal-hradis/ocr_benchmarking/issues/91)).
+- **No text.** A `Picture` gets no markup: the prompt asks for no text there, so anything the model writes is not used. Elements with blank or missing text are regions without text.
+- **Page text.** Left empty by the adapter and built on the host from the converted regions, joined by blank lines. `output.json` and the engine's own `prediction.json` keep the model's markup.
 
 **Incomplete output.** An output that is not one complete JSON list keeps the elements of its list that are complete: everything up to the last complete element. The official parser instead falls back to the raw text. `extra.json_complete` tells whether the output was a complete list, and `extra.elements` gives the number of elements used.
 
@@ -139,7 +140,7 @@ The peak allocated GPU memory of every sample is recorded as `gpu_peak_memory_mb
 - parameter validation and the prompt against the official SHA-256;
 - the `flash_attn` import the model code needs, without the flash-attn package;
 - reading complete elements from cut-off JSON;
-- the plain text of every category;
+- the element text written unchanged as Markdown markup, and its conversion on the host for every category;
 - the mapping of boxes to the input image and the handling of invalid boxes;
 - the model checksums and the download script;
 - the engine protocol through the runner.

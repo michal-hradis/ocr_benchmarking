@@ -12,7 +12,6 @@ are read in Surya's layout reading order (README.md).
 from __future__ import annotations
 
 import hashlib
-import html
 import json
 import os
 import re
@@ -55,9 +54,6 @@ REGION_TYPES = {
 }
 MIN_INSIDE = 0.5  # share of a line's box that must lie in a layout block to belong to it
 SAME_LINE_OVERLAP = 0.8  # vertical overlap (of the smaller height) that puts boxes on one line
-# Inline formatting the recognizer writes as HTML; the prediction keeps only the text.
-FORMATTING_TAGS = re.compile(r"</?(?:b|i|u|s|del|mark|sup|sub|small)\b[^<>]*>", re.IGNORECASE)
-LINE_BREAK_TAGS = re.compile(r"<br\s*/?>", re.IGNORECASE)
 
 
 class AdapterError(Exception):
@@ -199,11 +195,6 @@ def run_surya(models: tuple, params: dict[str, Any], image: Any) -> dict[str, An
     }
 
 
-def plain_text(text: str) -> str:
-    """A recognized line without Surya's inline formatting tags and with entities decoded."""
-    return html.unescape(FORMATTING_TAGS.sub("", LINE_BREAK_TAGS.sub(" ", text)))
-
-
 def bbox(polygon: list[list[float]]) -> list[float]:
     xs, ys = [p[0] for p in polygon], [p[1] for p in polygon]
     return [min(xs), min(ys), max(xs), max(ys)]
@@ -263,7 +254,10 @@ def result_to_prediction(
     Every layout block becomes a region, in Surya's layout reading order (``position``), with
     its polygon and label. Every recognized line with non-blank text, its polygon and
     confidence, goes into the block that contains most of it (``assign_lines``), ordered as
-    ``line_order``. Lines outside every block follow, top to bottom, in one region without a
+    ``line_order``. Its text is written unchanged as HTML line ``markup`` (the recognizer's inline
+    tags such as ``<b>`` or ``<sup>``, and entities), which the host converts to plain text
+    (docs/PREDICTIONS.md#markup-in-positioned-regions); the page text is left empty for the host
+    to build. Lines outside every block follow, top to bottom, in one region without a
     polygon (``extra.grouping: "unassigned"``), so no recognized text is lost.
     """
     lines = native["recognition"]["text_lines"]
@@ -275,8 +269,7 @@ def result_to_prediction(
         if (round(width), round(height)) != size:
             raise AdapterError(f"{name} result is for a {width}x{height} image")
     blocks = sorted(native["layout"]["bboxes"], key=lambda block: block["position"])
-    texts = [plain_text(line["text"]) for line in lines]
-    kept = [i for i, text in enumerate(texts) if text.strip()]
+    kept = [i for i, line in enumerate(lines) if line["text"].strip()]
     boxes = [bbox(line["polygon"]) for line in lines]
     owners = assign_lines([boxes[i] for i in kept], [bbox(b["polygon"]) for b in blocks])
     members: dict[int | None, list[int]] = {}
@@ -284,7 +277,8 @@ def result_to_prediction(
         members.setdefault(owner, []).append(index)
 
     def entry(index: int) -> dict[str, Any]:
-        line = {"id": f"l{index + 1}", "text": texts[index]}
+        markup = {"format": "html", "content": lines[index]["text"]}
+        line: dict[str, Any] = {"id": f"l{index + 1}", "markup": markup}
         if polygon := _polygon(lines[index]["polygon"]):
             line["polygon"] = polygon
         if lines[index].get("confidence") is not None:
@@ -314,17 +308,12 @@ def result_to_prediction(
                 "extra": {"grouping": "unassigned"},
             }
         )
-    text = "\n\n".join(
-        "\n".join(line["text"] for line in region["lines"])
-        for region in regions
-        if "lines" in region
-    )
     prediction: dict[str, Any] = {
         "format": "ocrbench.prediction",
         "version": 1,
         "sample_id": sample_id,
         "image": {"width": size[0], "height": size[1]},
-        "text": text,
+        "text": "",  # built on the host from the converted line markup
     }
     if regions:
         prediction["regions"] = regions

@@ -276,3 +276,67 @@ def test_conflicting_region_markup_is_an_error(change):
 def test_region_markup_format_is_checked_by_the_schema():
     data = marked_up({"format": "latex", "content": "x"})
     assert codes(validate_prediction(data)[1]) == ["schema-violation"]
+
+
+def marked_up_lines(*markups):
+    lines = [
+        {"id": f"l{i}", "polygon": box(0, 10 * i, 50, 10 * i + 9), "markup": m}
+        for i, m in enumerate(markups)
+    ]
+    return minimal(
+        image={"width": 100, "height": 100},
+        regions=[{"id": "r1", "polygon": box(0, 0, 60, 99), "lines": lines}],
+    )
+
+
+def test_line_markup_is_converted_on_the_host_and_keeps_positions():
+    data = marked_up_lines(
+        {"format": "html", "content": "H<sub>2</sub>O &amp; <b>salt</b>"},
+        {"format": "html", "content": "<b> </b><br>"},  # no text: dropped
+        {"format": "html", "content": "one<br>two"},  # one line stays one line
+    )
+    native = copy.deepcopy(data)
+    prediction, issues = validate_prediction(data, sample_id="s1", image_size=(100, 100))
+    assert codes(issues) == []  # the empty page text is rebuilt without a warning
+    assert data == native
+    lines = prediction.regions[0].lines
+    assert [(line.id, line.text) for line in lines] == [("l0", "H2O & salt"), ("l2", "one two")]
+    assert lines[1].polygon == ((0, 20), (50, 20), (50, 29), (0, 29))
+    assert prediction.text == "H2O & salt\none two"
+    assert prediction.conversion == {"from": "html", "version": CONVERTER_VERSION}
+    standardized = prediction_to_json(prediction)
+    assert all("markup" not in line for line in standardized["regions"][0]["lines"])
+    assert validate_prediction(standardized)[0] == prediction
+
+
+def test_lines_with_and_without_markup_can_be_mixed():
+    data = marked_up_lines({"format": "html", "content": "<i>a</i>"})
+    data["regions"][0]["lines"].append({"id": "plain", "text": "b"})
+    prediction, issues = validate_prediction(data)
+    assert codes(issues) == []
+    assert prediction.text == "a\nb"
+
+
+@pytest.mark.parametrize(
+    "change",
+    [
+        lambda d: d["regions"][0]["lines"][0].update(text="x"),
+        lambda d: d["regions"][0]["lines"][1]["markup"].update(format="markdown"),
+        lambda d: d["regions"].append(
+            {"id": "r2", "markup": {"format": "markdown", "content": "c"}}
+        ),
+        lambda d: d.update(conversion={"from": "html", "version": 1}),
+    ],
+)
+def test_conflicting_line_markup_is_an_error(change):
+    data = marked_up_lines({"format": "html", "content": "a"}, {"format": "html", "content": "b"})
+    change(data)
+    prediction, issues = validate_prediction(data)
+    assert prediction is None
+    assert codes(issues, Severity.ERROR) == ["markup-conflict"]
+
+
+@pytest.mark.parametrize("line", [{"id": "l0"}, {"markup": {"format": "latex", "content": "x"}}])
+def test_a_line_needs_text_or_valid_markup(line):
+    data = minimal(regions=[{"id": "r1", "lines": [line]}])
+    assert codes(validate_prediction(data)[1]) == ["schema-violation"]

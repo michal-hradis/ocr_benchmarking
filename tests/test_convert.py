@@ -7,7 +7,7 @@ import pytest
 from PIL import Image
 
 from ocrbench.cli import main
-from ocrbench.convert import CONVERTER_VERSION, convert_native, fragment_text
+from ocrbench.convert import CONVERTER_VERSION, convert_native, fragment_text, line_text
 from ocrbench.issues import Severity
 from ocrbench.prediction import validate_prediction
 
@@ -151,8 +151,8 @@ def test_html_image_text_and_underscore_tags(content, expected):
     assert fragment_text(content, "html") == expected
 
 
-def test_converter_version_is_2():
-    assert CONVERTER_VERSION == 2
+def test_converter_version_is_3():
+    assert CONVERTER_VERSION == 3
 
 
 def test_plain_text_is_kept_exactly():
@@ -250,3 +250,40 @@ def test_fragment_text_uses_the_document_rules(content, source_format, expected)
 def test_fragment_text_rejects_unknown_formats():
     with pytest.raises(ValueError, match="markup format"):
         fragment_text("x", "text")
+
+
+@pytest.mark.parametrize(
+    ("content", "expected"),
+    [
+        ("1912.", [("list-item", "1912.")]),  # an empty ordered item prints its number
+        ("3)", [("list-item", "3)")]),
+        ("7. \n\n8. text", [("list-item", "7."), ("list-item", "8. text")]),
+        ("1. - nested", [("list-item", "1."), ("list-item", "nested")]),
+        ("-", []),  # an empty bullet item has no text
+    ],
+)
+def test_empty_ordered_markdown_items_keep_their_number(content, expected):
+    blocks = convert_native(content, "markdown", "s1").get("regions", [])
+    assert [(r["type"], r["text"]) for r in blocks] == expected
+
+
+def test_empty_ordered_items_keep_their_number_in_markdown_and_html():
+    assert (
+        fragment_text("1912.", "markdown")
+        == fragment_text('<ol start="1912"><li></li></ol>', "html").strip()
+    )
+
+
+@pytest.mark.parametrize(
+    ("content", "source_format", "expected"),
+    [
+        ("H<sub>2</sub>O &amp; <b>salt</b>", "html", "H2O & salt"),
+        ("one<br>two<br/>three", "html", "one two three"),
+        ("<p>a</p><p>b</p>", "html", "a b"),
+        ("  spaced   out  ", "html", "spaced out"),
+        ("<b></b>", "html", ""),
+        ("*a*  \nb", "markdown", "a b"),
+    ],
+)
+def test_line_text_keeps_one_line(content, source_format, expected):
+    assert line_text(content, source_format) == expected

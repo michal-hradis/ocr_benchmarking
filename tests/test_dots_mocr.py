@@ -23,7 +23,6 @@ import pytest
 from PIL import Image
 
 from ocrbench.cli import main
-from ocrbench.convert import convert_native
 from ocrbench.engine import parse_engine_config
 from ocrbench.prediction import validate_prediction
 from ocrbench.runner import ProcessLauncher, create_run, execute, latest_record, load_run
@@ -127,45 +126,74 @@ def test_layout_parsing_keeps_complete_elements(text, elements, complete):
     assert dm.parse_layout(text) == (elements, complete)
 
 
+def host_text(category, content):
+    """The region text of one element after the host converts its markup, or None."""
+    element = {"bbox": [0, 0, 10, 10], "category": category, "text": content}
+    prediction, _ = dm.layout_to_prediction([element], "s", (10, 10), (10, 10))
+    standardized, issues = validate_prediction(prediction, sample_id="s", image_size=(10, 10))
+    assert standardized is not None, issues
+    return standardized.regions[0].text
+
+
 @pytest.mark.parametrize(
     ("category", "content", "text"),
     [
         ("Title", "# The Title", "The Title"),
         ("Section-header", "### **Part 2**", "Part 2"),
         ("Section-header", "#hashtag", "#hashtag"),  # not a heading mark
-        ("Text", "# not a heading in Text", "# not a heading in Text"),
+        # dots.mocr writes headings into Text elements too: the marks are removed there as well
+        ("Text", "### Z Drnku.\nSpolek pro chov", "Z Drnku.\nSpolek pro chov"),
         ("Text", " a **bold** and *italic* word ", "a bold and italic word"),
         ("Caption", "*Fig. 1.* [A ship](x.png) ![](i.png)", "Fig. 1. A ship"),
         ("Text", "line one<br>line  two\nthree", "line one\nline two\nthree"),
         ("Text", "Note*) here \\*not\\* &amp; `x`", "Note*) here *not* & x"),
         ("List-item", "- item", "item"),
-        ("List-item", "• item", "item"),
-        ("List-item", "2. item", "2. item"),  # the number is kept, as the host converter does
+        ("List-item", "• item", "• item"),  # not a Markdown bullet: printed text
+        ("List-item", "2. item", "2. item"),  # an ordered item keeps its number
+        ("Page-header", "1912.", "1912."),  # an empty ordered item: still its number
         ("Formula", "$$x^2$$", "x^2"),
-        ("Formula", "\\[ x^2 \\]", "x^2"),
+        (
+            "Formula",
+            "$$\n\\text{Potřeba na } 1/4 \\text{ ha}\n$$",
+            "\\text{Potřeba na } 1/4 \\text{ ha}",
+        ),
         ("Formula", "$x$", "x"),
-        ("Formula", "x^2", "x^2"),
         ("Table", "<table><tr><td>a</td><td>b<br>c</td></tr></table>", "a\tb c"),
-        ("Table", "plain", "plain"),
-        ("Picture", "a drawing of a ship", ""),
+        (
+            "Table",
+            "<table>\n<tr><th>A</th><th>B</th></tr>\n<tr><td>1</td><td>2</td></tr>\n</table>",
+            "A\tB\n1\t2",
+        ),
     ],
 )
-def test_element_text_is_plain(category, content, text):
-    assert dm.element_text(category, content) == text
+def test_element_markup_is_converted_on_the_host(category, content, text):
+    assert host_text(category, content) == text
 
 
-@pytest.mark.parametrize(
-    "content",
-    [
-        "a **bold**, *italic* and _italic_ word, ~~struck~~",
-        "[a link](https://example.org) <https://example.org> ![an image](i.png)",
-        "\\*escaped\\* &amp; &#x17F; `code` and $x^2$",
-        "a<sup>1</sup> b<br/>next *) line\nnie-\nman",
-        "**unclosed and a_b_c",
-    ],
-)
-def test_inline_markdown_matches_the_host_converter(content):
-    assert dm.markdown_text("Text", content) == convert_native(content, "markdown", "s")["text"]
+def test_element_text_is_written_unchanged_as_markdown_markup():
+    elements = [
+        {"bbox": [0, 0, 5, 5], "category": "Table", "text": "<table><tr><td>a</td></tr></table>"},
+        {"bbox": [0, 0, 5, 5], "category": "Text", "text": " **kept** as is "},
+        {"bbox": [0, 0, 5, 5], "category": "Picture", "text": "a drawing of a ship"},
+        {"bbox": [0, 0, 5, 5], "category": "Text", "text": "  "},
+        {"bbox": [0, 0, 5, 5], "category": "Text", "text": 7},
+    ]
+    prediction, _ = dm.layout_to_prediction(elements, "s", (5, 5), (5, 5))
+    regions = prediction["regions"]
+    assert regions[0]["markup"] == {"format": "markdown", "content": elements[0]["text"]}
+    assert regions[1]["markup"] == {"format": "markdown", "content": " **kept** as is "}
+    # The prompt asks for no Picture text; blank or non-string text is no text.
+    assert all("markup" not in r and "text" not in r for r in regions[2:])
+    assert prediction["text"] == ""  # built on the host
+    assert "conversion" not in prediction
+
+
+def test_adapter_has_no_conversion_code():
+    source = ADAPTER_PATH.read_text(encoding="utf-8")
+    for name in ("markdown_it", "HTMLParser", "html.unescape", "def element_text"):
+        assert name not in source
+    requirements = (ENGINE_DIR / "requirements.in").read_text(encoding="utf-8")
+    assert "markdown-it-py" not in requirements
 
 
 def test_layout_to_prediction_maps_boxes_to_the_input_image():
@@ -204,11 +232,13 @@ def test_layout_to_prediction_maps_boxes_to_the_input_image():
     }
     assert regions[4]["type"] == "other"
     assert "native_type" not in regions[4]
-    assert prediction["text"] == "all\n\nx\n\nzero width\n\nno category\n\nall\n\nall"
+    assert prediction["text"] == ""
     assert prediction["image"] == {"width": 1000, "height": 700}
     standardized, issues = validate_prediction(prediction, sample_id="s", image_size=(1000, 700))
     assert standardized is not None
     assert issues == []
+    assert standardized.text == "all\n\nx\n\nzero width\n\nno category\n\nall\n\nall"
+    assert [r.id for r in standardized.regions] == [r["id"] for r in regions]
 
 
 def model_cache(root, corrupt=False, extra_file=False):
@@ -313,8 +343,15 @@ def test_adapter_follows_the_engine_protocol(tmp_path):
     native = (page / "output" / "output.json").read_text(encoding="utf-8")
     assert native == (FIXTURES / "output.json").read_text(encoding="utf-8").strip()  # unchanged
     assert records["page"]["findings"] == []
+    engine_prediction = json.loads((page / "output" / "prediction.json").read_text())
+    assert engine_prediction["text"] == ""
+    elements = json.loads(native)
+    assert [r.get("markup", {}).get("content") for r in engine_prediction["regions"]] == [
+        None if e["category"] == "Picture" else e["text"] for e in elements
+    ]  # the element text, unchanged
     prediction = json.loads((page / "prediction.json").read_text(encoding="utf-8"))
-    assert "conversion" not in prediction  # written by the engine, not converted on the host
+    assert prediction["conversion"] == {"from": "markdown", "version": 3}  # converted on the host
+    assert all("markup" not in r for r in prediction["regions"])
     assert prediction["image"] == {"width": 1000, "height": 700}
     regions = prediction["regions"]
     assert [r.get("native_type") for r in regions] == [e["category"] for e in json.loads(native)]

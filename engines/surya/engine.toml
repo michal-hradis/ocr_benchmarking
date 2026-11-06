@@ -1,8 +1,8 @@
 # Surya OCR line detection + recognition + layout/reading order (README.md next to this file;
 # format: docs/RUNNER.md). Run with --cache <dir> holding the checkpoints from make surya-model.
 name = "surya"
-engine_version = "1"
-image = "ocrbench/engine-surya:0.17.1-v1"
+engine_version = "2"
+image = "ocrbench/engine-surya:0.17.1-v2"
 model = "surya-0.17.1:text_detection/2025_05_07+text_recognition/2025_09_23+layout/2025_09_23"
 
 [params]
