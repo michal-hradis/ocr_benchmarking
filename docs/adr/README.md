@@ -20,6 +20,7 @@ Create short ADRs for agreed cross-engine decisions, including output schema, co
 | [0012: Inference servers inside engine containers](0012-inference-servers-inside-engine-containers.md) | accepted |
 | [0013: Opt-in network access for hosted-API engines](0013-opt-in-network-for-hosted-api-engines.md) | accepted |
 | [0014: ARCHER references imported as PAGE XML with a versioned text view](0014-archer-import-and-text-view.md) | proposed |
+| [0015: ARCHER hypothesis export from stored predictions](0015-archer-hypothesis-export.md) | proposed |
 
 ## Conventions
 

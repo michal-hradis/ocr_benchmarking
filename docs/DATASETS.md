@@ -138,3 +138,57 @@ The scored text of each block, applied identically to every sample:
 - Nothing else changes: whitespace, Unicode and line breaks are kept and normalized only by the evaluator.
 
 A change to these rules is a new text-view version and a re-import; stored predictions can then be re-evaluated without rerunning OCR. The sidecar keeps the raw text, tags and relations, so an official-style ARCHER scorer can be added later without re-importing.
+
+## Exporting ARCHER hypothesis XML
+
+A finished run on an ARCHER import can be written as one **ARCHER OCR hypothesis XML** file from its stored predictions; no engine is run again ([#136](https://github.com/michal-hradis/ocr_benchmarking/issues/136), [ADR 0015](adr/0015-archer-hypothesis-export.md)).
+
+```sh
+uv run ocrbench export archer runs/<run-id> -o submission.xml                     # page blocks
+uv run ocrbench export archer runs/<run-id> -o submission.xml --blocks regions
+```
+
+```xml
+<?xml version='1.0' encoding='UTF-8'?>
+<archer-ocr>
+  <doc source_name="August_2002_page45.png">
+    <block>Purple patch
+on golden day</block>
+  </doc>
+</archer-ocr>
+```
+
+The output is UTF-8 with one `<doc>` per run sample, in the run's (manifest) order, and zero or more plain-text `<block>` children with the usual XML escaping. Its layout, declaration and indentation are those of the accepted examples: re-serializing the 50 local `hyp/` examples with the exporter's writer reproduces them byte for byte.
+
+**Document identifier.** ARCHER's D9.1 illustrates `<doc source_name="…">` in section 3.3, while the Annex B XSD requires `<doc id="…">`. All 50 local accepted hypothesis examples use `source_name` and no other attribute, so the export writes `source_name`. Its value is the task's `meta/source_name` (the image file name) as recorded by the importer in `archer/<id>.json`, and is matched to the run sample by the task ID, which is the sample ID. A task without `meta/source_name` is an error: the name is never guessed from the image file. If ARCHER requires the Annex B form, the export must be changed after the organizers confirm what `id` contains; `--xsd` shows such a mismatch (below).
+
+**Text and blocks.** The text is the **standardized plain text** of each stored prediction (`prediction.json`, revalidated as for scoring), never native Markdown or HTML, with its case, punctuation, Unicode and line breaks. Positions, confidences, region types and reference-only markers such as `(PR)`, `(HW)` or `(YYY)` are never written. Nothing is taken from the reference except the document name: reference text and blocks are never used to choose, split, order or correct hypothesis text.
+
+| `--blocks` | Blocks of one document |
+| --- | --- |
+| `page` (default) | The page text as one block, for any engine, including text-only OCR and VLM output |
+| `regions` | Each region with text, in the prediction's reading order (array order if the engine gave none). A region with lines is one block, its lines joined by line breaks. Regions without text, such as figures, add nothing. No segmentation is invented |
+
+With `--blocks regions`, a **text-only prediction** (page text, but no region with text) is an error that names the sample; `--fallback page` exports its page text as one block instead (an info finding, `page_fallback` in the report). Text that is empty or only whitespace adds no block, so an empty valid transcription is a `<doc>` without blocks. A carriage return becomes a line break, and characters XML 1.0 cannot hold (control characters such as Tesseract's form feed) become a space, with an `xml-invalid-character` warning.
+
+**Statuses.** Every run sample is accounted for, and no failure is silently exported as an empty transcription:
+
+| Run status | Export |
+| --- | --- |
+| `success` | Exported |
+| `truncated`, `partial` | Exported from the valid prediction, with a `truncated-sample` or `partial-sample` warning |
+| `failure` | With `--failed error` (default) the export fails. `--failed empty` writes a `<doc>` without blocks and `--failed omit` leaves the document out; both print a `failed-sample` warning |
+| pending (no record) | Always an error; finish the run with `ocrbench run resume` |
+
+`--report export.json` also writes, for every sample, its ID, `source_name`, run status and failure reason, how it was exported (`blocks`, `empty` or `omitted`), the number of blocks and whether the page fallback was used.
+
+**Checks.** The export writes nothing if any error is found:
+
+- the run's GT must be unchanged since the run was created (`gt-changed`, as for `evaluate`), and must come from one ARCHER import (`import.json`; `--dataset` names the import directory if the GT paths do not show it);
+- every imported document must be in the run (`document-not-in-run`) and every run sample must have a sidecar for the same task and reference (`missing-sidecar`, `sidecar-mismatch`);
+- document names must be present and unique (`missing-source-name`, `duplicate-source-name`);
+- stored predictions must be valid (`invalid-prediction`) and the output must not exist (`--force` replaces it).
+
+The file is written next to the output, parsed back and compared with the intended documents and block texts (the structure of the accepted examples: root `archer-ocr`, only `doc` elements with exactly `source_name`, only plain `block` children), optionally validated against an XML schema given with `--xsd`, and only then moved into place. The official ARCHER schema is not in the repository; with the Annex B schema, which requires `id`, `--xsd` would report the identifier mismatch above instead of writing a file.
+
+**Format compliance is not scoring parity.** The export produces a file in the accepted submission form. It does not compute ARCHER's official block-reconstruction CER/WER, and OCRbench scores of the same run (on the [imported references](#importing-archer-ocr-datasets)) are not official ARCHER scores. The block segmentation reflects only the engine's predicted structure; matching it to reference blocks is the ARCHER evaluator's job. Keep exports of real data under ignored directories such as `dev_data/`.
