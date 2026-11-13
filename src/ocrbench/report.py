@@ -296,13 +296,14 @@ _SHORT = {
 }
 
 
-def _sample_row(run: dict[str, Any], entry: dict[str, Any]) -> dict[str, Any]:
+def _sample_row(run: dict[str, Any], entry: dict[str, Any], image: str) -> dict[str, Any]:
     row = {
         "run_id": run["run_id"],
         "engine": run["engine"]["name"],
         "engine_version": run["engine"]["engine_version"],
         "model": run["engine"]["model"],
         "sample_id": entry["sample_id"],
+        "image": image,
         "unit": entry["unit"],
         "doc_type": entry["doc_type"],
         "status": entry["status"],
@@ -517,7 +518,11 @@ def _results(report: dict[str, Any]) -> list[str]:
 
 
 def _index(
-    report: dict[str, Any], samples: list[tuple[dict, list[dict]]], out: Path, inspected: bool
+    report: dict[str, Any],
+    samples: list[tuple[dict, list[dict]]],
+    out: Path,
+    inspected: bool,
+    names: dict[str, SampleNames],
 ) -> str:
     config = report["evaluation"]["config"]
     exclude = config["failure_policy"] == "exclude"
@@ -602,10 +607,12 @@ def _index(
     for sample_id in [entry["sample_id"] for entry in samples[0][1]]:
         for run, entries in samples:
             entry = next(e for e in entries if e["sample_id"] == sample_id)
-            name = _e(sample_id)
+            sample_names = names[run["run_id"]]
+            name = _e(sample_names.images[sample_id])
             if inspected:
-                page = _link(out / _inspect_path(run["run_id"], sample_id), out)
+                page = _link(out / sample_names.page(run["run_id"], sample_id), out)
                 name = f'<a href="{page}">{name}</a>'
+            name += f"<br><code>{_e(sample_id)}</code>"
             values = [
                 f"#{_percent((entry[k] or {}).get('rate'))}"
                 + ("*" if entry[k] and not entry[k].get("exact", True) else "")
@@ -628,8 +635,29 @@ def _index(
 # Inspection pages --------------------------------------------------------------------------------
 
 
-def _inspect_path(run_id: str, sample_id: str) -> Path:
-    return Path("samples") / run_id / f"{sample_id}.html"
+@dataclass(frozen=True)
+class SampleNames:
+    """How a run's samples are shown: the image file name, and the inspection page name."""
+
+    images: dict[str, str]  # sample ID -> image file name
+    pages: dict[str, str]  # sample ID -> page name without .html
+
+    def page(self, run_id: str, sample_id: str) -> Path:
+        return Path("samples") / run_id / f"{self.pages[sample_id]}.html"
+
+
+def sample_names(run: Run) -> SampleNames:
+    """Inspection pages are named after the image files, so that a page can be found by its
+    original file name. When two images of the run share a stem (ignoring case, for
+    case-insensitive file systems) or a stem cannot be a page name, every page of the run is
+    named by its sample ID instead, which is unique and file-name safe."""
+    stems = {sample.id: sample.image.stem for sample in run.samples}
+    usable = all(
+        stem and not stem.startswith(".") and len(stem.encode()) <= 200 for stem in stems.values()
+    )
+    distinct = len({stem.casefold() for stem in stems.values()}) == len(stems)
+    images = {sample.id: sample.image.name for sample in run.samples}
+    return SampleNames(images, stems if usable and distinct else {s: s for s in stems})
 
 
 def diff_html(reference: str, hypothesis: str) -> str:
@@ -678,15 +706,16 @@ def group_texts(
     return GroupTexts(groups, unmatched[0], unmatched[1])
 
 
-def _inspect(evaluation: Evaluation, entry: dict[str, Any], out: Path) -> str:
+def _inspect(evaluation: Evaluation, entry: dict[str, Any], out: Path, page: Path) -> str:
     run = evaluation.run
     sample = next(s for s in run.samples if s.id == entry["sample_id"])
     record = evaluation.records[sample.id]
     form = evaluation.scores["config"]["unicode"]
-    base = (out / _inspect_path(run.run_id, sample.id)).parent
+    base = (out / page).parent
     body = [
-        f"<h1>{_e(sample.id)}</h1>",
-        f'<p><a href="{_link(out / "index.html", base)}">report</a> · run {_e(run.run_id)}'
+        f"<h1>{_e(sample.image.name)}</h1>",
+        f'<p><a href="{_link(out / "index.html", base)}">report</a> · sample {_e(sample.id)}'
+        f" · run {_e(run.run_id)}"
         f" · engine {_e(run.engine.name)} {_e(run.engine.engine_version)}"
         f" · unit {_e(entry['unit'])} · document type {_e(entry['doc_type'])}</p>",
         f"<p>Status <b>{_e(entry['status'])}</b>, reason {_e(entry['reason'])}, attempt"
@@ -700,7 +729,7 @@ def _inspect(evaluation: Evaluation, entry: dict[str, Any], out: Path) -> str:
         body.append('<p class="warn">Excluded by the failure policy; no score.</p>')
         body.append("<h2>Reference</h2>")
         body.append(f'<p class="text">{_e(normalize(" ".join(reference), form))}</p>')
-        return _page(f"{sample.id} · {run.run_id}", body)
+        return _page(f"{sample.image.name} · {run.run_id}", body)
     hypothesis: list[str] = []
     text = ""
     if entry["scored_as"] == "prediction":
@@ -757,7 +786,7 @@ def _inspect(evaluation: Evaluation, entry: dict[str, Any], out: Path) -> str:
         if unmatched:
             lines = "\n".join(f"{n}: {_e(text)}" for n, text in unmatched)
             body.append(f'<p class="text">{lines}</p>')
-    return _page(f"{sample.id} · {run.run_id}", body)
+    return _page(f"{sample.image.name} · {run.run_id}", body)
 
 
 # Writing -----------------------------------------------------------------------------------------
@@ -770,13 +799,15 @@ def write_report(evaluations: list[Evaluation], out: Path, *, inspect: bool = Fa
     out = Path(out).resolve()
     runs = {run["run_id"]: run for run in report["runs"]}
     pairs = [(runs[e.run.run_id], e.scores["samples"]) for e in evaluations]
+    names = {e.run.run_id: sample_names(e.run) for e in evaluations}
     pages = {}
     if inspect:
         for evaluation in evaluations:
+            run_id = evaluation.run.run_id
             for entry in evaluation.scores["samples"]:
-                path = _inspect_path(evaluation.run.run_id, entry["sample_id"])
+                path = names[run_id].page(run_id, entry["sample_id"])
                 try:
-                    pages[path] = _inspect(evaluation, entry, out)
+                    pages[path] = _inspect(evaluation, entry, out, path)
                 except EvaluationError as error:
                     raise ReportError(str(error)) from error
     try:
@@ -790,9 +821,16 @@ def write_report(evaluations: list[Evaluation], out: Path, *, inspect: bool = Fa
         out / "aggregates.csv",
         [_aggregate_row(runs[g["run_id"]], g, policy) for g in report["aggregates"]],
     )
-    _write_csv(out / "samples.csv", [_sample_row(r, s) for r, ss in pairs for s in ss])
+    _write_csv(
+        out / "samples.csv",
+        [
+            _sample_row(r, s, names[r["run_id"]].images[s["sample_id"]])
+            for r, ss in pairs
+            for s in ss
+        ],
+    )
     for path, page in pages.items():
         (out / path).parent.mkdir(parents=True, exist_ok=True)
         (out / path).write_text(page, encoding="utf-8")
-    (out / "index.html").write_text(_index(report, pairs, out, inspect), encoding="utf-8")
+    (out / "index.html").write_text(_index(report, pairs, out, inspect, names), encoding="utf-8")
     return report

@@ -221,6 +221,63 @@ def test_inspection_pages_are_optional_and_show_differences(tmp_path, two_runs):
     assert 'href="samples/a/txt.html"' in index
 
 
+def renamed_images(manifest, names):
+    """Rename the images of a make_dataset manifest: sample ID -> new file name."""
+    data = json.loads(manifest.read_text(encoding="utf-8"))
+    for entry in data["samples"]:
+        new = manifest.parent / names[entry["id"]]
+        new.parent.mkdir(parents=True, exist_ok=True)
+        (manifest.parent / entry["image"]).rename(new)
+        entry["image"] = names[entry["id"]]
+    manifest.write_text(json.dumps(data), encoding="utf-8")
+
+
+def test_samples_are_shown_and_inspected_by_their_image_file_names(tmp_path):
+    samples = {
+        "s-1": ("text", ["plain text"], "page", None),
+        "s-2": ("text", ["plain text"], "page", None),
+    }
+    manifest = make_dataset(tmp_path, samples)
+    renamed_images(manifest, {"s-1": "Letter page 1.png", "s-2": "Report#2.png"})
+    run = make_run(tmp_path, manifest, "named", dict.fromkeys(samples, "text"))
+    out = tmp_path / "report"
+    write_report([load_evaluation(run.path)], out, inspect=True)
+    assert sorted(p.name for p in (out / "samples" / "named").iterdir()) == [
+        "Letter page 1.html",
+        "Report#2.html",
+    ]
+    index = (out / "index.html").read_text(encoding="utf-8")
+    assert 'href="samples/named/Letter%20page%201.html">Letter page 1.png</a>' in index
+    assert 'href="samples/named/Report%232.html">Report#2.png</a>' in index
+    assert "<code>s-1</code>" in index
+    page = (out / "samples/named/Letter page 1.html").read_text(encoding="utf-8")
+    assert "<h1>Letter page 1.png</h1>" in page
+    assert "sample s-1" in page
+    rows = {r["sample_id"]: r["image"] for r in read_csv(out / "samples.csv")}
+    assert rows == {"s-1": "Letter page 1.png", "s-2": "Report#2.png"}
+
+
+def test_pages_fall_back_to_sample_ids_when_image_names_collide(tmp_path):
+    samples = {
+        "s-1": ("text", ["plain text"], "page", None),
+        "s-2": ("text", ["plain text"], "page", None),
+        "s-3": ("text", ["plain text"], "page", None),
+    }
+    manifest = make_dataset(tmp_path, samples)
+    names = {"s-1": "a/page.png", "s-2": "b/PAGE.jpg", "s-3": "other.png"}
+    renamed_images(manifest, names)
+    run = make_run(tmp_path, manifest, "same", dict.fromkeys(samples, "text"))
+    out = tmp_path / "report"
+    write_report([load_evaluation(run.path)], out, inspect=True)
+    assert sorted(p.name for p in (out / "samples" / "same").iterdir()) == [
+        "s-1.html",
+        "s-2.html",
+        "s-3.html",
+    ]
+    index = (out / "index.html").read_text(encoding="utf-8")
+    assert 'href="samples/same/s-2.html">PAGE.jpg</a><br><code>s-2</code>' in index
+
+
 def test_flexible_groups_are_shown_from_stored_line_ranges(tmp_path):
     samples = {"md": ("markdown", ["Text of md.", "md"], "page", None)}
     manifest = make_dataset(tmp_path, samples)
