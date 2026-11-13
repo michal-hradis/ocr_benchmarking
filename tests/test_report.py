@@ -92,7 +92,7 @@ def test_report_compares_runs_with_provenance_and_stored_scores(tmp_path, two_ru
     ]
     assert json.loads((out / "report.json").read_text(encoding="utf-8")) == report
     assert report["evaluation"]["config"]["failure_policy"] == "empty-output"
-    assert report["evaluation"]["metrics_version"] == 2
+    assert report["evaluation"]["metrics_version"] == 3
     run_a, run_b = report["runs"]
     assert (run_a["run_id"], run_b["run_id"]) == ("a", "b")
     assert run_b["engine"] == {
