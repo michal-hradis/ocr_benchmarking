@@ -1,5 +1,5 @@
-"""Command-line interface: ``ocrbench dataset``, ``prediction``, ``run``, ``evaluate`` and
-``report``."""
+"""Command-line interface: ``ocrbench dataset``, ``prediction``, ``run``, ``evaluate``,
+``report`` and ``export``."""
 
 from __future__ import annotations
 
@@ -12,6 +12,7 @@ from pathlib import Path
 from PIL import Image
 
 from ocrbench.archer import ArcherImportError, import_archer
+from ocrbench.archer_export import BLOCK_MODES, FAILED_POLICIES, ArcherExportError, export_archer
 from ocrbench.convert import FORMATS, SUFFIXES, convert_native
 from ocrbench.engine import EngineConfigError, load_engine_config
 from ocrbench.evaluate import (
@@ -311,6 +312,42 @@ def _report(args: argparse.Namespace) -> int:
     return 0
 
 
+def _export_archer(args: argparse.Namespace) -> int:
+    try:
+        docs, issues = export_archer(
+            args.run,
+            args.output,
+            blocks=args.blocks,
+            fallback=args.fallback,
+            failed=args.failed,
+            dataset=args.dataset,
+            xsd=args.xsd,
+            force=args.force,
+            report=args.report,
+        )
+    except ArcherExportError as error:
+        for issue in error.issues:
+            if args.verbose or issue.severity is not Severity.INFO:
+                print(issue.format(), file=sys.stderr)
+        print(f"export failed: {error}; nothing written", file=sys.stderr)
+        return 1
+    for issue in issues:
+        if args.verbose or issue.severity is not Severity.INFO:
+            print(issue.format(), file=sys.stderr)
+    counts: dict[str, int] = {}
+    for doc in docs:
+        counts[doc.status] = counts.get(doc.status, 0) + 1
+    exported = [d for d in docs if d.exported != "omitted"]
+    blocks = sum(len(d.blocks) for d in exported)
+    omitted = len(docs) - len(exported)
+    statuses = ", ".join(f"{n} {s}" for s, n in counts.items())
+    print(
+        f"wrote {args.output}: {len(exported)} documents, {blocks} blocks ({args.blocks});"
+        f" run samples: {statuses}" + (f"; {omitted} omitted" if omitted else "")
+    )
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="ocrbench", description="OCR/HTR benchmark tools")
     commands = parser.add_subparsers(dest="command", required=True)
@@ -417,6 +454,43 @@ def build_parser() -> argparse.ArgumentParser:
         help="also write a GT-versus-prediction page per run and sample",
     )
     report.set_defaults(handler=_report)
+
+    export = commands.add_parser("export", help="export stored predictions in other formats")
+    actions = export.add_subparsers(dest="format", required=True)
+    archer_export = actions.add_parser(
+        "archer", help="write a run as one ARCHER OCR hypothesis XML file (no OCR is rerun)"
+    )
+    archer_export.add_argument("run", type=Path, help="run directory on an ARCHER import")
+    archer_export.add_argument("-o", "--output", type=Path, required=True, help="XML file")
+    archer_export.add_argument(
+        "--blocks",
+        choices=BLOCK_MODES,
+        default="page",
+        help="page: the page text as one block (default); regions: one block per text region",
+    )
+    archer_export.add_argument(
+        "--fallback",
+        choices=("page",),
+        help="with --blocks regions: export a text-only prediction as one page block "
+        "instead of failing",
+    )
+    archer_export.add_argument(
+        "--failed",
+        choices=FAILED_POLICIES,
+        default="error",
+        help="failed samples: refuse the export (default), write a <doc> without blocks, or "
+        "leave the document out",
+    )
+    archer_export.add_argument(
+        "--dataset", type=Path, help="ARCHER import directory (default: from the run's GT paths)"
+    )
+    archer_export.add_argument("--xsd", type=Path, help="also validate against this XML schema")
+    archer_export.add_argument("--report", type=Path, help="write a JSON export report")
+    archer_export.add_argument("--force", action="store_true", help="replace existing files")
+    archer_export.add_argument(
+        "-v", "--verbose", action="store_true", help="also list info findings"
+    )
+    archer_export.set_defaults(handler=_export_archer)
     return parser
 
 
