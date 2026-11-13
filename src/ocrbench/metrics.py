@@ -17,7 +17,9 @@ from dataclasses import dataclass, fields
 
 from rapidfuzz.distance import Levenshtein
 
-METRICS_VERSION = 2  # 2: flexible CER/WER (ocrbench.alignment) added; ordered metrics unchanged
+# 2: flexible CER/WER (ocrbench.alignment) added; ordered metrics unchanged.
+# 3: reference lines with line breaks are split into flexible units; ordered metrics unchanged.
+METRICS_VERSION = 3
 UNICODE_FORMS = ("NFC", "NFKC")
 
 
