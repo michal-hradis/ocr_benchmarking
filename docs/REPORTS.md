@@ -12,7 +12,7 @@ uv run ocrbench report runs/<run-a> runs/<run-b> -o reports/<name> [--inspect]
 
 - Each argument is a run directory, which uses its newest evaluation (`evaluations/<n>` with the highest `n`), or an evaluation directory such as `runs/<run-a>/evaluations/2`.
 - `-o` must name a **new** directory. An existing directory is refused, so a report never mixes files from different evaluations.
-- `--inspect` also writes one GT-versus-prediction page per run and sample. It is off by default.
+- `--inspect` also writes one GT-versus-prediction page per run and sample, named after the sample's image file (see [inspection pages](#inspection-pages)). It is off by default.
 - The command logs every non-`success` sample on stderr, prints the evaluation used for each run and exits with status 1, writing nothing, when the report cannot be built.
 
 Everything runs offline, without a GPU.
@@ -37,7 +37,7 @@ reports/<name>/
   aggregates.csv                one row per run and group
   samples.csv                   one row per run and sample
   index.html                    the same, for reading
-  samples/<run-id>/<id>.html    with --inspect: GT versus prediction
+  samples/<run-id>/<name>.html  with --inspect: GT versus prediction
 ```
 
 **`report.json`** (`ocrbench.report`, version 1) records:
@@ -63,7 +63,7 @@ Rates are fractions, not percentages, and an undefined value is an empty cell. A
 **`samples.csv`** has one row per run and sample:
 
 - the run, engine, version and model;
-- the sample, unit, document type, status, reason, attempt and `scored_as`;
+- the sample, its image file name, unit, document type, status, reason, attempt and `scored_as`;
 - the rate, errors and reference length of every edit metric, and `exact` for the flexible ones;
 - precision, recall and F1 of bag-of-words and ROUGE-2.
 
@@ -76,7 +76,7 @@ An excluded sample has empty metric cells. Engine messages are left out of the C
 - the provenance and status counts of each run;
 - per group, one micro table (samples, scored, coverage, GT characters and words, CER, WER, fCER, fWER, bag-of-words P/R/F1 and ROUGE-2 F1) and one macro table (each mean with its sample count and its number of undefined values);
 - the list of samples that did not succeed, with links to their execution records;
-- a per-sample table.
+- a per-sample table, which shows each sample by its image file name and sample ID.
 
 A flexible score marked `*` includes samples whose result is not proven optimal ([EVALUATION.md](EVALUATION.md#flexible-cer-and-wer-metrics-version-2)).
 
@@ -86,7 +86,7 @@ Under both failure policies, every `failure`, `partial` and `truncated` sample i
 
 ## Inspection pages
 
-With `--inspect`, each run and sample gets a page that shows:
+With `--inspect`, each run and sample gets a page `samples/<run-id>/<name>.html`. `<name>` is the image file name without its extension, so a page can be found by the original file name (for an ARCHER import, the image name is the task's `source_name`). If two images of a run share that name, ignoring case, or a name starts with `.` or is longer than 200 bytes, all pages of that run are named by their sample IDs instead. Each page shows:
 
 - the status, reason, the engine's message and a link to the execution record;
 - the counts (S, D, I and reference length) of CER, WER, fCER and fWER;
