@@ -29,5 +29,5 @@ ARCHER OCR references describe a page as labelled blocks with percentage-based, 
 
 ## Consequences and verification
 
-- Strict CER/WER depend on the annotation order of blocks; flexible metrics can reorder blocks but never split them. A long block is one unit.
+- Strict CER/WER depend on the annotation order of blocks; flexible metrics can reorder blocks but never split them. A long block is one unit. *Amended by [ADR 0016](0016-reference-line-breaks-split-flexible-units.md): from metrics version 3, flexible CER/WER split block text at its line breaks.*
 - `tests/test_archer.py` validates the generated PAGE XML against the vendored PAGE 2019-07-15 schema and checks pairing and validation errors, path containment, `--force` ownership, the lossless sidecar, geometry and rotation, the text view (tags, illegibility, tables, empty text, unscored labels), byte-identical re-import and that job entries carry no reference data, on a synthetic fixture.

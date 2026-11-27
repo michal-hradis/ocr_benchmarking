@@ -193,11 +193,15 @@ def _scores_json(scores: SampleScores | None) -> dict[str, Any]:
 
 
 def reference_lines(sample_id: str, gt: Path) -> list[str]:
+    """The GT text lines in reading order. A reference line whose text has line breaks, such as a
+    region-level TextEquiv without TextLines (ARCHER blocks), is split at them, as prediction
+    text is (metrics version 3): flexible CER/WER can then regroup its lines. Ordered metrics
+    join the lines with spaces and are unchanged, since a line break is whitespace."""
     page, issues = read_page_xml(gt, sample_id)
     errors = [issue.format() for issue in issues if issue.severity is Severity.ERROR]
     if page is None or errors:
         raise EvaluationError(f"{sample_id}: invalid GT {gt}:\n" + "\n".join(errors))
-    return [line.text for line in page.reference_lines]
+    return [part for line in page.reference_lines for part in line.text.split("\n")]
 
 
 def stored_prediction(

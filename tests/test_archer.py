@@ -107,7 +107,9 @@ def test_import_writes_a_valid_dataset_with_the_text_view(root):
     assert by_id["syn-print"].image_sha256 == sha256_file(root / "src" / "print.png")
 
     def lines(sample_id):
-        return reference_lines(sample_id, by_id[sample_id].gt)
+        """The PAGE reference lines: one per block, with its line breaks."""
+        page, _ = read_page_xml(by_id[sample_id].gt, sample_id)
+        return [line.text for line in page.reference_lines]
 
     # Annotation order, each text block once; image, noise and the tag-only block contribute none.
     assert lines("syn-print") == [
@@ -123,6 +125,13 @@ def test_import_writes_a_valid_dataset_with_the_text_view(root):
     ]
     assert lines("syn-hand") == ["Printed line. OK!\n ldiers trained"], "not the signature"
     assert lines("syn-table") == ["No. Name\n\n61 Abdel Hadi\n62 a | b"]
+    # Scoring splits the block text at its line breaks (metrics version 3, ADR 0016).
+    assert reference_lines("syn-table", by_id["syn-table"].gt) == [
+        "No. Name",
+        "",
+        "61 Abdel Hadi",
+        "62 a | b",
+    ]
     codes = {(i.code, i.location.rsplit("/", 1)[-1]) for i in issues}
     assert ("illegible-removed", "9body") in codes
     assert ("empty-text", "blank") in codes

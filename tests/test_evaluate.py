@@ -24,6 +24,7 @@ from ocrbench.evaluate import (
     EvaluationError,
     evaluate_run,
     parse_eval_config,
+    reference_lines,
     write_scores,
 )
 from ocrbench.runner import ProcessLauncher, create_run, execute, load_run
@@ -208,7 +209,7 @@ def test_scores_record_settings_and_identity(tmp_path):
     scores = evaluate_run(run, EvalConfig(unicode="NFKC"))
     assert scores["format"] == "ocrbench.scores"
     assert scores["run_id"] == run.run_id
-    assert (scores["version"], scores["metrics_version"]) == (2, 2)
+    assert (scores["version"], scores["metrics_version"]) == (2, 3)
     assert scores["rules"] == {
         "characters": "code-points",
         "whitespace": "collapse-to-space",
@@ -367,3 +368,25 @@ def test_flexible_scores_tolerate_reordered_output(tmp_path):
         load_run(tmp_path / "runs" / scores["run_id"]), EvalConfig(failure_policy="exclude")
     )
     assert by_id(excluded)["failed"]["flexible_chars"] is None
+
+
+def test_reference_text_with_line_breaks_is_split_into_flexible_units(tmp_path):
+    # A region-level TextEquiv without TextLines, as in ARCHER blocks: one PAGE reference line
+    # with a line break. Split, its two lines can be matched in the prediction's order.
+    block = (
+        '<PcGts xmlns="http://schema.primaresearch.org/PAGE/gts/pagecontent/2019-07-15">'
+        '<Page imageWidth="60" imageHeight="40"><TextRegion id="r1">'
+        '<Coords points="0,0 60,0 60,40 0,40"/>'
+        "<TextEquiv><Unicode>Text of md.\nmd</Unicode></TextEquiv></TextRegion></Page></PcGts>"
+    )
+    lines = {"md": ("markdown", ["Text of md.", "md"], "page", None)}
+    scored = by_id(
+        evaluate_run(make_run(tmp_path / "block", {"md": ("markdown", block, "page", None)}))
+    )
+    expected = by_id(evaluate_run(make_run(tmp_path / "lines", lines)))
+    assert reference_lines("md", tmp_path / "block" / "data" / "md.xml") == ["Text of md.", "md"]
+    for key in ("chars", "words", "flexible_chars", "flexible_words", "flexible_units"):
+        assert scored["md"][key] == expected["md"][key]
+    assert scored["md"]["chars"]["errors"] > 0  # the ordered score still sees the reordering
+    assert scored["md"]["flexible_chars"]["errors"] == 0
+    assert scored["md"]["flexible_chars"]["group_lines"] == [[1, 2, 0, 1], [0, 1, 2, 3]]
