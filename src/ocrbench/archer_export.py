@@ -223,8 +223,8 @@ def _source_name(
 def collect(
     run: Run,
     *,
-    blocks: str = "page",
-    fallback: str | None = None,
+    blocks: str = "regions",
+    fallback: str | None = "page",
     failed: str = "error",
     dataset: Path | None = None,
 ) -> tuple[list[ExportedDoc], list[Issue]]:
@@ -338,7 +338,7 @@ def collect(
                     Severity.ERROR,
                     "text-only-prediction",
                     "the prediction has page text but no text-bearing regions; use --blocks "
-                    "page, or --fallback page to export its page text as one block",
+                    "page, or the default --fallback page to export its page text as one block",
                     sample.id,
                 )
             )
@@ -402,8 +402,8 @@ def export_archer(
     run_path: Path,
     output: Path,
     *,
-    blocks: str = "page",
-    fallback: str | None = None,
+    blocks: str = "regions",
+    fallback: str | None = "page",
     failed: str = "error",
     dataset: Path | None = None,
     xsd: Path | None = None,
@@ -412,8 +412,10 @@ def export_archer(
 ) -> tuple[list[ExportedDoc], list[Issue]]:
     """Write the run's predictions as one ARCHER hypothesis XML file.
 
-    ``blocks``: ``page`` (the page text as one block) or ``regions`` (each text-bearing region).
-    ``fallback="page"`` lets ``regions`` export a text-only prediction as one page block.
+    ``blocks``: ``regions`` (default: each text-bearing region, the blocks the engine produced)
+    or ``page`` (the page text as one block). ``fallback="page"`` (default) lets ``regions``
+    export a text-only prediction, which has no regions, as one page block; ``None`` makes it
+    an error.
     ``failed``: a failed sample is an error (default), a ``<doc>`` without blocks (``empty``),
     or left out (``omit``); both are reported. Pending samples are always an error. Truncated and
     partial samples are exported with a warning. The file is checked by a round trip (and against

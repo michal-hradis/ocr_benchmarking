@@ -147,7 +147,7 @@ def errors(run, tmp_path, **kwargs):
 def test_page_mode_writes_one_document_per_sample_named_by_source_name(tmp_path):
     run = make_run(tmp_path)
     complete(run)
-    docs, _, issues = export(run, tmp_path)
+    docs, _, issues = export(run, tmp_path, blocks="page")
     assert docs == [(NAMES[sid], [f"text of {sid}"]) for sid in IDS]
     assert not issues
     raw = (tmp_path / "submission.xml").read_bytes()
@@ -158,7 +158,7 @@ def test_page_mode_keeps_text_line_breaks_unicode_and_escapes_xml(tmp_path):
     run = make_run(tmp_path)
     tricky = 'Fish & "chips" <b>bold</b> ]]> ſtraße ž 漢字 🙂\nsecond line\n\nnext paragraph'
     complete(run, text_only(tricky))
-    docs, _, _ = export(run, tmp_path)
+    docs, _, _ = export(run, tmp_path, blocks="page")
     assert docs[0][1] == [tricky]
     raw = (tmp_path / "submission.xml").read_text(encoding="utf-8")
     assert 'Fish &amp; "chips" &lt;b&gt;bold&lt;/b&gt; ]]&gt; ſtraße' in raw
@@ -169,17 +169,17 @@ def test_regions_mode_emits_text_regions_in_reading_order_lines_joined(tmp_path)
     prediction = regions("Heading", ["first line", "second line"], None, "  ", "Footer")
     prediction["reading_order"] = ["r4", "r0", "r1", "r2", "r3"]
     complete(run, prediction)
-    docs, _, _ = export(run, tmp_path, blocks="regions")
+    docs, _, _ = export(run, tmp_path)  # regions is the default
     # A figure without text and a whitespace-only region add no block.
     assert docs[0][1] == ["Footer", "Heading", "first line\nsecond line"]
 
 
-def test_regions_mode_refuses_text_only_predictions_unless_page_fallback(tmp_path):
+def test_regions_mode_falls_back_to_page_text_for_text_only_predictions_by_default(tmp_path):
     run = make_run(tmp_path)
     complete(run, skip=("syn-print",))
     store(run, "syn-print", prediction=regions("A region"))
-    assert errors(run, tmp_path, blocks="regions") == ["text-only-prediction"] * 3
-    docs, exported, issues = export(run, tmp_path, blocks="regions", fallback="page")
+    assert errors(run, tmp_path, fallback=None) == ["text-only-prediction"] * 3
+    docs, exported, issues = export(run, tmp_path)  # regions with the page fallback by default
     assert dict(docs)["print.png"] == ["A region"]
     assert dict(docs)["hand.png"] == ["text of syn-hand"]
     assert [d.fallback for d in exported] == [True, True, False, True]
@@ -262,7 +262,7 @@ def test_failed_samples_are_refused_or_explicitly_exported(tmp_path):
     store(run, "syn-hand", "failure", reason="timeout", message="no sample within 600 s")
     assert errors(run, tmp_path) == ["failed-sample"]
 
-    docs, exported, issues = export(run, tmp_path, failed="empty")
+    docs, exported, issues = export(run, tmp_path, blocks="page", failed="empty")
     assert dict(docs)["hand.png"] == []
     hand = next(d for d in exported if d.sample_id == "syn-hand")
     assert (hand.status, hand.reason, hand.exported) == ("failure", "timeout", "empty")
@@ -271,7 +271,7 @@ def test_failed_samples_are_refused_or_explicitly_exported(tmp_path):
     ]
 
     report = tmp_path / "report.json"
-    docs, _, _ = export(run, tmp_path, failed="omit", force=True, report=report)
+    docs, _, _ = export(run, tmp_path, blocks="page", failed="omit", force=True, report=report)
     assert [name for name, _ in docs] == ["columns.png", "print.png", "table.png"]
     entries = {d["sample_id"]: d for d in json.loads(report.read_text())["documents"]}
     assert entries["syn-hand"] == {
@@ -290,7 +290,7 @@ def test_truncated_and_partial_samples_are_exported_with_a_warning(tmp_path):
     complete(run, skip=("syn-hand", "syn-print"))
     store(run, "syn-hand", "truncated", text_only("cut"), message="token limit")
     store(run, "syn-print", "partial", text_only("part"))
-    docs, exported, issues = export(run, tmp_path)
+    docs, exported, issues = export(run, tmp_path, blocks="page")
     assert dict(docs)["hand.png"] == ["cut"]
     assert dict(docs)["print.png"] == ["part"]
     assert [d.status for d in exported] == ["success", "truncated", "partial", "success"]
@@ -311,7 +311,7 @@ def test_characters_xml_cannot_hold_are_replaced_and_reported(tmp_path):
     assert xml_text("a\r\nb\rc\x0cd\x00e￾") == ("a\nb\nc d e ", 3)
     run = make_run(tmp_path)
     complete(run, text_only("page one\x0c"))
-    docs, _, issues = export(run, tmp_path)
+    docs, _, issues = export(run, tmp_path, blocks="page")
     assert docs[0][1] == ["page one "]
     assert {i.code for i in issues} == {"xml-invalid-character"}
 
@@ -369,7 +369,7 @@ def test_cli_exports_a_run_from_the_fake_engine(tmp_path, capsys):
     assert not output.exists()
 
     args = ["export", "archer", str(run.path), "-o", str(output), "--failed", "omit"]
-    assert main([*args, "--blocks", "regions"]) == 0
+    assert main(args) == 0  # region blocks by default
     printed = capsys.readouterr()
     assert "3 documents, 6 blocks (regions)" in printed.out
     assert "3 success, 1 failure; 1 omitted" in printed.out
