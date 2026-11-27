@@ -144,8 +144,8 @@ A change to these rules is a new text-view version and a re-import; stored predi
 A finished run on an ARCHER import can be written as one **ARCHER OCR hypothesis XML** file from its stored predictions; no engine is run again ([#136](https://github.com/michal-hradis/ocr_benchmarking/issues/136), [ADR 0015](adr/0015-archer-hypothesis-export.md)).
 
 ```sh
-uv run ocrbench export archer runs/<run-id> -o submission.xml                     # page blocks
-uv run ocrbench export archer runs/<run-id> -o submission.xml --blocks regions
+uv run ocrbench export archer runs/<run-id> -o submission.xml                  # the engine's region blocks
+uv run ocrbench export archer runs/<run-id> -o submission.xml --blocks page      # one block per page
 ```
 
 ```xml
@@ -166,10 +166,10 @@ The output is UTF-8 with one `<doc>` per run sample, in the run's (manifest) ord
 
 | `--blocks` | Blocks of one document |
 | --- | --- |
-| `page` (default) | The page text as one block, for any engine, including text-only OCR and VLM output |
-| `regions` | Each region with text, in the prediction's reading order (array order if the engine gave none). A region with lines is one block, its lines joined by line breaks. Regions without text, such as figures, add nothing. No segmentation is invented |
+| `regions` (default) | The blocks the engine produced: each region with text, in the prediction's reading order (array order if the engine gave none). A region with lines is one block, its lines joined by line breaks. Regions without text, such as figures, add nothing. No segmentation is invented |
+| `page` | The page text as one block, for any engine |
 
-With `--blocks regions`, a **text-only prediction** (page text, but no region with text) is an error that names the sample; `--fallback page` exports its page text as one block instead (an info finding, `page_fallback` in the report). Text that is empty or only whitespace adds no block, so an empty valid transcription is a `<doc>` without blocks. A carriage return becomes a line break, and characters XML 1.0 cannot hold (control characters such as Tesseract's form feed) become a space, with an `xml-invalid-character` warning.
+With `--blocks regions`, a **text-only prediction** (page text, but no region with text, as from engines that return only a page transcription) has a single block, its page text, by default (`--fallback page`; an info finding, `page_fallback` in the report). `--fallback none` makes it an error that names the sample. Text that is empty or only whitespace adds no block, so an empty valid transcription is a `<doc>` without blocks. A carriage return becomes a line break, and characters XML 1.0 cannot hold (control characters such as Tesseract's form feed) become a space, with an `xml-invalid-character` warning.
 
 **Statuses.** Every run sample is accounted for, and no failure is silently exported as an empty transcription:
 

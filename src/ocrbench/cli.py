@@ -318,7 +318,7 @@ def _export_archer(args: argparse.Namespace) -> int:
             args.run,
             args.output,
             blocks=args.blocks,
-            fallback=args.fallback,
+            fallback=None if args.fallback == "none" else args.fallback,
             failed=args.failed,
             dataset=args.dataset,
             xsd=args.xsd,
@@ -465,14 +465,16 @@ def build_parser() -> argparse.ArgumentParser:
     archer_export.add_argument(
         "--blocks",
         choices=BLOCK_MODES,
-        default="page",
-        help="page: the page text as one block (default); regions: one block per text region",
+        default="regions",
+        help="regions: one block per text region of the engine's output (default); page: the "
+        "page text as one block",
     )
     archer_export.add_argument(
         "--fallback",
-        choices=("page",),
-        help="with --blocks regions: export a text-only prediction as one page block "
-        "instead of failing",
+        choices=("page", "none"),
+        default="page",
+        help="with --blocks regions: a text-only prediction (no regions) is exported as one "
+        "page block (page, default) or is an error (none)",
     )
     archer_export.add_argument(
         "--failed",
